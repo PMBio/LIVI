@@ -101,11 +101,11 @@ repos:
           - --skip=logs/**,data/**,*.ipynb
           # - --ignore-words-list=abc,def
 
-  # jupyter notebook cell output clearing
-  - repo: https://github.com/kynan/nbstripout
-    rev: 0.6.1
-    hooks:
-      - id: nbstripout
+  # # jupyter notebook cell output clearing
+  # - repo: https://github.com/kynan/nbstripout
+  #   rev: 0.6.1
+  #   hooks:
+  #     - id: nbstripout
 
   # jupyter notebook linting
   - repo: https://github.com/nbQA-dev/nbQA
@@ -116,8 +116,6 @@ repos:
       - id: nbqa-isort
         args: ["--profile=black"]
       - id: nbqa-flake8
-        args:
-          [
-            "--extend-ignore=E203,E402,E501,F401,F841",
-            "--exclude=logs/*,data/*",
-          ]
+        args: ["--extend-ignore=E402,E501,E741,E266", "--exclude=logs/*,data/*"]
+      - id: nbqa-ruff
+        args: ["--fix", "--ignore=E402,E501,E741,E266"]
