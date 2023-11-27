@@ -1,0 +1,262 @@
+"""Base class for DCRM models."""
+
+from typing import List, Optional
+
+import pytorch_lightning as pl
+import torch
+import torch.distributions as tdist
+import torch.nn as nn
+import torch.nn.functional as F
+
+from src.models.components.distributions import RobustNormal
+from src.models.components.mlp import create_mlp
+
+
+class Encoder(nn.Module):
+    """Encoder module for Variational autoencoder (VAE) model."""
+
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        encoder_hidden_dims: List[int],
+        layer_norm: bool,
+    ):
+        """Initialize module.
+
+        Args:
+            x_dim: Data dimension.
+            z_dim: Latent dimension.
+            encoder_hidden_dims: Number of hidden nodes for each layer.
+            layer_norm: Use layer norm.
+        """
+        super().__init__()
+        self.net = create_mlp(
+            input_size=x_dim,
+            output_size=encoder_hidden_dims[-1],
+            hidden_dims=encoder_hidden_dims[:-1],
+            layer_norm=layer_norm,
+        )
+
+        # map to mean and diagonal covariance of Gaussian
+        self.mean = nn.Linear(encoder_hidden_dims[-1], z_dim)
+        self.log_scale = nn.Linear(encoder_hidden_dims[-1], z_dim)
+
+    def forward(self, x: torch.Tensor):
+        x = self.net(x)
+        mean = self.mean(x)
+        log_scale = self.log_scale(x)
+        return tdist.Independent(RobustNormal(mean, log_scale.exp()), 1)
+
+
+class NormalDecoder(nn.Module):
+    """Decoder module for autoencoder model with Gaussian likelihood."""
+
+    def __init__(
+        self,
+        z_dim: int,
+        x_dim: int,
+        decoder_hidden_dims: List[int],
+        layer_norm: bool,
+    ):
+        """Initialize module.
+
+        Args:
+            z_dim: Latent dimension.
+            x_dim: Data dimension.
+            decoder_hidden_dims: Number of hidden nodes for each layer.
+            layer_norm: Use layer norm.
+        """
+        super().__init__()
+        self.mean = create_mlp(
+            input_size=z_dim,
+            output_size=x_dim,
+            hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+        )
+        self.log_scale = nn.Parameter(torch.ones(1) * 0.1, requires_grad=True)
+
+    def forward(self, z: torch.Tensor):
+        mean = self.mean(z)
+        return tdist.Independent(RobustNormal(mean, self.log_scale.exp()), 1)
+
+
+class NegativeBinomialDecoder(nn.Module):
+    """Decoder module autoencoder model with Negative Binomial likelihood."""
+
+    def __init__(
+        self,
+        z_dim: int,
+        x_dim: int,
+        decoder_hidden_dims: List[int],
+        layer_norm: bool,
+    ):
+        """Initialize module.
+
+        Args:
+            z_dim: Latent dimension.
+            x_dim: Data dimension.
+            decoder_hidden_dims: Number of hidden nodes for each layer.
+            layer_norm: Use layer norm.
+        """
+        super().__init__()
+        self.mean = create_mlp(
+            input_size=z_dim,
+            output_size=x_dim,
+            hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+        )
+        self.log_total_count = torch.nn.Parameter(torch.ones(x_dim))
+
+    def forward(self, z: torch.Tensor, size_factor: torch.Tensor):
+        total_count = self.log_total_count.exp()
+        mean = F.softmax(self.mean(z), dim=-1) * size_factor
+        probs = mean / (mean + total_count)
+
+        assert not torch.isnan(mean).any()
+        assert not torch.isnan(probs).any()
+        assert not torch.isnan(total_count).any()
+
+        return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
+    
+
+DECODER_MODELS = {
+    "normal": NormalDecoder,
+    "nb": NegativeBinomialDecoder,
+}
+
+
+class VAE(pl.LightningModule):
+    """Variational autoencoder."""
+
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        encoder_hidden_dims: List[int],
+        decoder_hidden_dims: List[int],
+        learning_rate: float,
+        layer_norm: bool,
+        likelihood: str = "normal",
+    ):
+        """Initializes VAE.
+
+        Args:
+            x_dim: Data dimension.
+            z_dim: Latent dimension.
+            encoder_hidden_dims: List of hidden dimensions for each encoder layer.
+            decoder_hidden_dims: List of hidden dimensions for each decoder layer.
+            learning_rate: Learning rate.
+            layer_norm: Whether to use layer normalization.
+            likelihood: Likelihood model to use, one of "normal" or "poisson".
+        """
+
+        super().__init__()
+        self.x_dim = x_dim
+        self.z_dim = z_dim
+        self.likelihood = likelihood
+        self.learning_rate = learning_rate
+
+        self.encoder = Encoder(
+            x_dim=x_dim,
+            z_dim=z_dim,
+            encoder_hidden_dims=encoder_hidden_dims,
+            layer_norm=layer_norm,
+        )
+        self.decoder = DECODER_MODELS[likelihood](
+            z_dim=z_dim,
+            x_dim=x_dim,
+            decoder_hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+        )
+
+        self.register_buffer("z_prior_loc", torch.zeros(self.z_dim))
+        self.register_buffer("z_prior_scale", torch.ones(self.z_dim))
+        self.save_hyperparameters()
+
+    def transform_latent(self, z: torch.Tensor, y: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Applies transformation to latent variable z before decoding.
+
+        May be overwritten by subclasses to transform z using auxiliary information.
+        """
+        return z
+
+    def get_prior(self) -> tdist.Distribution:
+        """Constructs zbase prior for given batch shape."""
+        return tdist.Independent(tdist.Normal(self.z_prior_loc, self.z_prior_scale), 1)
+
+    def forward(self, x: torch.Tensor):
+        """Encodes data into latent space."""
+        return self.encoder(x)
+
+    def compute_elbo(
+        self,
+        z_dist: torch.distributions.Distribution,
+        x: torch.Tensor,
+        y: Optional[torch.Tensor] = None,
+        size_factor: Optional[torch.Tensor] = None,
+    ):
+        """Computes evidence lower bound (ELBO).
+
+        Args:
+            z_dist: Variational distribution.
+            x: Input data.
+            y: Optional auxiliary information.
+            size_factor: Optional size factor.
+
+        Returns:
+            Mean evidence lower bound (ELBO).
+        """
+        z = z_dist.rsample()
+        z_combined = self.transform_latent(z, y)
+
+        kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
+        if self.likelihood == "nb":
+            log_lik = self.decoder(z_combined, size_factor).log_prob(x).mean()
+        else:
+            log_lik = self.decoder(z_combined).log_prob(x).mean()
+        return log_lik - kl_div
+
+    def prepare_batch(self, batch):
+        if self.likelihood == "nb":
+            x, y, size_factor = batch
+            # TODO log transform ? size-factor for encoder?
+        else:
+            x, y = batch
+            size_factor = None
+            x = torch.log1p(x)
+        return x, y, size_factor
+
+    def step(self, batch, batch_idx, mode="train"):
+        """Performs a single training or validation step."""
+        x, y, size_factor = self.prepare_batch(batch)
+        loss = -self.compute_elbo(self(x), x, y, size_factor)
+        log_dict = {
+            f"{mode}/elbo": -loss.item(),
+            "hp_metric": loss.item(),
+        }
+        self.log_dict(
+            log_dict,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        """Performs a single training step."""
+        return self.step(batch, batch_idx)
+
+    def validation_step(self, batch, batch_idx):
+        """Performs a single validation step."""
+        return self.step(batch, batch_idx, mode="val")
+
+    def configure_optimizers(self):
+        """Configures optimizer."""
+        optim = torch.optim.Adam(
+            self.parameters(),
+            lr=self.learning_rate,
+        )
+        return optim
+
