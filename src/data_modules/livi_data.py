@@ -17,6 +17,7 @@ class LIVIDataModule(LightningDataModule):
         adata: Union[str, AnnData],
         y_key: str,
         use_size_factor: bool,
+        donor_sex_key: Optional[str] = None,
         experimental_batch_key: Optional[str] = None,
         size_factor_key: Optional[str] = None,
         layer_key: Optional[str] = None,
@@ -61,6 +62,7 @@ class LIVIDataModule(LightningDataModule):
             raise ValueError("Set use_size_factor = True when passing log_size_factor_key")
         self.use_size_factor = use_size_factor
         self.size_factor_key = size_factor_key
+        self.donor_sex_key = donor_sex_key
         self.experimental_batch_key = experimental_batch_key
         self.layer_key = layer_key
         self.data_split = data_split
@@ -71,6 +73,7 @@ class LIVIDataModule(LightningDataModule):
         self.pin_memory = pin_memory
         self.drop_last = drop_last
         self.device = device
+        self.strict = strict
 
     def setup(self, stage: Optional[str] = None) -> None:
         """Sets up training, validation and test."""
@@ -88,7 +91,9 @@ class LIVIDataModule(LightningDataModule):
                 )
         y, self.y_id = pd.factorize(self.adata.obs[self.y_obs_key])
         tensors = [torch.tensor(X, device=self.device).float(), torch.tensor(y, device=self.device).long()]
-        
+        if self.donor_sex_key:
+            dsex, self.dsex_index = pd.factorize(self.adata.obs[self.donor_sex_key])
+            tensors.append(torch.Tensor(dsex, device=self.device).long())
         if self.experimental_batch_key:
             eb, self.eb_index = pd.factorize(self.adata.obs[self.experimental_batch_key])
             tensors.append(torch.tensor(eb, device=self.device).long())
@@ -138,5 +143,5 @@ class LIVIDataModule(LightningDataModule):
         )
 
     def get_num_features(self) -> int:
-        """Returns dimennsion of observed space."""
+        """Returns dimension of observed space."""
         return self.adata.shape[1]

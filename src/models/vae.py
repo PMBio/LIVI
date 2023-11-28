@@ -1,6 +1,6 @@
-"""Base class for DCRM models."""
+"""Base class for LIVI models."""
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import pytorch_lightning as pl
 import torch
@@ -21,6 +21,7 @@ class Encoder(nn.Module):
         z_dim: int,
         encoder_hidden_dims: List[int],
         layer_norm: bool,
+        device: str = "cuda",
     ):
         """Initialize module.
 
@@ -31,16 +32,20 @@ class Encoder(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
+        
+        self.device = device
+         
         self.net = create_mlp(
             input_size=x_dim,
             output_size=encoder_hidden_dims[-1],
             hidden_dims=encoder_hidden_dims[:-1],
             layer_norm=layer_norm,
+            device = self.device
         )
 
         # map to mean and diagonal covariance of Gaussian
-        self.mean = nn.Linear(encoder_hidden_dims[-1], z_dim)
-        self.log_scale = nn.Linear(encoder_hidden_dims[-1], z_dim)
+        self.mean = nn.Linear(encoder_hidden_dims[-1], z_dim, device=self.device)
+        self.log_scale = nn.Linear(encoder_hidden_dims[-1], z_dim, device=self.device)
 
     def forward(self, x: torch.Tensor):
         x = self.net(x)
@@ -58,6 +63,7 @@ class NormalDecoder(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
+        device: str = "cuda",
     ):
         """Initialize module.
 
@@ -68,13 +74,17 @@ class NormalDecoder(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
+        
+        self.device = device
+        
         self.mean = create_mlp(
             input_size=z_dim,
             output_size=x_dim,
             hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
+            device = self.device,
         )
-        self.log_scale = nn.Parameter(torch.ones(1) * 0.1, requires_grad=True)
+        self.log_scale = nn.Parameter(torch.ones(1, device=self.device) * 0.1, requires_grad=True)
 
     def forward(self, z: torch.Tensor):
         mean = self.mean(z)
@@ -90,6 +100,7 @@ class NegativeBinomialDecoder(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
+        device: str = "cuda",
     ):
         """Initialize module.
 
@@ -100,13 +111,17 @@ class NegativeBinomialDecoder(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
+        
+        self.device = device
+        
         self.mean = create_mlp(
             input_size=z_dim,
             output_size=x_dim,
             hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
+            device=self.device
         )
-        self.log_total_count = torch.nn.Parameter(torch.ones(x_dim))
+        self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
     def forward(self, z: torch.Tensor, size_factor: torch.Tensor):
         total_count = self.log_total_count.exp()
@@ -119,10 +134,72 @@ class NegativeBinomialDecoder(nn.Module):
 
         return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
     
+    
+class NegativeBinomialDecoderBatchSex(nn.Module):
+    """ Decoder module with Negative Binomial likelihood and batch and sex effect correction. """
+
+    def __init__(
+        self,
+        z_dim: int,
+        x_dim: int,
+        decoder_hidden_dims: List[int],
+        layer_norm: bool,
+        batch_norm: bool = False,
+        device: str = "cuda",
+    ):
+        """Initialize module.
+
+        Args:
+            z_dim: Latent dimension.
+            x_dim: Data dimension.
+            decoder_hidden_dims: Number of hidden nodes for each layer.
+            layer_norm: Use layer norm.
+        """
+        super().__init__()
+        
+        self.x_dim = x_dim
+        self.batch_norm = batch_norm
+        self.device = device
+        
+        self.mean = create_mlp(
+            input_size=z_dim,
+            output_size=x_dim,
+            hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+            device=self.device
+        )
+        self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
+
+    def forward(
+        self, 
+        z: torch.Tensor, 
+        size_factor: torch.Tensor, 
+        batch_effect: Union[torch.Tensor, None],
+        donor_sex_effect: Union[torch.Tensor, None]
+    ) -> tdist.Distribution:
+        
+        total_count = self.log_total_count.exp()
+        decoder_out = self.mean(z)
+        if batch_effect is not None:
+            decoder_out = decoder_out + batch_effect
+        if donor_sex_effect is not None:
+            decoder_out = decoder_out + donor_sex_effect
+        if self.batch_norm:
+            decoder_out = nn.BatchNorm1d(self.x_dim, device=self.device)(decoder_out)
+        mean = F.softmax(decoder_out, dim=-1) * size_factor
+        probs = mean / (mean + total_count)
+
+        assert not torch.isnan(mean).any()
+        assert not torch.isnan(probs).any()
+        assert not torch.isnan(total_count).any()
+        
+        return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
+    
 
 DECODER_MODELS = {
     "normal": NormalDecoder,
     "nb": NegativeBinomialDecoder,
+    "nb_batch_sex": NegativeBinomialDecoderBatchSex,
 }
 
 
@@ -138,6 +215,7 @@ class VAE(pl.LightningModule):
         learning_rate: float,
         layer_norm: bool,
         likelihood: str = "normal",
+        device: str = "cuda",
     ):
         """Initializes VAE.
 
@@ -162,12 +240,15 @@ class VAE(pl.LightningModule):
             z_dim=z_dim,
             encoder_hidden_dims=encoder_hidden_dims,
             layer_norm=layer_norm,
+            device=device
+            
         )
         self.decoder = DECODER_MODELS[likelihood](
             z_dim=z_dim,
             x_dim=x_dim,
             decoder_hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
+            device=device
         )
 
         self.register_buffer("z_prior_loc", torch.zeros(self.z_dim))
