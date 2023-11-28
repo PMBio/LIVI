@@ -1,0 +1,44 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=livi-adv-batch-sex_onek1k
+
+defaults:
+  - override /model: livi-adv-batch-sex_onek1k.yaml
+  - override /datamodule: onek1k.yaml
+  - override /callbacks: default.yaml
+  - override /trainer: default.yaml
+  - override /paths: pc007.yaml
+  - override /logger: tensorboard.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+trainer:
+  max_epochs: 4000
+  min_epochs: 1000
+  accelerator: gpu
+  devices: 1
+  logger: True
+  enable_checkpointing: True
+  fast_dev_run: 3
+
+callbacks:
+    model_checkpoint:
+        dirpath: ${paths.output_dir}/checkpoints 
+        filename: "LIVI-adv-batch-sex_onek1k_HVGs_epoch_{epoch:04d}_{hp_metric:.5f}"
+        auto_insert_metric_name: True
+    early_stopping:
+        _target_: pytorch_lightning.callbacks.EarlyStopping
+        monitor: "hp_metric" 
+        min_delta: 1e-5 
+        patience: 20 
+        verbose: False
+        mode: "min"
+        strict: True
+        check_finite: True
+        check_on_train_epoch_end: True
+        
+task_name: livi-adv-batch-sex_onek1k
+
+seed: 32

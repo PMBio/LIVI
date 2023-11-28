@@ -1,0 +1,17 @@
+_target_: src.data_modules.livi_data.LIVIDataModule
+
+adata: ${paths.data_dir}/OneK1K/LogNorm_counts_across_celltypes_DCRM_protein-coding_Azimuth_50k_HVGs.h5ad
+y_key: individual
+use_size_factor: True
+size_factor_key: null
+donor_sex_key: sex
+experimental_batch_key: latent
+layer_key: counts
+data_split: [1.0]
+batch_size: 528
+num_workers: 10
+seed: 32
+shuffle: True
+pin_memory: False
+drop_last: False
+strict: False
