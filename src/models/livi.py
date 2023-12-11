@@ -1,16 +1,17 @@
 import sys
 from itertools import chain
-from typing import List, Union, Optional
+from typing import List, Optional, Union
 
+import pytorch_lightning as pl
 import torch
+import torch.distributions as tdist
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.distributions as tdist
-import pytorch_lightning as pl
 
-from src.models.components.mlp import create_mlp
 from src.models.components.distributions import RobustNormal
+from src.models.components.mlp import create_mlp
 from src.models.vae import VAE, Encoder, NegativeBinomialDecoderBatchSex
+
 
 class LIVI(VAE):
     """The Latent Interaction Variational Inference (LIVI) model.
@@ -33,7 +34,6 @@ class LIVI(VAE):
         learning_rate: float,
         layer_norm: bool,
         likelihood: str = "nb",
-        transform_base: bool = True,
         device: str = "cuda",
     ):
         """Initializes LIVI.
@@ -46,8 +46,6 @@ class LIVI(VAE):
             learning_rate: Learning rate.
             layer_norm: Whether to use layer normalization.
             likelihood: Likelihood model to use, one of "normal" or "poisson".
-            transform_base: Whether to apply linear transformation to the base
-                latent space before computing dynamic effects.
         """
         super().__init__(
             x_dim=x_dim,
@@ -66,18 +64,10 @@ class LIVI(VAE):
         self.U_context = nn.Embedding(y_dim, z_dim, device=device)
         self.V_persistent = nn.Embedding(y_dim, z_dim, device=device)
 
-        self.transform_base = transform_base
-        if self.transform_base:
-            # used to transform z before multiplication with U_context
-            self.A = nn.Parameter(torch.randn(z_dim, z_dim, device=device))
-
         self.save_hyperparameters()
 
     def transform_latent(self, z: torch.Tensor, y: torch.Tensor):
-        zA = z
-        if self.transform_base:
-            zA = z @ self.A
-        return z + zA * self.U_context(y) + self.V_persistent(y)
+        return z + z * self.U_context(y) + self.V_persistent(y)
 
 
 class LIVIadv(LIVI):
@@ -96,7 +86,6 @@ class LIVIadv(LIVI):
         learning_rate: float,
         layer_norm: bool,
         likelihood: str = "nb",
-        transform_base: bool = True,
         adversary_weight: float = 1.0,
         adversary_hidden_dims: List[int] = [256, 256],
         adversary_learning_rate: float = 1e-4,
@@ -117,7 +106,6 @@ class LIVIadv(LIVI):
             adversary_hidden_dims: List of hidden dimensions for each adversary layer.
             adversary_learning_rate: Learning rate for adversary.
             adversary_steps: Number of steps to train adversary for every step of VAE.
-            transform_base: Whether to apply linear transformation to the base latent space before computing dynamic effects.
         """
         super().__init__(
             x_dim=x_dim,
@@ -127,7 +115,6 @@ class LIVIadv(LIVI):
             learning_rate=learning_rate,
             layer_norm=layer_norm,
             likelihood=likelihood,
-            transform_base=transform_base,
             device=device,
         )
 
@@ -186,8 +173,6 @@ class LIVIadv(LIVI):
             self.U_context.parameters(),
             self.V_persistent.parameters(),
         )
-        if self.transform_base:
-            params = chain(params, [self.A])
 
         optim_vae = torch.optim.Adam(
             params,
@@ -208,11 +193,12 @@ class LIVIadv(LIVI):
             },
         )
 
-    
+
 class LIVIadvBatchSex(LIVIadv):
-    """
-    Variant of LIVI that learns two additional correction terms per gene, one to account for the effect of the experimental batch
-    and another one to account for the effect of the donor sex. The gene-level correction terms are added to the decoder output.  
+    """Variant of LIVI that learns two additional correction terms per gene, one to account for the
+    effect of the experimental batch and another one to account for the effect of the donor sex.
+
+    The gene-level correction terms are added to the decoder output.
     """
 
     def __init__(
@@ -243,7 +229,7 @@ class LIVIadvBatchSex(LIVIadv):
             encoder_hidden_dims: List of hidden dimensions for each encoder layer.
             learning_rate: Learning rate.
             layer_norm: Whether to use layer normalization.
-            likelihood: Likelihood model to use. Defaults to one of "nb_batch_sex", which means Negative-Binomial likelihood 
+            likelihood: Likelihood model to use. Defaults to one of "nb_batch_sex", which means Negative-Binomial likelihood
                         with batch and sex correction after decoding.
             adversarial_weight: If > 0, add adversarial loss to remove individual effects from the cell-state latent space.
             adversary_hidden_dims: List of hidden dimensions for each adversary layer.
@@ -265,7 +251,7 @@ class LIVIadvBatchSex(LIVIadv):
             adversary_steps=adversary_steps,
             device=device,
         )
-        
+
         self.y_dim = y_dim
 
         # self.decoder = NegativeBinomialDecoderBatchSex(
@@ -275,41 +261,36 @@ class LIVIadvBatchSex(LIVIadv):
         #     layer_norm=layer_norm,
         #     device=device,
         # )
-        
+
         # Sex and batch correction per gene
         if donor_sex_dim is not None:
             self.sex_effect = nn.Embedding(donor_sex_dim, x_dim, device=device)
         else:
             self.sex_effect = None
         self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
-        
+
         self.save_hyperparameters()
 
-    def transform_latent(self, z: torch.Tensor, y: torch.Tensor):
-        z_combined = z + z * self.U_context(y) + self.V_persistent(y)
-        return z_combined
-    
     def prepare_batch(self, batch):
-        
-        x=None
-        y=None
-        dsex=None
-        eb=None
-        size_factor=None
-        
+        x = None
+        y = None
+        dsex = None
+        eb = None
+        size_factor = None
+
         if self.hparams.donor_sex_dim is not None:
             x, y, dsex, eb, size_factor = batch
         else:
             x, y, eb, size_factor = batch
-            
+
         return x, y, dsex, eb, size_factor
-    
+
     def compute_elbo(
         self,
         z_dist: torch.distributions.Distribution,
         x: torch.Tensor,
         y: torch.Tensor,
-        dsex: torch.Tensor, 
+        dsex: torch.Tensor,
         eb: torch.Tensor,
         size_factor: torch.Tensor = None,
     ):
@@ -330,14 +311,18 @@ class LIVIadvBatchSex(LIVIadv):
         # z = nn.Softmax(dim=1)(z)
         z_combined = self.transform_latent(z, y)
         kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
- 
-        log_lik = self.decoder(
-            z=z_combined, 
-            size_factor=size_factor, 
-            batch_effect=self.batch_effect(eb),
-            donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
-        ).log_prob(x).mean()
- 
+
+        log_lik = (
+            self.decoder(
+                z=z_combined,
+                size_factor=size_factor,
+                batch_effect=self.batch_effect(eb),
+                donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
+            )
+            .log_prob(x)
+            .mean()
+        )
+
         return log_lik - kl_div
 
     def step(self, batch, batch_idx, optimizer_idx=0, mode="train"):
@@ -381,9 +366,9 @@ class LIVIadvBatchSex(LIVIadv):
             self.U_context.parameters(),
             self.V_persistent.parameters(),
             self.batch_effect.parameters(),
-            self.sex_effect.parameters()
+            self.sex_effect.parameters(),
         )
- 
+
         optim_vae = torch.optim.Adam(
             params,
             lr=self.learning_rate,

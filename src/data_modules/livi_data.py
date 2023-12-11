@@ -90,14 +90,17 @@ class LIVIDataModule(LightningDataModule):
                     "LIVI expects raw count data as input, but non-integers were found."
                 )
         y, self.y_id = pd.factorize(self.adata.obs[self.y_obs_key])
-        tensors = [torch.tensor(X, device=self.device).float(), torch.tensor(y, device=self.device).long()]
+        tensors = [
+            torch.tensor(X, device=self.device).float(),
+            torch.tensor(y, device=self.device).long(),
+        ]
         if self.donor_sex_key:
             dsex, self.dsex_index = pd.factorize(self.adata.obs[self.donor_sex_key])
             tensors.append(torch.Tensor(dsex, device=self.device).long())
         if self.experimental_batch_key:
             eb, self.eb_index = pd.factorize(self.adata.obs[self.experimental_batch_key])
             tensors.append(torch.tensor(eb, device=self.device).long())
-            
+
         if self.use_size_factor:
             if self.size_factor_key is not None:
                 size_factor = self.adata.obs[self.size_factor_key].to_numpy()

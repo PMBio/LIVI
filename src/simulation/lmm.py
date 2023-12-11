@@ -112,7 +112,6 @@ def test_association(
 
 def main():
     from limix.qc import quantile_gaussianize
-
     from simulate import simulate
 
     adata = simulate(

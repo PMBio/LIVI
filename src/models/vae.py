@@ -32,15 +32,15 @@ class Encoder(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
-        
+
         self.device = device
-         
+
         self.net = create_mlp(
             input_size=x_dim,
             output_size=encoder_hidden_dims[-1],
             hidden_dims=encoder_hidden_dims[:-1],
             layer_norm=layer_norm,
-            device = self.device
+            device=self.device,
         )
 
         # map to mean and diagonal covariance of Gaussian
@@ -74,15 +74,15 @@ class NormalDecoder(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
-        
+
         self.device = device
-        
+
         self.mean = create_mlp(
             input_size=z_dim,
             output_size=x_dim,
             hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
-            device = self.device,
+            device=self.device,
         )
         self.log_scale = nn.Parameter(torch.ones(1, device=self.device) * 0.1, requires_grad=True)
 
@@ -111,15 +111,15 @@ class NegativeBinomialDecoder(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
-        
+
         self.device = device
-        
+
         self.mean = create_mlp(
             input_size=z_dim,
             output_size=x_dim,
             hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
-            device=self.device
+            device=self.device,
         )
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
@@ -133,10 +133,10 @@ class NegativeBinomialDecoder(nn.Module):
         assert not torch.isnan(total_count).any()
 
         return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
-    
-    
+
+
 class NegativeBinomialDecoderBatchSex(nn.Module):
-    """ Decoder module with Negative Binomial likelihood and batch and sex effect correction. """
+    """Decoder module with Negative Binomial likelihood and batch and sex effect correction."""
 
     def __init__(
         self,
@@ -156,28 +156,27 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
             layer_norm: Use layer norm.
         """
         super().__init__()
-        
+
         self.x_dim = x_dim
         self.batch_norm = batch_norm
         self.device = device
-        
+
         self.mean = create_mlp(
             input_size=z_dim,
             output_size=x_dim,
             hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
-            device=self.device
+            device=self.device,
         )
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
     def forward(
-        self, 
-        z: torch.Tensor, 
-        size_factor: torch.Tensor, 
+        self,
+        z: torch.Tensor,
+        size_factor: torch.Tensor,
         batch_effect: Union[torch.Tensor, None],
-        donor_sex_effect: Union[torch.Tensor, None]
+        donor_sex_effect: Union[torch.Tensor, None],
     ) -> tdist.Distribution:
-        
         total_count = self.log_total_count.exp()
         decoder_out = self.mean(z)
         if batch_effect is not None:
@@ -192,9 +191,9 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         assert not torch.isnan(mean).any()
         assert not torch.isnan(probs).any()
         assert not torch.isnan(total_count).any()
-        
+
         return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
-    
+
 
 DECODER_MODELS = {
     "normal": NormalDecoder,
@@ -240,15 +239,14 @@ class VAE(pl.LightningModule):
             z_dim=z_dim,
             encoder_hidden_dims=encoder_hidden_dims,
             layer_norm=layer_norm,
-            device=device
-            
+            device=device,
         )
         self.decoder = DECODER_MODELS[likelihood](
             z_dim=z_dim,
             x_dim=x_dim,
             decoder_hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
-            device=device
+            device=device,
         )
 
         self.register_buffer("z_prior_loc", torch.zeros(self.z_dim))
@@ -340,4 +338,3 @@ class VAE(pl.LightningModule):
             lr=self.learning_rate,
         )
         return optim
-

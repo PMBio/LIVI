@@ -1,4 +1,3 @@
-
 simple_profiler:
   _target_: pytorch_lightning.profilers.SimpleProfiler
   dirpath: ${paths.output_dir}
