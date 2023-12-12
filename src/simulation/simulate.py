@@ -262,8 +262,8 @@ def main():
     adata = simulate(
         n_cells=10000,
         n_factors=10,
-        n_individuals=25,
-        n_genes=100,
+        n_individuals=100,
+        n_genes=1000,
         n_snps=5,
         maf_min=0.3,
         maf_max=0.5,
@@ -277,6 +277,7 @@ def main():
     for k, v in adata.uns["simulation"].items():
         if "var" in k:
             print(f"{k:14}: {v:6.2f}")
+    adata.write("data/test.h5ad")
 
 
 if __name__ == "__main__":

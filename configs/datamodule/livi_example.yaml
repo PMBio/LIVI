@@ -1,0 +1,14 @@
+_target_: src.data_modules.livi_data.LIVIDataModule
+
+adata: ${paths.data_dir}/test.h5ad
+y_key: individual
+use_size_factor: True
+size_factor_key: null
+data_split: [1.0]
+batch_size: 528
+num_workers: 2
+seed: 32
+shuffle: True
+pin_memory: False
+drop_last: False
+strict: False

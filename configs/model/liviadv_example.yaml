@@ -1,0 +1,13 @@
+_target_: src.models.livi.LIVIadv
+
+x_dim: 1000
+y_dim: 100
+z_dim: 10
+encoder_hidden_dims: [128, 64]
+learning_rate: 1e-3
+layer_norm: True
+adversary_weight: 100
+adversary_hidden_dims: [64, 128]
+adversary_learning_rate: 1e-3
+adversary_steps: 2
+device: cuda

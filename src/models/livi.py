@@ -64,10 +64,30 @@ class LIVI(VAE):
         self.U_context = nn.Embedding(y_dim, z_dim, device=device)
         self.V_persistent = nn.Embedding(y_dim, z_dim, device=device)
 
+        self.pretrain_mode = False
+
         self.save_hyperparameters()
 
+    def set_pretrain_mode(self, mode: bool):
+        """Set VAE pretrain mode.
+
+        If True, label information is ignored.
+        """
+        self.pretrain_mode = mode
+        if mode:
+            # freeze parameters
+            self.U_context.requires_grad = False
+            self.V_persistent.requires_grad = False
+        else:
+            # unfreeze parameters
+            self.U_context.requires_grad = True
+            self.V_persistent.requires_grad = True
+
     def transform_latent(self, z: torch.Tensor, y: torch.Tensor):
-        return z + z * self.U_context(y) + self.V_persistent(y)
+        if self.pretrain_mode:
+            return z
+        else:
+            return z + z * self.U_context(y) + self.V_persistent(y)
 
 
 class LIVIadv(LIVI):
@@ -130,23 +150,57 @@ class LIVIadv(LIVI):
             layer_norm=False,
             device=device,
         )
+
+        self.automatic_optimization = False
+
         self.save_hyperparameters()
 
-    def step(self, batch, batch_idx, optimizer_idx=0, mode="train"):
+    def set_pretrain_mode(self, mode: bool):
+        """Set VAE pretrain mode.
+
+        If True, label information is ignored.
+        """
+        super().set_pretrain_mode(mode)
+        if mode:
+            self.adversary.requires_grad = False
+        else:
+            self.adversary.requires_grad = True
+
+    def step(self, batch, batch_idx, mode="train"):
         """Performs a single training or validation step."""
         x, y, size_factor = self.prepare_batch(batch)
+        optim_vae, optim_adversary = self.optimizers()
+
+        train_adversary = batch_idx % self.adversary_steps == 0
+        train_adversary = train_adversary & (not self.pretrain_mode)
+        train_adversary = train_adversary * (mode == "train")
 
         z_dist = self(x)
-        z = z_dist.rsample()
-        loss = F.cross_entropy(self.adversary(z), y)
+        if self.pretrain_mode:
+            # no adversary signal
+            loss = torch.zeros([1], device=self.device)
+        else:
+            z = z_dist.rsample()
+            loss = F.cross_entropy(self.adversary(z), y)
         logs = {f"{mode}/adversary_loss": loss.item()}
 
-        if optimizer_idx == 0:
+        if train_adversary:
+            # train adversary
+            optim_adversary.zero_grad()
+            self.manual_backward(loss)
+            optim_adversary.step()
+        else:
+            # train vae
             elbo = self.compute_elbo(z_dist, x, y, size_factor)
             logs[f"{mode}/elbo"] = elbo.item()
             loss = -elbo - self.adversary_weight * loss
-            logs[f"{mode}/vae_loss"] = loss.item()
+            logs[f"{mode}/livi_loss"] = loss.item()
             logs["hp_metric"] = loss.item()
+
+            if mode == "train":
+                optim_vae.zero_grad()
+                self.manual_backward(loss)
+                optim_vae.step()
 
         self.log_dict(
             logs,
@@ -155,15 +209,14 @@ class LIVIadv(LIVI):
             prog_bar=True,
             logger=True,
         )
-        return loss
 
-    def training_step(self, batch, batch_idx, optimizer_idx):
+    def training_step(self, batch, batch_idx):
         """Performs a single training step."""
-        return self.step(batch, batch_idx, optimizer_idx, mode="train")
+        self.step(batch, batch_idx, mode="train")
 
-    def validation_step(self, batch, batch_idx, optimizer_idx):
+    def validation_step(self, batch, batch_idx):
         """Performs a single validation step."""
-        return self.step(batch, batch_idx, optimizer_idx, mode="val")
+        self.step(batch, batch_idx, mode="val")
 
     def configure_optimizers(self):
         """Configures optimizer."""
@@ -182,16 +235,7 @@ class LIVIadv(LIVI):
             self.adversary.parameters(),
             lr=self.adversary_learning_rate,
         )
-        return (
-            {
-                "optimizer": optim_vae,
-                "frequency": 1,
-            },
-            {
-                "optimizer": optim_adversary,
-                "frequency": self.adversary_steps,
-            },
-        )
+        return optim_vae, optim_adversary
 
 
 class LIVIadvBatchSex(LIVIadv):

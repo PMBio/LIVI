@@ -1,0 +1,29 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=livi-adv-batch-sex_onek1k
+
+defaults:
+  - override /model: livi_example.yaml
+  - override /datamodule: livi_example.yaml
+  - override /callbacks: default.yaml
+  - override /trainer: default.yaml
+  - override /paths: default.yaml
+  - override /logger: tensorboard.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+trainer:
+  max_epochs: 100
+  accelerator: gpu
+  devices: 1
+
+callbacks:
+  livi_pretrain_vae:
+    _target_: src.callbacks.pretrain_vae.LIVIPretrainVAE
+    pretrain_epochs: 10
+
+task_name: livi_example
+
+seed: 32
