@@ -27,3 +27,4 @@ scanpy[leiden]>=1.9.1
 statsmodels>=0.13.1
 jupyterlab
 glimix_core
+pandas_plink
