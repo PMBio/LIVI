@@ -212,7 +212,7 @@ def run_LIVI_genetic_association_testing(
     - output_file_prefix(str): Output file prefix.
     - Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
     - bim (Optional[pd.DataFrame]): SNP information contained in the .bim file, if PLINK genotype matrix is used.
-    - covariates_df (pd.DataFrame): DataFrame containing sample covariates to be included as fixed effects in the LMM.
+    - covariates_df (Optional[pd.DataFrame]): DataFrame containing sample covariates to be included as fixed effects in the LMM.
     - quantile_norm (bool): Flag indicating whether quantile normalization should be applied to the phenotype.
 
     Returns:
