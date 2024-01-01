@@ -15,7 +15,7 @@ repos:
       - id: check-executables-have-shebangs
       - id: check-toml
       - id: check-case-conflict
-      - id: check-added-large-files
+     # - id: check-added-large-files
 
   # python code formatting
   - repo: https://github.com/psf/black
@@ -53,7 +53,7 @@ repos:
         args:
           [
             "--extend-ignore",
-            "E203,E402,E501,F401,F841",
+            "E203,E266,E402,E501,F401,F841",
             "--exclude",
             "logs/*,data/*",
           ]
@@ -70,6 +70,7 @@ repos:
     rev: v4.0.0-alpha.4
     hooks:
       - id: prettier
+        language_version: 17.9.1
         types: [yaml]
         exclude: "environment.yaml"
 
@@ -99,7 +100,7 @@ repos:
       - id: codespell
         args:
           - --skip=logs/**,data/**,*.ipynb
-          # - --ignore-words-list=abc,def
+          - --ignore-words-list=multipy
 
   # # jupyter notebook cell output clearing
   # - repo: https://github.com/kynan/nbstripout
