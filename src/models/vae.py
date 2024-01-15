@@ -144,7 +144,6 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
-        batch_norm: bool = False,
         device: str = "cuda",
     ):
         """Initialize module.
@@ -157,8 +156,9 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         """
         super().__init__()
 
-        self.x_dim = x_dim
-        self.batch_norm = batch_norm
+        self._z_dim = z_dim
+        self._x_dim = x_dim
+        self.batch_norm = kwargs["batch_norm"]
         self.device = device
 
         self.mean = create_mlp(
@@ -183,6 +183,124 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
             decoder_out = decoder_out + batch_effect
         if donor_sex_effect is not None:
             decoder_out = decoder_out + donor_sex_effect
+        if self.batch_norm:
+            decoder_out = nn.BatchNorm1d(self._x_dim, device=self.device)(decoder_out)
+        mean = F.softmax(decoder_out, dim=-1) * size_factor
+        probs = mean / (mean + total_count)
+
+        assert not torch.isnan(mean).any()
+        assert not torch.isnan(probs).any()
+        assert not torch.isnan(total_count).any()
+
+        return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
+
+
+class LIVI2_Decoder(nn.Module):
+    """Decoder module with Negative Binomial likelihood and batch and sex effect correction.
+
+    This module encompasses separate (linear) decoders for cell-state and genetic factors.
+    """
+
+    def __init__(
+        self,
+        z_dim: int,
+        x_dim: int,
+        decoder_hidden_dims: List[int],
+        layer_norm: bool,
+        n_gxc_factors: int,
+        n_persistent_factors: int,
+        pretrain_VAE: bool = True,
+        pretrain_G: bool = False,
+        batch_norm: bool = False,
+        device: str = "cuda",
+        #     **kwargs,
+    ):
+        """Initialize module.
+
+        Args:
+            z_dim: Latent dimension.
+            x_dim: Data dimension.
+            decoder_hidden_dims: Number of hidden nodes for each layer.
+            layer_norm: Use layer norm.
+        """
+        super().__init__()
+
+        self._x_dim = x_dim
+        self._z_dim = z_dim
+        self._num_genetic_factors = n_gxc_factors
+        self._num_persistent_factors = n_persistent_factors
+        self._pretrain_vae = pretrain_VAE
+        self._pretrain_G = pretrain_G
+        self.batch_norm = batch_norm
+        # self._num_genetic_factors = kwargs["n_gxc_factors"]
+        # self._num_persistent_factors = kwargs["n_persistent_factors"]
+        # self._pretrain_vae = kwargs["pretrain_VAE"]
+        # self._pretrain_G = kwargs["pretrain_G"]
+        # self.batch_norm = kwargs["batch_norm"]
+        self.device = device
+
+        self.mean = create_mlp(
+            input_size=self._z_dim,
+            output_size=self._x_dim,
+            hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+            device=self.device,
+        )
+        self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
+
+        self.context_decoder = create_mlp(
+            input_size=self._z_dim * self._num_genetic_factors,
+            output_size=self._x_dim,
+            hidden_dims=[],
+            layer_norm=layer_norm,
+            device=self.device,
+        )
+
+        self.persistent_decoder = create_mlp(
+            input_size=self._num_persistent_factors,
+            output_size=self._x_dim,
+            hidden_dims=[],
+            layer_norm=layer_norm,
+            device=self.device,
+        )
+
+    @property
+    def pretrain_VAE(self):
+        return self._pretrain_vae
+
+    @pretrain_VAE.setter
+    def pretrain_VAE(self, value):
+        self._pretrain_vae = value
+
+    @property
+    def pretrain_G(self):
+        return self._pretrain_G
+
+    @pretrain_G.setter
+    def pretrain_G(self, value):
+        self._pretrain_G = value
+
+    def forward(
+        self,
+        z: torch.Tensor,
+        GxC: torch.Tensor,
+        persistent_G: torch.Tensor,
+        size_factor: torch.Tensor,
+        batch_effect: Union[torch.Tensor, None],
+        donor_sex_effect: Union[torch.Tensor, None],
+    ) -> tdist.Distribution:
+        total_count = self.log_total_count.exp()
+        decoder_out = self.mean(z)
+        if batch_effect is not None:
+            decoder_out = decoder_out + batch_effect
+        if donor_sex_effect is not None:
+            decoder_out = decoder_out + donor_sex_effect
+        if not self.pretrain_VAE:
+            y_add = self.persistent_decoder(persistent_G)
+            decoder_out = decoder_out + y_add
+            if not self.pretrain_G:
+                y_gc = self.context_decoder(GxC)
+                decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = nn.BatchNorm1d(self.x_dim, device=self.device)(decoder_out)
         mean = F.softmax(decoder_out, dim=-1) * size_factor
