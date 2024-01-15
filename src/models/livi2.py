@@ -12,9 +12,9 @@ from src.models.components.mlp import create_mlp
 from src.models.vae import VAE, Encoder, LIVI2_Decoder
 
 
-
 class LIVI2(pl.LightningModule):
-    """ LIVI with separate decoders for cell-state and genetic factors.
+    """LIVI with separate decoders for cell-state and genetic factors.
+
     Each cell-state has its own genetic factors (hierarchical model).
     """
 
@@ -67,7 +67,7 @@ class LIVI2(pl.LightningModule):
         self.n_persistent_factors = n_persistent_factors
         # self.pretrain_mode = pretrain_vae
         # self.pretrain_G = pretrain_G
-        
+
         self.encoder = Encoder(
             x_dim=x_dim,
             z_dim=z_dim,
@@ -90,17 +90,17 @@ class LIVI2(pl.LightningModule):
             layer_norm=False,
             device=device,
         )
-        
+
         # hierarchical model
-        self.U_context = nn.Embedding(y_dim, z_dim*n_gxc_factors, device=device)
+        self.U_context = nn.Embedding(y_dim, z_dim * n_gxc_factors, device=device)
         self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
 
-        # decoder_kwargs = {"n_gxc_factors": n_gxc_factors, 
-        #                   "n_persistent_factors": n_persistent_factors, 
+        # decoder_kwargs = {"n_gxc_factors": n_gxc_factors,
+        #                   "n_persistent_factors": n_persistent_factors,
         #                   "pretrain_VAE": pretrain_vae,
-        #                   "pretrain_G": pretrain_vae, 
+        #                   "pretrain_G": pretrain_vae,
         #                   "batch_norm": False}
-        
+
         self.decoder = LIVI2_Decoder(
             z_dim=z_dim,
             x_dim=x_dim,
@@ -124,12 +124,14 @@ class LIVI2(pl.LightningModule):
         self.save_hyperparameters()
 
     def set_pretrain_mode(self, mode: bool):
-        """Set VAE pretrain mode. If True, discriminator and genetic embeddings are not optimised.
+        """Set VAE pretrain mode.
+
+        If True, discriminator and genetic embeddings are not optimised.
         """
         self.pretrain_mode = mode
         self.decoder.pretrain_VAE = mode
         if mode:
-             # freeze parameters
+            # freeze parameters
             self.adversary.requires_grad = False
             self.U_context.requires_grad = False
             self.V_persistent.requires_grad = False
@@ -139,9 +141,11 @@ class LIVI2(pl.LightningModule):
             self.adversary.requires_grad = True
             self.V_persistent.requires_grad = True
             self.decoder.persistent_decoder[0].weight.requires_grad = True
-            
+
     def set_pretrain_G_mode(self, mode: bool):
-        """ Set persistent (global) genetic effects pretrain mode. If True, the context-specific genetic effects are not learned.
+        """Set persistent (global) genetic effects pretrain mode.
+
+        If True, the context-specific genetic effects are not learned.
         """
         self.pretrain_G = mode
         self.decoder.pretrain_G = mode
@@ -154,7 +158,6 @@ class LIVI2(pl.LightningModule):
             self.U_context.requires_grad = True
             self.decoder.context_decoder[0].weight.requires_grad = True
 
-            
     def prepare_batch(self, batch):
         x = None
         y = None
@@ -168,11 +171,11 @@ class LIVI2(pl.LightningModule):
             x, y, eb, size_factor = batch
 
         return x, y, dsex, eb, size_factor
-    
+
     def forward(self, x: torch.Tensor):
         """Encodes data into cell-state latent space."""
         return self.encoder(x)
-    
+
     def get_prior(self) -> tdist.Distribution:
         """Constructs zbase prior for given batch shape."""
         return tdist.Independent(tdist.Normal(self.z_prior_loc, self.z_prior_scale), 1)
@@ -202,8 +205,8 @@ class LIVI2(pl.LightningModule):
         z = z_dist.rsample()
         # z = nn.Softmax(dim=1)(z)
         kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
-        
-        z_interaction = self.U_context(y) * z.repeat_interleave(self.n_gxc_factors, dim=1) 
+
+        z_interaction = self.U_context(y) * z.repeat_interleave(self.n_gxc_factors, dim=1)
 
         log_lik = (
             self.decoder(
@@ -230,7 +233,7 @@ class LIVI2(pl.LightningModule):
         train_adversary = train_adversary * (mode == "train")
 
         z_dist = self(x)
-        
+
         if self.pretrain_mode:
             # no adversary signal
             adversarial_loss = torch.zeros([1], device=self.device)
@@ -253,13 +256,24 @@ class LIVI2(pl.LightningModule):
                 if self.pretrain_mode:
                     l1_loss_persistent = torch.zeros([1], device=self.device)
                 else:
-                    l1_loss_persistent = self.hparams.l1_weight * torch.linalg.norm(torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1) 
+                    l1_loss_persistent = self.hparams.l1_weight * torch.linalg.norm(
+                        torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1
+                    )
             else:
-                l1_loss_context = self.hparams.l1_weight * torch.linalg.norm(torch.cat([p for p in self.decoder.context_decoder.parameters()]), ord=1)
-                l1_loss_persistent = self.hparams.l1_weight * torch.linalg.norm(torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1) 
+                l1_loss_context = self.hparams.l1_weight * torch.linalg.norm(
+                    torch.cat([p for p in self.decoder.context_decoder.parameters()]), ord=1
+                )
+                l1_loss_persistent = self.hparams.l1_weight * torch.linalg.norm(
+                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1
+                )
             logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
             logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
-            loss = -elbo - self.adversary_weight * adversarial_loss + l1_loss_context + l1_loss_persistent 
+            loss = (
+                -elbo
+                - self.adversary_weight * adversarial_loss
+                + l1_loss_context
+                + l1_loss_persistent
+            )
             logs[f"{mode}/livi_loss"] = loss.item()
             logs["hp_metric"] = loss.item()
 
@@ -303,5 +317,5 @@ class LIVI2(pl.LightningModule):
             self.adversary.parameters(),
             lr=self.hparams.adversary_learning_rate,
         )
-        
+
         return optim_vae, optim_adversary
