@@ -7,9 +7,8 @@ import torch.distributions as tdist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.components.distributions import RobustNormal
 from src.models.components.mlp import create_mlp
-from src.models.vae import VAE, Encoder, LIVI2_Decoder
+from src.models.vae import Encoder, LIVI2_Decoder
 
 
 class LIVI2(pl.LightningModule):
