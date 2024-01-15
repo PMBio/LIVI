@@ -144,6 +144,7 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
+        batch_norm: bool = False,
         device: str = "cuda",
     ):
         """Initialize module.
@@ -156,9 +157,9 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         """
         super().__init__()
 
-        self._z_dim = z_dim
-        self._x_dim = x_dim
-        self.batch_norm = kwargs["batch_norm"]
+        self.z_dim = z_dim
+        self.x_dim = x_dim
+        self.batch_norm = batch_norm
         self.device = device
 
         self.mean = create_mlp(
@@ -184,7 +185,7 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         if donor_sex_effect is not None:
             decoder_out = decoder_out + donor_sex_effect
         if self.batch_norm:
-            decoder_out = nn.BatchNorm1d(self._x_dim, device=self.device)(decoder_out)
+            decoder_out = nn.BatchNorm1d(self.x_dim, device=self.device)(decoder_out)
         mean = F.softmax(decoder_out, dim=-1) * size_factor
         probs = mean / (mean + total_count)
 
