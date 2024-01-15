@@ -18,5 +18,6 @@ def create_mlp(
             nn.ReLU(),
             nn.LayerNorm(dims[i + 1]) if layer_norm else nn.Identity(),
         )
-    layers.append(nn.Linear(dims[-1], output_size, device=device))
+    has_hidden = len(hidden_dims) != 0
+    layers.append(nn.Linear(dims[-1], output_size, bias=has_hidden, device=device))
     return layers
