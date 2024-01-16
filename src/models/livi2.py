@@ -81,7 +81,6 @@ class LIVI2(pl.LightningModule):
         self.adversary_learning_rate = adversary_learning_rate
         self.adversary_steps = adversary_steps
         # Set up adversary
-        self.adversary_weight = adversary_weight
         self.adversary = create_mlp(
             input_size=z_dim,
             output_size=y_dim,
@@ -269,7 +268,7 @@ class LIVI2(pl.LightningModule):
             logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
             loss = (
                 -elbo
-                - self.adversary_weight * adversarial_loss
+                - self.hparams.adversary_weight * adversarial_loss
                 + l1_loss_context
                 + l1_loss_persistent
             )
