@@ -28,3 +28,4 @@ statsmodels>=0.13.1
 jupyterlab
 glimix_core
 pandas_plink
+multipy @ git+https://github.com/puolival/multipy

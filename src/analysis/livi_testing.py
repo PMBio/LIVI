@@ -1,5 +1,5 @@
 ### Run:
-# python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise_U --output_dir --output_file_prefix
+# python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise_U --multiple_testing_threshold --output_dir --output_file_prefix
 ###
 
 import argparse
@@ -15,18 +15,20 @@ from pandas_plink import read_plink
 from scipy.stats import chi2, norm
 from sklearn.preprocessing import StandardScaler
 
-# from multipy.fdr import qvalue
+from multipy.fdr import qvalue
 
 
 def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 1) -> np.ndarray:
     """Compute p-values from likelihood ratios.
 
-    Parameters:
-    - null_lml (float): Log-likelihood of the null model.
-    - alt_lmls (Union[float, np.ndarray]): Log-likelihoods of the alternative models.
-    - dof (Optional[int]): Degrees of freedom for the chi-squared distribution. Default is 1.
+    Parameters
+    ----------
+    null_lml (float): Log-likelihood of the null model.
+    alt_lmls (Union[float, np.ndarray]): Log-likelihoods of the alternative models.
+    dof (Optional[int]): Degrees of freedom for the chi-squared distribution. Default is 1.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: Likelihood ratio test p-values.
     """
     import numpy as np
@@ -43,10 +45,12 @@ def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 
 def force_gauss_norm(phenotype: Union[np.ndarray, list]) -> np.ndarray:
     """Force quantile normalization on a phenotype array.
 
-    Parameters:
-    - phenotype (Union[np.ndarray, list]): Phenotype array to be quantile normalized.
+    Parameters
+    ----------
+    phenotype (Union[np.ndarray, list]): Phenotype array to be quantile normalized.
 
-    Returns:
+    Returns
+    -------
     np.ndarray: Quantile normalized phenotype array.
     """
 
@@ -70,20 +74,25 @@ def LMM_test_feature(
     QS: Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray],
     quantile_norm: bool,
 ) -> pd.DataFrame:
-    """Perform a linear mixed model (LMM) test for the effect of a genetic variable (e.g. SNP or
-    PRS) on a specified phenotype feature (e.g. a gene or factor).
+    """Perform a linear mixed model (LMM) test for the effect of a genetic variable 
+    (e.g. SNP or PRS) on a specified phenotype feature (e.g. a gene or factor).
 
-    Parameters:
-    - feature_id (Union[int, str]): Identifier for the specific phenotype feature.
-    - phenotype_df (pd.DataFrame): DataFrame containing the values of all phenotype features.
-    - covariates_df (pd.DataFrame): DataFrame containing sample covariates to be included as fixed effects in the LMM.
-    - G_scaled (pd.DataFrame): DataFrame containing the standardised genetic data.
-    - QS (tuple): Economic eigendecomposition in the form of ((Q0, Q1), S0) of a kinship matrix K (used as covariance of the random genetic effect).
-    - quantile_norm (bool): Flag indicating whether quantile normalization should be applied to the phenotype.
+    Parameters
+    ----------
+    feature_id (Union[int, str]): Identifier for the specific phenotype feature.
+    phenotype_df (pd.DataFrame): DataFrame containing the values of all phenotype features.
+    covariates_df (pd.DataFrame): DataFrame containing sample covariates to be included
+        as fixed effects in the LMM.
+    G_scaled (pd.DataFrame): DataFrame containing the standardised genetic data.
+    QS (tuple): Economic eigendecomposition in the form of ((Q0, Q1), S0) of a kinship
+        matrix K (used as covariance of the random genetic effect).
+    quantile_norm (bool): Flag indicating whether quantile normalization should be
+        applied to the phenotype.
 
-    Returns:
-    pd.DataFrame: DataFrame containing results of the LMM test, including phenotype feature ID, genetic variable ID,
-    effect size, effect size standard error, and p-value.
+    Returns
+    -------
+    pd.DataFrame: DataFrame containing results of the LMM test, including phenotype feature ID,
+        genetic variable ID, effect size, effect size standard error, and p-value.
     """
     feature_phenotype = phenotype_df.loc[feature_id]
     # Remove samples where the feature is NaN
@@ -135,12 +144,15 @@ def LMM_test_feature(
 def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.DataFrame:
     """Set up sample covariates based on command-line arguments and metadata.
 
-    Parameters:
-    - args (argparse.Namespace): Parsed command-line arguments.
-    - metadata (pd.DataFrame): DataFrame containing sample metadata.
+    Parameters
+    ----------
+    args (argparse.Namespace): Parsed command-line arguments.
+    metadata (pd.DataFrame): DataFrame containing sample metadata.
 
-    Returns:
-    pd.DataFrame: DataFrame containing sample covariates to be included as fixed effects in the LMM.
+    Returns
+    -------
+    pd.DataFrame: DataFrame containing sample covariates to be included 
+        as fixed effects in the LMM.
     """
 
     covariates = pd.DataFrame(index=metadata[args.individual_column].unique())
@@ -201,23 +213,27 @@ def run_LIVI_genetic_association_testing(
     bim=None,
     covariates=None,
     quantile_norm=True,
-):
-    """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings.
+    qval_threshold=None,
+) -> None:
+    """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings and save the results to file. 
+    Optionally select also significant associations based on `fdr_threshold`.
 
-    Parameters:
-    - U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
-    - V_persistent (pd.DataFrame): LIVI persistent genetic embedding.
-    - GT_matrix (pd.DataFrame): Standardised genetic variable matrix.
-    - output_dir (str): Output directory to save the testing results.
-    - output_file_prefix(str): Output file prefix.
-    - Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
-    - bim (Optional[pd.DataFrame]): SNP information contained in the .bim file, if PLINK genotype matrix is used.
-    - covariates_df (Optional[pd.DataFrame]): DataFrame containing sample covariates to be included as fixed effects in the LMM.
-    - quantile_norm (bool): Flag indicating whether quantile normalization should be applied to the phenotype.
+    Parameters
+    ----------
+    U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
+    V_persistent (pd.DataFrame): LIVI persistent genetic embedding.
+    GT_matrix (pd.DataFrame): Standardised genetic variable matrix.
+    output_dir (str): Output directory to save the testing results.
+    output_file_prefix(str): Output file prefix.
+    Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
+    bim (Optional[pd.DataFrame]): SNP information contained in the .bim file, 
+        if PLINK genotype matrix is used.
+    covariates_df (Optional[pd.DataFrame]): DataFrame containing sample covariates
+        to be included as fixed effects in the LMM.
+    quantile_norm (bool): Flag indicating whether quantile normalization should be
+        applied to the phenotype.
+    qval_threshold (Optional[float]): Storey q-value threshold to call an association significant.
 
-    Returns:
-    pd.DataFrame: DataFrame containing results of the LMM test, including factor ID, genetic variable ID,
-    effect size, effect size standard error, and p-value.
     """
 
     if covariates is not None:
@@ -285,7 +301,16 @@ def run_LIVI_genetic_association_testing(
     )
 
     results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-
+    
+    if qval_threshold is not None:
+        results_sign = FDR_correction(results, cut_off=qval_threshold)
+        filename_sign = (
+            f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+            if args.variable_factors or args.variance_threshold
+            else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+        )
+        results_sign.to_csv(os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False)
+        
     print("----- Done ----- \n")
 
     if V_persistent is not None:
@@ -323,8 +348,42 @@ def run_LIVI_genetic_association_testing(
         filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
 
         results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-        print("----- Done ----- \n")
+        if qval_threshold is not None:
+            results_sign = FDR_correction(results, cut_off=qval_threshold)
+            filename_sign = f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+            results_sign.to_csv(os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False)
 
+        print("----- Done ----- \n")
+        
+        
+def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.DataFrame:
+    """
+    Perform False Discovery Rate (FDR) correction on testing results.
+
+    Parameters
+    ----------
+    testing_results (pd.DataFrame): DataFrame containing testing results.
+    cut_off (float, optional): Storey q-value threshold for significance.
+        Default is 0.05.
+
+    Returns
+    -------
+    pd.DataFrame: DataFrame containing testing results after FDR correction.
+    """
+    
+    ## Multiple testing correction across everything
+    testing_results = testing_results.assign(Storey_qvals = qvalue(
+        testing_results["p_value"].to_numpy(), threshold=cut_off)[1]
+     )
+
+    testing_results_sign = testing_results.loc[testing_results.Storey_qvals < cut_off]
+    print(f"number of fQTLs: {testing_results_sign.shape[0]}")
+    print(f"number of unique fSNPs: {testing_results_sign.SNP_id.nunique()}")
+    print(f"number of unique factors: {testing_results_sign.Factor.nunique()}")
+  
+    return testing_results_sign
+    
+    
 
 def validate_and_read_passed_args(
     args: argparse.Namespace,
@@ -333,19 +392,21 @@ def validate_and_read_passed_args(
 ]:
     """Validate the passed arguments and read the corresponding files.
 
-    Parameters:
-    - args (argparse.Namespace): Parsed command-line arguments.
+    Parameters
+    ----------
+    args (argparse.Namespace): Parsed command-line arguments.
 
-    Returns:
+    Returns
+    -------
     Tuple[str, str, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    - output_dir (str): Output directory to save the testing results.
-    - of_prefix (str): Output file prefix.
-    - metadata (pd.DataFrame): DataFrame containing cell metadata.
-    - GT_matrix_standardised (pd.DataFrame): Standardized genotype matrix.
-    - bim (pd.DataFrame): SNP information contained in the .bim file, if PLINK genotype matrix is used, otherwise None.
-    - kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
-    - U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
-    - V_persistent (pd.DataFrame): LIVI persistent genetic embedding if applicable, otherwise None.
+        output_dir (str): Output directory to save the testing results.
+        of_prefix (str): Output file prefix.
+        metadata (pd.DataFrame): DataFrame containing cell metadata.
+        GT_matrix_standardised (pd.DataFrame): Standardized genotype matrix.
+        bim (pd.DataFrame): SNP information contained in the .bim file, if PLINK genotype matrix is used, otherwise None.
+        kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
+        U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
+        V_persistent (pd.DataFrame): LIVI persistent genetic embedding if applicable, otherwise None.
     """
 
     assert os.path.isdir(args.model_output_dir), "Model directory not found"
@@ -564,6 +625,12 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
+        "--multiple_testing_threshold",
+        "-fdr",
+        type=float,
+        help="Storey q-value threshold for multiple testing correction.",
+    )
+    parser.add_argument(
         "--output_dir",
         help="Absolute path of the directory to save the testing results.",
         type=str,
@@ -598,4 +665,5 @@ if __name__ == "__main__":
         output_file_prefix=of_prefix,
         covariates=covariates,
         quantile_norm=args.quantile_normalise_U,
+        qval_threshold=args.multiple_testing_threshold if args.multiple_testing_threshold else None
     )
