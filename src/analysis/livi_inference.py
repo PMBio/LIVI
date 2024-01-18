@@ -28,10 +28,12 @@ from src.models.livi2 import LIVI2
 def validate_passed_args(args: argparse.Namespace) -> Tuple[AnnData, str]:
     """Validate the passed arguments.
 
-    Parameters:
-    - args (argparse.Namespace): Parsed command-line arguments.
+    Parameters
+    ----------
+    args (argparse.Namespace): Parsed command-line arguments.
 
-    Returns:
+    Returns
+    -------
     str: Output directory to save the LIVI embeddings.
     """
 
@@ -73,15 +75,18 @@ def setup_model_and_data(
 ) -> Tuple[str, str, AnnData, LIVIDataModule, Union[LIVI, LIVIadv, LIVIadvBatchSex, LIVI2]]:
     """Loads trained LIVI model from `model_run_dir` and setups LIVIDataModule from the `adata`.
 
-    Parameters:
-    - args (argparse.Namespace): Parsed command-line arguments.
+    Parameters
+    ----------
+    args (argparse.Namespace): Parsed command-line arguments.
 
-    Returns:
-    Tuple[str, LIVIDataModule]:
-    - of_prefix (str): Output file prefix.
-    - adata: AnnData object containing scRNA-seq data and metadata.
-    - LIVI_data (LIVIDataModule): LIVI data loader.
-    - LIVI_model: Trained LIVI model.
+    Returns
+    -------
+    Tuple[str, str, AnnData, LIVIDataModule]:
+        output_dir (str): Directory to save output files.
+        of_prefix (str): Output file prefix.
+        adata (AnnData): AnnData object containing scRNA-seq data and metadata.
+        LIVI_data (LIVIDataModule): LIVI data loader.
+        LIVI_model: Trained LIVI model.
     """
 
     print("\n ----- Validating passed args ----- \n")
@@ -228,16 +233,19 @@ def get_livi_embeddings(
 ) -> Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
     """Get LIVI embeddings from the provided LIVI model.
 
-    Parameters:
-    - args (argparse.Namespace): Parsed command-line arguments.
-    - LIVI_model (Union[LIVI, LIVIadv, LIVIadvBatchSex, LIVI2]): Trained LIVI model.
-    - adata (AnnData): AnnData object containing scRNA-seq data and metadata.
-    - LIVI_data (LIVIDataModule): LIVI data loader.
+    Parameters
+    ----------
+    args (argparse.Namespace): Parsed command-line arguments.
+    LIVI_model (Union[LIVI, LIVIadv, LIVIadvBatchSex, LIVI2]): Trained LIVI model.
+    adata (AnnData): AnnData object containing scRNA-seq data and metadata.
+    LIVI_data (LIVIDataModule): LIVI data loader.
 
-    Returns:
+    Returns
+    -------
     Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
-    - U_context_df (pd.DataFrame): DataFrame containing cell-state-specific genetic embeddings.
-    - V_persistent_df (Optional[pd.DataFrame]): DataFrame containing persistent genetic embeddings if applicable, otherwise None.
+        U_context_df (pd.DataFrame): DataFrame containing cell-state-specific genetic embeddings.
+        V_persistent_df (Optional[pd.DataFrame]): DataFrame containing persistent genetic 
+            embeddings if applicable, otherwise None.
     """
 
     print("\n ----- Getting genetic embeddings ----- \n")
