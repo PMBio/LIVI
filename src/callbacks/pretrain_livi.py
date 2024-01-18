@@ -13,13 +13,13 @@ class LIVIPretrainVAE(Callback):
         if trainer.current_epoch == self._pretrain_epochs:
             print("VAE pretraining completed")
             pl_module.set_pretrain_mode(False)
- 
-            
+
+
 class LIVIPretrain(Callback):
-    def __init__(self, pretrain_epochs=10, pretrain_wo_GxC=True):
+    def __init__(self, pretrain_vae_epochs=10, pretrain_wo_GxC_epochs=10):
         super().__init__()
-        self._pretrain_epochs = pretrain_epochs
-        self._genetics_epochs = pretrain_epochs+10 if pretrain_wo_GxC else pretrain_epochs
+        self._pretrain_epochs = pretrain_vae_epochs
+        self._genetics_epochs = pretrain_vae_epochs + pretrain_wo_GxC_epochs
 
     def on_train_start(self, trainer, pl_module):
         pl_module.set_pretrain_mode(True)
