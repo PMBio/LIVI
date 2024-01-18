@@ -10,12 +10,11 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from glimix_core.lmm import LMM
+from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
 from pandas_plink import read_plink
 from scipy.stats import chi2, norm
 from sklearn.preprocessing import StandardScaler
-
-from multipy.fdr import qvalue
 
 
 def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 1) -> np.ndarray:
@@ -74,8 +73,8 @@ def LMM_test_feature(
     QS: Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray],
     quantile_norm: bool,
 ) -> pd.DataFrame:
-    """Perform a linear mixed model (LMM) test for the effect of a genetic variable 
-    (e.g. SNP or PRS) on a specified phenotype feature (e.g. a gene or factor).
+    """Perform a linear mixed model (LMM) test for the effect of a genetic variable (e.g. SNP or
+    PRS) on a specified phenotype feature (e.g. a gene or factor).
 
     Parameters
     ----------
@@ -151,7 +150,7 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
 
     Returns
     -------
-    pd.DataFrame: DataFrame containing sample covariates to be included 
+    pd.DataFrame: DataFrame containing sample covariates to be included
         as fixed effects in the LMM.
     """
 
@@ -215,8 +214,9 @@ def run_LIVI_genetic_association_testing(
     quantile_norm=True,
     qval_threshold=None,
 ) -> None:
-    """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings and save the results to file. 
-    Optionally select also significant associations based on `fdr_threshold`.
+    """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings and
+    save the results to file. Optionally select also significant associations based on
+    `fdr_threshold`.
 
     Parameters
     ----------
@@ -226,14 +226,13 @@ def run_LIVI_genetic_association_testing(
     output_dir (str): Output directory to save the testing results.
     output_file_prefix(str): Output file prefix.
     Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
-    bim (Optional[pd.DataFrame]): SNP information contained in the .bim file, 
+    bim (Optional[pd.DataFrame]): SNP information contained in the .bim file,
         if PLINK genotype matrix is used.
     covariates_df (Optional[pd.DataFrame]): DataFrame containing sample covariates
         to be included as fixed effects in the LMM.
     quantile_norm (bool): Flag indicating whether quantile normalization should be
         applied to the phenotype.
     qval_threshold (Optional[float]): Storey q-value threshold to call an association significant.
-
     """
 
     if covariates is not None:
@@ -301,7 +300,7 @@ def run_LIVI_genetic_association_testing(
     )
 
     results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-    
+
     if qval_threshold is not None:
         results_sign = FDR_correction(results, cut_off=qval_threshold)
         filename_sign = (
@@ -309,8 +308,10 @@ def run_LIVI_genetic_association_testing(
             if args.variable_factors or args.variance_threshold
             else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
         )
-        results_sign.to_csv(os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False)
-        
+        results_sign.to_csv(
+            os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+        )
+
     print("----- Done ----- \n")
 
     if V_persistent is not None:
@@ -350,15 +351,18 @@ def run_LIVI_genetic_association_testing(
         results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         if qval_threshold is not None:
             results_sign = FDR_correction(results, cut_off=qval_threshold)
-            filename_sign = f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
-            results_sign.to_csv(os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False)
+            filename_sign = (
+                f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+            )
+            results_sign.to_csv(
+                os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+            )
 
         print("----- Done ----- \n")
-        
-        
+
+
 def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.DataFrame:
-    """
-    Perform False Discovery Rate (FDR) correction on testing results.
+    """Perform False Discovery Rate (FDR) correction on testing results.
 
     Parameters
     ----------
@@ -370,20 +374,19 @@ def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.D
     -------
     pd.DataFrame: DataFrame containing testing results after FDR correction.
     """
-    
+
     ## Multiple testing correction across everything
-    testing_results = testing_results.assign(Storey_qvals = qvalue(
-        testing_results["p_value"].to_numpy(), threshold=cut_off)[1]
-     )
+    testing_results = testing_results.assign(
+        Storey_qvals=qvalue(testing_results["p_value"].to_numpy(), threshold=cut_off)[1]
+    )
 
     testing_results_sign = testing_results.loc[testing_results.Storey_qvals < cut_off]
     print(f"number of fQTLs: {testing_results_sign.shape[0]}")
     print(f"number of unique fSNPs: {testing_results_sign.SNP_id.nunique()}")
     print(f"number of unique factors: {testing_results_sign.Factor.nunique()}")
-  
+
     return testing_results_sign
-    
-    
+
 
 def validate_and_read_passed_args(
     args: argparse.Namespace,
@@ -665,5 +668,7 @@ if __name__ == "__main__":
         output_file_prefix=of_prefix,
         covariates=covariates,
         quantile_norm=args.quantile_normalise_U,
-        qval_threshold=args.multiple_testing_threshold if args.multiple_testing_threshold else None
+        qval_threshold=args.multiple_testing_threshold
+        if args.multiple_testing_threshold
+        else None,
     )
