@@ -2,5 +2,5 @@
 
 pretrain_livi:
   _target_: src.callbacks.pretrain_livi.LIVIPretrain
-  pretrain_epochs: 10
-  pretrain_wo_GxC: True
+  pretrain_vae_epochs: 10
+  pretrain_wo_GxC_epochs: 10

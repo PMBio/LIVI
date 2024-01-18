@@ -145,7 +145,7 @@ class LIVI2(pl.LightningModule):
 
         If True, the context-specific genetic effects are not learned.
         """
-        self.pretrain_G = mode
+        self.pretrain_G_mode = mode
         self.decoder.pretrain_G = mode
         if mode:
             # freeze parameters
@@ -249,7 +249,7 @@ class LIVI2(pl.LightningModule):
             # train vae
             elbo = self.compute_elbo(z_dist, x, y, donor_sex, exp_batch_ids, size_factor)
             logs[f"{mode}/elbo"] = elbo.item()
-            if self.pretrain_G:
+            if self.pretrain_G_mode:
                 l1_loss_context = torch.zeros([1], device=self.device)
                 if self.pretrain_mode:
                     l1_loss_persistent = torch.zeros([1], device=self.device)
