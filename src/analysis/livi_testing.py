@@ -237,7 +237,7 @@ def run_LIVI_genetic_association_testing(
 
     if covariates is not None:
         GT_matrix = GT_matrix.loc[covariates.index]
-        U_context = U_context.loc[covariates.index]
+     #   U_context = U_context.loc[covariates.index]
 
     if Kinship is not None:
         kinship = Kinship
@@ -250,69 +250,76 @@ def run_LIVI_genetic_association_testing(
     else:
         QS = economic_qs_linear(GT_matrix)
 
-    results = pd.DataFrame(
-        columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
-    )
-
-    print("\n ----- Running genetic association testing for U_context ----- \n")
-
-    if args.variance_threshold:
-        variable_factors = np.where(
-            np.var(U_context.to_numpy(), axis=0) >= args.variance_threshold
-        )[0]
-        U_context = pd.DataFrame(
-            U_context.to_numpy()[:, variable_factors],
-            index=U_context.index,
-            columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
+        
+    if U_context is not None:
+        if covariates is not None:
+            U_context = U_context.loc[covariates.index]
+        print("\n ----- Running genetic association testing for U_context ----- \n")
+        
+        results = pd.DataFrame(
+            columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
         )
-    elif args.variable_factors:
-        U_context = pd.DataFrame(
-            U_context.to_numpy()[:, args.variable_factors],
-            index=U_context.index,
-            columns=[f"Individual_Interaction_Factor{f+1}" for f in args.variable_factors],
-        )
-    else:
-        U_context = U_context
 
-    for f in U_context.columns:
-        results_factor = LMM_test_feature(
-            feature_id=f,
-            phenotype_df=U_context.T,
-            covariates_df=covariates,
-            G_scaled=GT_matrix,
-            QS=QS,
-            quantile_norm=quantile_norm,
-        )
-        results_factor.rename(columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True)
+        if args.variance_threshold:
+            variable_factors = np.where(
+                np.var(U_context.to_numpy(), axis=0) >= args.variance_threshold
+            )[0]
+            U_context = pd.DataFrame(
+                U_context.to_numpy()[:, variable_factors],
+                index=U_context.index,
+                columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
+            )
+        elif args.variable_factors:
+            U_context = pd.DataFrame(
+                U_context.to_numpy()[:, args.variable_factors],
+                index=U_context.index,
+                columns=[f"Individual_Interaction_Factor{f+1}" for f in args.variable_factors],
+            )
+        else:
+            U_context = U_context
 
-        results = pd.concat([results, results_factor], axis=0)
+        for f in U_context.columns:
+            results_factor = LMM_test_feature(
+                feature_id=f,
+                phenotype_df=U_context.T,
+                covariates_df=covariates,
+                G_scaled=GT_matrix,
+                QS=QS,
+                quantile_norm=quantile_norm,
+            )
+            results_factor.rename(columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True)
 
-    if bim is not None:
-        results = results.merge(
-            bim.filter(["snp", "a1"]).rename(columns={"snp": "SNP_id", "a1": "assessed_allele"}),
-            on="SNP_id",
-            how="left",
-        )
-    filename = (
-        f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
-        if args.variable_factors or args.variance_threshold
-        else f"{output_file_prefix}_LMM_results_Ucontext.tsv"
-    )
+            if results.empty:
+                results = results_factor
+            else:
+                results = pd.concat([results, results_factor], axis=0)
 
-    results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-
-    if qval_threshold is not None:
-        results_sign = FDR_correction(results, cut_off=qval_threshold)
-        filename_sign = (
-            f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+        if bim is not None:
+            results = results.merge(
+                bim.filter(["snp", "a1"]).rename(columns={"snp": "SNP_id", "a1": "assessed_allele"}),
+                on="SNP_id",
+                how="left",
+            )
+        filename = (
+            f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
             if args.variable_factors or args.variance_threshold
-            else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
-        )
-        results_sign.to_csv(
-            os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+            else f"{output_file_prefix}_LMM_results_Ucontext.tsv"
         )
 
-    print("----- Done ----- \n")
+        results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+
+        if qval_threshold is not None:
+            results_sign = FDR_correction(results, cut_off=qval_threshold)
+            filename_sign = (
+                f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                if args.variable_factors or args.variance_threshold
+                else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+            )
+            results_sign.to_csv(
+                os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+            )
+
+        print("----- Done ----- \n")
 
     if V_persistent is not None:
         if covariates is not None:
@@ -335,8 +342,11 @@ def run_LIVI_genetic_association_testing(
             results_factor.rename(
                 columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
             )
-
-            results = pd.concat([results, results_factor], axis=0)
+            
+            if results.empty:
+                results = results_factor
+            else:
+                results = pd.concat([results, results_factor], axis=0)
 
         if args.plink:
             results = results.merge(
@@ -509,22 +519,27 @@ def validate_and_read_passed_args(
     ]
     # zbase = [re.match("(zbase.*sv)", f) for f in files if re.match("zbase.*sv", f) is not None][0].groups()[0]
     U_context = [
-        re.match("(cell-state-specific_effects.tsv)", f)
+        re.match("(.*cell-state-specific_effects.tsv)", f)
         for f in files
-        if re.match("cell-state-specific_effects.tsv", f) is not None
-    ][0].groups()[0]
-    U_context = pd.read_csv(os.path.join(args.model_output_dir, U_context), index_col=0, sep="\t")
-    if U_context.loc[U_context.index.isin(GT_matrix_standardised.index)].shape[0] == 0:
-        raise ValueError(
-            "Individual IDs in U context do not match individual IDs in the genotype matrix."
-        )
-    U_context.columns = [
-        f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
+        if re.match(".*cell-state-specific_effects.tsv", f) is not None
     ]
+    if len(U_context) > 0:
+        U_context = U_context[0].groups()[0]
+        U_context = pd.read_csv(os.path.join(args.model_output_dir, U_context), index_col=0, sep="\t")
+        if U_context.loc[U_context.index.isin(GT_matrix_standardised.index)].shape[0] == 0:
+            raise ValueError(
+                "Individual IDs in U context do not match individual IDs in the genotype matrix."
+            )
+        U_context.columns = [
+            f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
+        ]
+    else:
+        U_context = None
+        
     V_persistent = [
-        re.match("(persistent_effects.tsv)", f)
+        re.match("(.*persistent_effects.tsv)", f)
         for f in files
-        if re.match("persistent_effects.tsv", f) is not None
+        if re.match(".*persistent_effects.tsv", f) is not None
     ]
     if len(V_persistent) > 0:
         V_persistent = V_persistent[0].groups()[0]
