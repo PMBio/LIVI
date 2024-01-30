@@ -52,7 +52,7 @@ class LIVIDataModule(LightningDataModule):
 
         # load anndata
         if isinstance(adata, str):
-            self.adata = sc.read(adata)
+            self.adata = sc.read_h5ad(adata)
         else:
             self.adata = adata
 
