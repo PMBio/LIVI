@@ -249,10 +249,12 @@ class LIVI2_Decoder(nn.Module):
             device=self.device,
         )
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
-        
+
         if self._num_genetic_factors != 0:
             self.context_decoder = create_mlp(
-                input_size=self._z_dim * self._num_genetic_factors if hierarchical_decoder else self._num_genetic_factors,
+                input_size=self._z_dim * self._num_genetic_factors
+                if hierarchical_decoder
+                else self._num_genetic_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
                 layer_norm=layer_norm,
@@ -266,7 +268,7 @@ class LIVI2_Decoder(nn.Module):
                 layer_norm=layer_norm,
                 device=self.device,
             )
-            
+
         if self.batch_norm:
             self.BN_decoder = nn.BatchNorm1d(self._x_dim, device=self.device)
 
@@ -301,7 +303,11 @@ class LIVI2_Decoder(nn.Module):
             decoder_out = decoder_out + batch_effect
         if donor_sex_effect is not None:
             decoder_out = decoder_out + donor_sex_effect
-        if not self.pretrain_VAE and self._num_persistent_factors != 0 and persistent_G is not None:
+        if (
+            not self.pretrain_VAE
+            and self._num_persistent_factors != 0
+            and persistent_G is not None
+        ):
             y_add = self.persistent_decoder(persistent_G)
             decoder_out = decoder_out + y_add
         if not self.pretrain_G and self._num_genetic_factors != 0 and GxC is not None:
