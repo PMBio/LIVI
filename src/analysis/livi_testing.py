@@ -3,6 +3,10 @@
 ###
 
 import argparse
+import sys
+sys.path.append("/data/danai/scripts/LIVI/")
+from src.analysis.plotting import QQplot
+
 import os
 import re
 from typing import List, Optional, Tuple, Union
@@ -14,7 +18,9 @@ from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
 from pandas_plink import read_plink
 from scipy.stats import chi2, norm
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, quantile_transform
+
+
 
 
 def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 1) -> np.ndarray:
@@ -39,30 +45,6 @@ def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 
     pv = chi2(df=dof).sf(lrs)
 
     return np.clip(pv, super_tiny, 1 - tiny)
-
-
-def force_gauss_norm(phenotype: Union[np.ndarray, list]) -> np.ndarray:
-    """Force quantile normalization on a phenotype array.
-
-    Parameters
-    ----------
-    phenotype (Union[np.ndarray, list]): Phenotype array to be quantile normalized.
-
-    Returns
-    -------
-    np.ndarray: Quantile normalized phenotype array.
-    """
-
-    indextoupdate = np.isfinite(phenotype)
-    y1 = phenotype[indextoupdate]
-    yuni, yindex = np.unique(y1, return_inverse=True)
-    phenotypenorm = phenotype.copy()
-
-    sref = norm.isf(np.linspace(0.001, 0.999, num=yuni.shape[0])[::-1])
-
-    phenotypenorm[indextoupdate] = sref[yindex]
-
-    return phenotypenorm
 
 
 def LMM_test_feature(
@@ -110,9 +92,11 @@ def LMM_test_feature(
     ].values  # individuals x G_variable
 
     if quantile_norm:
-        phenotype = force_gauss_norm(feature_phenotype)
+        phenotype = quantile_transform(feature_phenotype.values.reshape(-1,1), output_distribution="normal")
+    else:
+        phenotype = feature_phenotype
 
-    null_lmm = LMM(feature_phenotype, covariates_matrix, QS, restricted=False)
+    null_lmm = LMM(phenotype, covariates_matrix, QS, restricted=False)
     null_lmm.fit(verbose=False)
     # Log of the marginal likelihood of null model:
     null_loglk = null_lmm.lml()
@@ -212,8 +196,11 @@ def run_LIVI_genetic_association_testing(
     bim=None,
     covariates=None,
     quantile_norm=True,
+    variance_threshold=None,
+    variable_factors=None,
     qval_threshold=None,
-) -> None:
+    return_associations=False,
+) -> Optional[Tuple[pd.DataFrame, Optional[pd.DataFrame]]]:
     """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings and
     save the results to file. Optionally select also significant associations based on
     `fdr_threshold`.
@@ -233,8 +220,17 @@ def run_LIVI_genetic_association_testing(
     quantile_norm (bool): Flag indicating whether quantile normalization should be
         applied to the phenotype.
     qval_threshold (Optional[float]): Storey q-value threshold to call an association significant.
+    
+    Returns
+    -------
+    results_sign_context (pd.DataFrame): Significant SNP associations with the cell-state-specific genetic embedding.
+    results_sign_persistent (pd.DataFrame): Significant SNP associations with the persistent genetic embedding, if there is one.
+    
     """
 
+    if return_associations and qval_threshold is None:
+        qval_threshold = 0.05
+        
     if covariates is not None:
         GT_matrix = GT_matrix.loc[covariates.index]
      #   U_context = U_context.loc[covariates.index]
@@ -260,20 +256,20 @@ def run_LIVI_genetic_association_testing(
             columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
         )
 
-        if args.variance_threshold:
-            variable_factors = np.where(
-                np.var(U_context.to_numpy(), axis=0) >= args.variance_threshold
-            )[0]
+        if variable_factors is not None:
             U_context = pd.DataFrame(
                 U_context.to_numpy()[:, variable_factors],
                 index=U_context.index,
                 columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
             )
-        elif args.variable_factors:
+        elif variance_threshold is not None:
+            variable_factors = np.where(
+                np.var(U_context.to_numpy(), axis=0) >= variance_threshold
+            )[0]
             U_context = pd.DataFrame(
-                U_context.to_numpy()[:, args.variable_factors],
+                U_context.to_numpy()[:, variable_factors],
                 index=U_context.index,
-                columns=[f"Individual_Interaction_Factor{f+1}" for f in args.variable_factors],
+                columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
             )
         else:
             U_context = U_context
@@ -302,20 +298,21 @@ def run_LIVI_genetic_association_testing(
             )
         filename = (
             f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
-            if args.variable_factors or args.variance_threshold
+            if variable_factors or variance_threshold
             else f"{output_file_prefix}_LMM_results_Ucontext.tsv"
         )
 
         results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+        QQplot(results.p_value, savefig = os.path.join(output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"))
 
         if qval_threshold is not None:
-            results_sign = FDR_correction(results, cut_off=qval_threshold)
+            results_sign_context = FDR_correction(results, cut_off=qval_threshold)
             filename_sign = (
                 f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
-                if args.variable_factors or args.variance_threshold
+                if variable_factors or variance_threshold
                 else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
             )
-            results_sign.to_csv(
+            results_sign_context.to_csv(
                 os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
             )
 
@@ -359,16 +356,24 @@ def run_LIVI_genetic_association_testing(
         filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
 
         results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+        QQplot(results.p_value, savefig = os.path.join(output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"))
+        
         if qval_threshold is not None:
-            results_sign = FDR_correction(results, cut_off=qval_threshold)
+            results_sign_persistent = FDR_correction(results, cut_off=qval_threshold)
             filename_sign = (
                 f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
             )
-            results_sign.to_csv(
+            results_sign_persistent.to_csv(
                 os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
             )
 
         print("----- Done ----- \n")
+    
+    if return_associations:
+        if V_persistent is not None:
+            return results_sign_context, results_sign_persistent
+        else:
+            return results_sign_context
 
 
 def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.DataFrame:
@@ -683,6 +688,8 @@ if __name__ == "__main__":
         output_file_prefix=of_prefix,
         covariates=covariates,
         quantile_norm=args.quantile_normalise_U,
+        variance_threshold=args.variance_threshold,
+        variable_factors=args.variable_factors,
         qval_threshold=args.multiple_testing_threshold
         if args.multiple_testing_threshold
         else None,
