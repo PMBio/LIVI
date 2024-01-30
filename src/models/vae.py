@@ -210,6 +210,7 @@ class LIVI2_Decoder(nn.Module):
         layer_norm: bool,
         n_gxc_factors: int,
         n_persistent_factors: int,
+        hierarchical_decoder: bool = True,
         pretrain_VAE: bool = True,
         pretrain_G: bool = False,
         batch_norm: bool = False,
@@ -248,22 +249,26 @@ class LIVI2_Decoder(nn.Module):
             device=self.device,
         )
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
-
-        self.context_decoder = create_mlp(
-            input_size=self._z_dim * self._num_genetic_factors,
-            output_size=self._x_dim,
-            hidden_dims=[],
-            layer_norm=layer_norm,
-            device=self.device,
-        )
-
-        self.persistent_decoder = create_mlp(
-            input_size=self._num_persistent_factors,
-            output_size=self._x_dim,
-            hidden_dims=[],
-            layer_norm=layer_norm,
-            device=self.device,
-        )
+        
+        if self._num_genetic_factors != 0:
+            self.context_decoder = create_mlp(
+                input_size=self._z_dim * self._num_genetic_factors if hierarchical_decoder else self._num_genetic_factors,
+                output_size=self._x_dim,
+                hidden_dims=[],
+                layer_norm=layer_norm,
+                device=self.device,
+            )
+        if self._num_persistent_factors != 0:
+            self.persistent_decoder = create_mlp(
+                input_size=self._num_persistent_factors,
+                output_size=self._x_dim,
+                hidden_dims=[],
+                layer_norm=layer_norm,
+                device=self.device,
+            )
+            
+        if self.batch_norm:
+            self.BN_decoder = nn.BatchNorm1d(self._x_dim, device=self.device)
 
     @property
     def pretrain_VAE(self):
@@ -284,8 +289,8 @@ class LIVI2_Decoder(nn.Module):
     def forward(
         self,
         z: torch.Tensor,
-        GxC: torch.Tensor,
-        persistent_G: torch.Tensor,
+        GxC: Union[torch.Tensor, None],
+        persistent_G: Union[torch.Tensor, None],
         size_factor: torch.Tensor,
         batch_effect: Union[torch.Tensor, None],
         donor_sex_effect: Union[torch.Tensor, None],
@@ -296,14 +301,14 @@ class LIVI2_Decoder(nn.Module):
             decoder_out = decoder_out + batch_effect
         if donor_sex_effect is not None:
             decoder_out = decoder_out + donor_sex_effect
-        if not self.pretrain_VAE:
+        if not self.pretrain_VAE and self._num_persistent_factors != 0 and persistent_G is not None:
             y_add = self.persistent_decoder(persistent_G)
             decoder_out = decoder_out + y_add
-            if not self.pretrain_G:
-                y_gc = self.context_decoder(GxC)
-                decoder_out = decoder_out + y_gc
+        if not self.pretrain_G and self._num_genetic_factors != 0 and GxC is not None:
+            y_gc = self.context_decoder(GxC)
+            decoder_out = decoder_out + y_gc
         if self.batch_norm:
-            decoder_out = nn.BatchNorm1d(self.x_dim, device=self.device)(decoder_out)
+            decoder_out = self.BN_decoder(decoder_out)
         mean = F.softmax(decoder_out, dim=-1) * size_factor
         probs = mean / (mean + total_count)
 
