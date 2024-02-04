@@ -31,3 +31,5 @@ pandas_plink
 multipy @ git+https://github.com/puolival/multipy
 matplotlib-venn==0.11.10
 gseapy==1.1.1
+plotnine==0.12.4
+plotnine-prism==0.3.0
