@@ -79,7 +79,7 @@ def LMM_test_feature(
     feature_phenotype = feature_phenotype.dropna()
 
     if covariates_df.empty:
-        covariates_matrix = np.zeros(feature_phenotype.shape[0], 1)
+        covariates_matrix = np.ones(feature_phenotype.shape[0], 1)
     else:
         covariates_matrix = covariates_df.loc[
             covariates_df.index.isin(feature_phenotype.index)
@@ -142,7 +142,6 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
     covariates = pd.DataFrame(index=metadata[args.individual_column].unique())
     if args.batch_column is not None:
         metadata[args.batch_column] = metadata[args.batch_column].astype(np.int32)
-        metadata[args.batch_column].replace({0: -1}, inplace=True)
         # adata.obs[args.batch_column] = pd.Categorical(adata.obs[args.batch_column])
         covariates = covariates.merge(
             metadata.filter([args.individual_column, args.batch_column])
@@ -550,9 +549,10 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in U context do not match individual IDs in the genotype matrix."
             )
-        U_context.columns = [
-            f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
-        ]
+        ## Define factor names during inference instead
+        # U_context.columns = [
+        #     f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
+        # ]
     else:
         U_context = None
 
@@ -570,9 +570,9 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in V_persistent do not match individual IDs in the genotype matrix."
             )
-        V_persistent.columns = [
-            f"Individual_Persistent_Factor{i}" for i in range(1, V_persistent.shape[1] + 1)
-        ]
+        # V_persistent.columns = [
+        #     f"Individual_Persistent_Factor{i}" for i in range(1, V_persistent.shape[1] + 1)
+        # ]
     else:
         V_persistent = None
     # base_decoder = [re.search("(.*decoder_basal.*sv)", f) for f in files if re.search(".*decoder_basal.*sv", f) is not None][0].groups()[0]
