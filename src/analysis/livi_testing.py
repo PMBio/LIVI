@@ -1,5 +1,5 @@
 ### Run:
-# python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise_U --multiple_testing_threshold --output_dir --output_file_prefix
+# python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise --multiple_testing_threshold --output_dir --output_file_prefix
 ###
 
 import argparse
@@ -12,6 +12,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from glimix_core.lmm import LMM
 from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
@@ -156,7 +157,7 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
         metadata[args.sex_column].replace(
             {
                 metadata[args.sex_column].cat.categories[0]: 1,
-                metadata[args.sex_column].cat.categories[1]: -1,
+                metadata[args.sex_column].cat.categories[1]: 0,
             },
             inplace=True,
         )
@@ -311,7 +312,7 @@ def run_LIVI_genetic_association_testing(
                 output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"
             ),
         )
-
+        plt.close()
         if qval_threshold is not None:
             results_sign_context = FDR_correction(results, cut_off=qval_threshold)
             filename_sign = (
@@ -352,7 +353,7 @@ def run_LIVI_genetic_association_testing(
             else:
                 results = pd.concat([results, results_factor], axis=0)
 
-        if args.plink:
+        if bim is not None:
             results = results.merge(
                 bim.filter(["snp", "a1"]).rename(
                     columns={"snp": "SNP_id", "a1": "assessed_allele"}
@@ -369,7 +370,7 @@ def run_LIVI_genetic_association_testing(
                 output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"
             ),
         )
-
+        plt.close()
         if qval_threshold is not None:
             results_sign_persistent = FDR_correction(results, cut_off=qval_threshold)
             filename_sign = (
@@ -632,7 +633,7 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
-        "--quantile_normalise_U",
+        "--quantile_normalise",
         action="store_true",
         help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
         default=False,
@@ -702,7 +703,7 @@ if __name__ == "__main__":
         output_dir=od,
         output_file_prefix=of_prefix,
         covariates=covariates,
-        quantile_norm=args.quantile_normalise_U,
+        quantile_norm=args.quantile_normalise,
         variance_threshold=args.variance_threshold,
         variable_factors=args.variable_factors,
         qval_threshold=args.multiple_testing_threshold
