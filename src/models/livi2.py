@@ -112,7 +112,7 @@ class LIVI2_experimental(pl.LightningModule):
             z_dim=z_dim,
             x_dim=x_dim,
             decoder_hidden_dims=[],
-            layer_norm=layer_norm,
+            layer_norm=True,
             n_gxc_factors=n_gxc_factors,
             n_persistent_factors=n_persistent_factors,
             pretrain_VAE=self.pretrain_mode,
@@ -436,7 +436,7 @@ class LIVI2_experimental(pl.LightningModule):
 
 class LIVI2_freeze(LIVI2_experimental):
     """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training is completed. 
-        Then only the individual embeddings are learned.
+    Then only the individual embeddings are learned.
     """
 
     def __init__(
@@ -609,7 +609,7 @@ class LIVI2_freeze(LIVI2_experimental):
 
     def freeze_vae(self, mode: bool):
         """Freezes VAE, discriminator and covariate embeddings parameters, after 
-            the number of VAE and discriminator warm-up epochs has been completed.
+        the number of VAE and discriminator warm-up epochs has been completed.
         """
 
         self.frozen = mode
@@ -660,17 +660,17 @@ class LIVI2_freeze(LIVI2_experimental):
 
 
     def on_train_epoch_end(self):
-
-         """ After each epoch checks whether the number of warm-up epochs for the VAE, discriminator and persistent G has been reached. """
-        
+        """ After each epoch checks whether the number of warm-up epochs for the VAE,
+        discriminator and persistent G has been reached. 
+        """
         if self.current_epoch == self.hparams.warmup_epochs_vae:
             self.set_pretrain_mode(False)
             print("VAE pretraining completed.")
-
+            
         if self.current_epoch == self.hparams.warmup_epochs_vae+self.hparams.train_epochs_adversary:
             self.freeze_vae(True)
             print("VAE and Adversary training completed.")
-        
+            
         if self.current_epoch == self.hparams.warmup_epochs_vae+self.hparams.train_epochs_adversary+self.warmup_epochs_G:
             print("Start learning GxC effects.")
             self.set_pretrain_G_mode(False)
