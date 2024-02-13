@@ -1,18 +1,17 @@
 ### Run:
-# python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise_U --multiple_testing_threshold --output_dir --output_file_prefix
+# python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise --multiple_testing_threshold --output_dir --output_file_prefix
 ###
 
 import argparse
 import sys
 sys.path.append("/data/danai/scripts/LIVI/")
-from src.analysis.plotting import QQplot
-
 import os
 import re
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from glimix_core.lmm import LMM
 from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
@@ -20,7 +19,7 @@ from pandas_plink import read_plink
 from scipy.stats import chi2, norm
 from sklearn.preprocessing import StandardScaler, quantile_transform
 
-
+from src.analysis.plotting import QQplot
 
 
 def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 1) -> np.ndarray:
@@ -80,7 +79,7 @@ def LMM_test_feature(
     feature_phenotype = feature_phenotype.dropna()
 
     if covariates_df.empty:
-        covariates_matrix = np.zeros(feature_phenotype.shape[0], 1)
+        covariates_matrix = np.ones(feature_phenotype.shape[0], 1)
     else:
         covariates_matrix = covariates_df.loc[
             covariates_df.index.isin(feature_phenotype.index)
@@ -92,7 +91,9 @@ def LMM_test_feature(
     ].values  # individuals x G_variable
 
     if quantile_norm:
-        phenotype = quantile_transform(feature_phenotype.values.reshape(-1,1), output_distribution="normal")
+        phenotype = quantile_transform(
+            feature_phenotype.values.reshape(-1, 1), output_distribution="normal"
+        )
     else:
         phenotype = feature_phenotype
 
@@ -141,7 +142,6 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
     covariates = pd.DataFrame(index=metadata[args.individual_column].unique())
     if args.batch_column is not None:
         metadata[args.batch_column] = metadata[args.batch_column].astype(np.int32)
-        metadata[args.batch_column].replace({0: -1}, inplace=True)
         # adata.obs[args.batch_column] = pd.Categorical(adata.obs[args.batch_column])
         covariates = covariates.merge(
             metadata.filter([args.individual_column, args.batch_column])
@@ -156,7 +156,7 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
         metadata[args.sex_column].replace(
             {
                 metadata[args.sex_column].cat.categories[0]: 1,
-                metadata[args.sex_column].cat.categories[1]: -1,
+                metadata[args.sex_column].cat.categories[1]: 0,
             },
             inplace=True,
         )
@@ -220,20 +220,19 @@ def run_LIVI_genetic_association_testing(
     quantile_norm (bool): Flag indicating whether quantile normalization should be
         applied to the phenotype.
     qval_threshold (Optional[float]): Storey q-value threshold to call an association significant.
-    
+
     Returns
     -------
     results_sign_context (pd.DataFrame): Significant SNP associations with the cell-state-specific genetic embedding.
     results_sign_persistent (pd.DataFrame): Significant SNP associations with the persistent genetic embedding, if there is one.
-    
     """
 
     if return_associations and qval_threshold is None:
         qval_threshold = 0.05
-        
+
     if covariates is not None:
         GT_matrix = GT_matrix.loc[covariates.index]
-     #   U_context = U_context.loc[covariates.index]
+    #   U_context = U_context.loc[covariates.index]
 
     if Kinship is not None:
         kinship = Kinship
@@ -246,12 +245,11 @@ def run_LIVI_genetic_association_testing(
     else:
         QS = economic_qs_linear(GT_matrix)
 
-        
     if U_context is not None:
         if covariates is not None:
             U_context = U_context.loc[covariates.index]
         print("\n ----- Running genetic association testing for U_context ----- \n")
-        
+
         results = pd.DataFrame(
             columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
         )
@@ -275,6 +273,7 @@ def run_LIVI_genetic_association_testing(
             U_context = U_context
 
         for f in U_context.columns:
+            print(f"Testing: {f}")
             results_factor = LMM_test_feature(
                 feature_id=f,
                 phenotype_df=U_context.T,
@@ -283,7 +282,9 @@ def run_LIVI_genetic_association_testing(
                 QS=QS,
                 quantile_norm=quantile_norm,
             )
-            results_factor.rename(columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True)
+            results_factor.rename(
+                columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
+            )
 
             if results.empty:
                 results = results_factor
@@ -292,7 +293,9 @@ def run_LIVI_genetic_association_testing(
 
         if bim is not None:
             results = results.merge(
-                bim.filter(["snp", "a1"]).rename(columns={"snp": "SNP_id", "a1": "assessed_allele"}),
+                bim.filter(["snp", "a1"]).rename(
+                    columns={"snp": "SNP_id", "a1": "assessed_allele"}
+                ),
                 on="SNP_id",
                 how="left",
             )
@@ -303,8 +306,13 @@ def run_LIVI_genetic_association_testing(
         )
 
         results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-        QQplot(results.p_value, savefig = os.path.join(output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"))
-
+        QQplot(
+            results.p_value,
+            savefig=os.path.join(
+                output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"
+            ),
+        )
+        plt.close()
         if qval_threshold is not None:
             results_sign_context = FDR_correction(results, cut_off=qval_threshold)
             filename_sign = (
@@ -328,6 +336,7 @@ def run_LIVI_genetic_association_testing(
         )
 
         for f in V_persistent.columns:
+            print(f"Testing: {f}")
             results_factor = LMM_test_feature(
                 feature_id=f,
                 phenotype_df=V_persistent.T,
@@ -339,13 +348,13 @@ def run_LIVI_genetic_association_testing(
             results_factor.rename(
                 columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
             )
-            
+
             if results.empty:
                 results = results_factor
             else:
                 results = pd.concat([results, results_factor], axis=0)
 
-        if args.plink:
+        if bim is not None:
             results = results.merge(
                 bim.filter(["snp", "a1"]).rename(
                     columns={"snp": "SNP_id", "a1": "assessed_allele"}
@@ -356,8 +365,13 @@ def run_LIVI_genetic_association_testing(
         filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
 
         results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-        QQplot(results.p_value, savefig = os.path.join(output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"))
-        
+        QQplot(
+            results.p_value,
+            savefig=os.path.join(
+                output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"
+            ),
+        )
+        plt.close()
         if qval_threshold is not None:
             results_sign_persistent = FDR_correction(results, cut_off=qval_threshold)
             filename_sign = (
@@ -368,7 +382,7 @@ def run_LIVI_genetic_association_testing(
             )
 
         print("----- Done ----- \n")
-    
+
     if return_associations:
         if V_persistent is not None:
             return results_sign_context, results_sign_persistent
@@ -530,17 +544,20 @@ def validate_and_read_passed_args(
     ]
     if len(U_context) > 0:
         U_context = U_context[0].groups()[0]
-        U_context = pd.read_csv(os.path.join(args.model_output_dir, U_context), index_col=0, sep="\t")
+        U_context = pd.read_csv(
+            os.path.join(args.model_output_dir, U_context), index_col=0, sep="\t"
+        )
         if U_context.loc[U_context.index.isin(GT_matrix_standardised.index)].shape[0] == 0:
             raise ValueError(
                 "Individual IDs in U context do not match individual IDs in the genotype matrix."
             )
-        U_context.columns = [
-            f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
-        ]
+        ## Define factor names during inference instead
+        # U_context.columns = [
+        #     f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
+        # ]
     else:
         U_context = None
-        
+
     V_persistent = [
         re.match("(.*persistent_effects.tsv)", f)
         for f in files
@@ -555,9 +572,9 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in V_persistent do not match individual IDs in the genotype matrix."
             )
-        V_persistent.columns = [
-            f"Individual_Persistent_Factor{i}" for i in range(1, V_persistent.shape[1] + 1)
-        ]
+        # V_persistent.columns = [
+        #     f"Individual_Persistent_Factor{i}" for i in range(1, V_persistent.shape[1] + 1)
+        # ]
     else:
         V_persistent = None
     # base_decoder = [re.search("(.*decoder_basal.*sv)", f) for f in files if re.search(".*decoder_basal.*sv", f) is not None][0].groups()[0]
@@ -617,7 +634,7 @@ if __name__ == "__main__":
         type=str,
     )
     parser.add_argument(
-        "--quantile_normalise_U",
+        "--quantile_normalise",
         action="store_true",
         help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
         default=False,
@@ -655,11 +672,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output_dir",
+        "-od",
         help="Absolute path of the directory to save the testing results.",
         type=str,
     )
     parser.add_argument(
         "--output_file_prefix",
+        "-ofp",
         help="Common prefix of the output results files.",
         type=str,
     )
@@ -687,7 +706,7 @@ if __name__ == "__main__":
         output_dir=od,
         output_file_prefix=of_prefix,
         covariates=covariates,
-        quantile_norm=args.quantile_normalise_U,
+        quantile_norm=args.quantile_normalise,
         variance_threshold=args.variance_threshold,
         variable_factors=args.variable_factors,
         qval_threshold=args.multiple_testing_threshold
