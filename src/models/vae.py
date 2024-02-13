@@ -215,7 +215,6 @@ class LIVI2_Decoder(nn.Module):
         pretrain_G: bool = False,
         batch_norm: bool = False,
         device: str = "cuda",
-        #     **kwargs,
     ):
         """Initialize module.
 
@@ -234,11 +233,6 @@ class LIVI2_Decoder(nn.Module):
         self._pretrain_vae = pretrain_VAE
         self._pretrain_G = pretrain_G
         self.batch_norm = batch_norm
-        # self._num_genetic_factors = kwargs["n_gxc_factors"]
-        # self._num_persistent_factors = kwargs["n_persistent_factors"]
-        # self._pretrain_vae = kwargs["pretrain_VAE"]
-        # self._pretrain_G = kwargs["pretrain_G"]
-        # self.batch_norm = kwargs["batch_norm"]
         self.device = device
 
         self.mean = create_mlp(
