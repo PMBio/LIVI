@@ -4,7 +4,6 @@
 
 import argparse
 import sys
-
 sys.path.append("/data/danai/scripts/LIVI/")
 import os
 import re
@@ -274,6 +273,7 @@ def run_LIVI_genetic_association_testing(
             U_context = U_context
 
         for f in U_context.columns:
+            print(f"Testing: {f}")
             results_factor = LMM_test_feature(
                 feature_id=f,
                 phenotype_df=U_context.T,
@@ -336,6 +336,7 @@ def run_LIVI_genetic_association_testing(
         )
 
         for f in V_persistent.columns:
+            print(f"Testing: {f}")
             results_factor = LMM_test_feature(
                 feature_id=f,
                 phenotype_df=V_persistent.T,
@@ -671,11 +672,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--output_dir",
+        "-od",
         help="Absolute path of the directory to save the testing results.",
         type=str,
     )
     parser.add_argument(
         "--output_file_prefix",
+        "-ofp",
         help="Common prefix of the output results files.",
         type=str,
     )
