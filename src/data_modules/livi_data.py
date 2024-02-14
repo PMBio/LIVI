@@ -138,15 +138,15 @@ class LIVIDataset(Dataset):
         if issparse(x):
             x = x.todense()
         data["x"] = torch.tensor(np.asarray(x), dtype=torch.float)
-        data["y"] = torch.tensor(self.y[idx].reshape(-1, 1), dtype=torch.long)
+        data["y"] = torch.tensor(self.y[idx], dtype=torch.long)
         if self.use_size_factor:
             data["size_factor"] = torch.tensor(
                 self.size_factor[idx].reshape(-1, 1), dtype=torch.float
             )
         if self.donor_sex_key:
-            data["dsex"] = torch.tensor(self.dsex[idx].reshape(-1, 1), dtype=torch.long)
+            data["dsex"] = torch.tensor(self.dsex[idx], dtype=torch.long)
         if self.experimental_batch_key:
-            data["eb"] = torch.tensor(self.eb[idx].reshape(-1, 1), dtype=torch.long)
+            data["eb"] = torch.tensor(self.eb[idx], dtype=torch.long)
         return data
 
     def __len__(self):
