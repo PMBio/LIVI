@@ -428,9 +428,7 @@ class LIVI2_experimental(pl.LightningModule):
 
 
 class LIVI2_freeze(LIVI2_experimental):
-    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training
-    is completed.
-
+    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training is completed.
     Then only the individual embeddings are learned.
     """
 
