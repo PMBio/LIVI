@@ -265,7 +265,7 @@ def run_LIVI_genetic_association_testing(
             U_context = pd.DataFrame(
                 U_context.to_numpy()[:, variable_factors],
                 index=U_context.index,
-                columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
+                columns=[f"CxG_Factor{f+1}" for f in variable_factors],
             )
         elif variance_threshold is not None:
             variable_factors = np.where(
@@ -274,7 +274,7 @@ def run_LIVI_genetic_association_testing(
             U_context = pd.DataFrame(
                 U_context.to_numpy()[:, variable_factors],
                 index=U_context.index,
-                columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
+                columns=[f"CxG_Factor{f+1}" for f in variable_factors],
             )
         else:
             U_context = U_context
@@ -558,10 +558,6 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in U context do not match individual IDs in the genotype matrix."
             )
-        ## Define factor names during inference instead
-        # U_context.columns = [
-        #     f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
-        # ]
     else:
         U_context = None
 
