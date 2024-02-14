@@ -144,9 +144,9 @@ class LIVIDataset(Dataset):
                 self.size_factor[idx].reshape(-1, 1), dtype=torch.float
             )
         if self.donor_sex_key:
-            data["dsex"] = torch.tensor(self.dsex[idx].reshape(-1, 1), dtype=torch.float)
+            data["dsex"] = torch.tensor(self.dsex[idx].reshape(-1, 1), dtype=torch.long)
         if self.experimental_batch_key:
-            data["eb"] = torch.tensor(self.eb[idx].reshape(-1, 1), dtype=torch.float)
+            data["eb"] = torch.tensor(self.eb[idx].reshape(-1, 1), dtype=torch.long)
         return data
 
     def __len__(self):
