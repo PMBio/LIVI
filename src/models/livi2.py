@@ -378,8 +378,8 @@ class LIVI2_experimental(pl.LightningModule):
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
             "batch_embedding": batch_embedding,
-            "context_effects": U,
-            "context_decoder": context_decoder,
+            "CxG_effects": U,
+            "CxG_decoder": context_decoder,
             "Bernoulli_logits": (
                 self.bernoulli_logits if not self.hparams.hierarchical_model else None
             ),
