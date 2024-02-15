@@ -21,7 +21,7 @@ from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
 from scipy.stats import probplot
 from tqdm import tqdm
 
-from src.analysis._utils import add_livi_results_to_adata_obs, compute_umap
+from src.analysis._utils import add_livi_umaps_to_cell_metadata, compute_umap
 
 sc.settings.set_figure_params(
     dpi=100, dpi_save=400, facecolor="white", transparent=True, figsize=(7, 6)
