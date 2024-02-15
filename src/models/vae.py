@@ -246,9 +246,11 @@ class LIVI2_Decoder(nn.Module):
 
         if self._num_genetic_factors != 0:
             self.context_decoder = create_mlp(
-                input_size=self._z_dim * self._num_genetic_factors
-                if hierarchical_decoder
-                else self._num_genetic_factors,
+                input_size=(
+                    self._z_dim * self._num_genetic_factors
+                    if hierarchical_decoder
+                    else self._num_genetic_factors
+                ),
                 output_size=self._x_dim,
                 hidden_dims=[],
                 layer_norm=layer_norm,
@@ -421,11 +423,10 @@ class VAE(pl.LightningModule):
         return log_lik - kl_div
 
     def prepare_batch(self, batch):
+        x, y = batch["x"], batch["y"]
         if self.likelihood == "nb":
-            x, y, size_factor = batch
-            # TODO log transform ? size-factor for encoder?
+            size_factor = batch["size_factor"]
         else:
-            x, y = batch
             size_factor = None
             x = torch.log1p(x)
         return x, y, size_factor
