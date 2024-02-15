@@ -1,17 +1,24 @@
+import pyrootutils
+
+root = pyrootutils.setup_root(
+    search_from=__file__,
+    indicator=[".git", "pyproject.toml", "setup.py"],
+    pythonpath=True,
+    dotenv=True,
+)
+
 ### Run:
 # python livi_testing.py --model_output_dir --cell_metadata_file -id -GT_matrix --plink -K --batch_column --age_column --sex_column --quantile_normalise --multiple_testing_threshold --output_dir --output_file_prefix
 ###
 
 import argparse
-import sys
-sys.path.append("/data/danai/scripts/LIVI/")
 import os
 import re
 from typing import List, Optional, Tuple, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 from glimix_core.lmm import LMM
 from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
@@ -258,7 +265,7 @@ def run_LIVI_genetic_association_testing(
             U_context = pd.DataFrame(
                 U_context.to_numpy()[:, variable_factors],
                 index=U_context.index,
-                columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
+                columns=[f"CxG_Factor{f+1}" for f in variable_factors],
             )
         elif variance_threshold is not None:
             variable_factors = np.where(
@@ -267,7 +274,7 @@ def run_LIVI_genetic_association_testing(
             U_context = pd.DataFrame(
                 U_context.to_numpy()[:, variable_factors],
                 index=U_context.index,
-                columns=[f"Individual_Interaction_Factor{f+1}" for f in variable_factors],
+                columns=[f"CxG_Factor{f+1}" for f in variable_factors],
             )
         else:
             U_context = U_context
@@ -551,10 +558,6 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in U context do not match individual IDs in the genotype matrix."
             )
-        ## Define factor names during inference instead
-        # U_context.columns = [
-        #     f"Individual_Interaction_Factor{i}" for i in range(1, U_context.shape[1] + 1)
-        # ]
     else:
         U_context = None
 

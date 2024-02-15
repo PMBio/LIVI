@@ -378,8 +378,8 @@ class LIVI2_experimental(pl.LightningModule):
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
             "batch_embedding": batch_embedding,
-            "context_effects": U,
-            "context_decoder": context_decoder,
+            "CxG_effects": U,
+            "CxG_decoder": context_decoder,
             "Bernoulli_logits": (
                 self.bernoulli_logits if not self.hparams.hierarchical_model else None
             ),
@@ -428,9 +428,7 @@ class LIVI2_experimental(pl.LightningModule):
 
 
 class LIVI2_freeze(LIVI2_experimental):
-    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training
-    is completed.
-
+    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training is completed.
     Then only the individual embeddings are learned.
     """
 
