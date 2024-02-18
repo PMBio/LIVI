@@ -137,7 +137,13 @@ class LIVIDataset(Dataset):
         x = x[idx, :]
         if issparse(x):
             x = x.todense()
-        data["x"] = torch.tensor(np.asarray(x), dtype=torch.float)
+        x = np.asarray(x)
+        if self.strict:
+            if np.any(np.not_equal(np.mod(x, 1), 0)) and self.use_size_factor:
+                raise TypeError(
+                    "LIVI expects raw count data as input, but non-integers were found."
+                )
+        data["x"] = torch.tensor(x, dtype=torch.float)
         data["y"] = torch.tensor(self.y[idx], dtype=torch.long)
         if self.use_size_factor:
             data["size_factor"] = torch.tensor(
