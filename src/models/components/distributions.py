@@ -1,6 +1,5 @@
 """Robust normal distribution."""
 
-
 from torch.distributions import Normal
 
 

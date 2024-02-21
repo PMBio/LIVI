@@ -316,17 +316,11 @@ class LIVIadvBatchSex(LIVIadv):
         self.save_hyperparameters()
 
     def prepare_batch(self, batch):
-        x = None
-        y = None
-        dsex = None
-        eb = None
-        size_factor = None
-
-        if self.hparams.donor_sex_dim is not None:
-            x, y, dsex, eb, size_factor = batch
-        else:
-            x, y, eb, size_factor = batch
-
+        x = batch["x"]
+        y = batch["y"]
+        dsex = None if self.hparams.donor_sex_dim is None else batch["dsex"]
+        eb = batch["eb"]
+        size_factor = batch["size_factor"]
         return x, y, dsex, eb, size_factor
 
     def compute_elbo(
