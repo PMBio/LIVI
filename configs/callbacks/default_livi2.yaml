@@ -1,0 +1,27 @@
+defaults:
+  - livi_checkpoint.yaml
+  - livi_early_stopping.yaml
+  - model_summary.yaml
+  - device_monitor.yaml
+  - rich_progress_bar.yaml
+  - _self_
+
+livi_checkpoint:
+  _target_: src.callbacks.livi_checkpoint.LIVI_Checkpoint
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch_{epoch:04d}"
+  monitor: "hp_metric"
+  save_last: true
+  auto_insert_metric_name: True
+  
+livi_early_stopping:
+  _target_: src.callbacks.livi_early_stopping.LIVI_EarlyStopping
+  monitor: "hp_metric"
+  min_delta: 1e-5
+  patience: 20
+  verbose: False
+  strict: True
+  check_on_train_epoch_end: True
+
+model_summary:
+  max_depth: -1
