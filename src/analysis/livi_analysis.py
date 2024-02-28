@@ -33,7 +33,12 @@ from src.analysis.livi_testing import (
     run_LIVI_genetic_association_testing,
     set_up_covariates,
 )
-from src.analysis.plotting import visualise_cell_state_latent
+from src.analysis.plotting import (
+    cell_state_factors_heatmap,
+    plot_A_sparsity,
+    plot_CxG_factor_cor,
+    visualise_cell_state_latent,
+)
 from src.data_modules.livi_data import LIVIDataModule
 from src.models.livi2 import LIVI2_experimental, LIVI2_freeze
 
@@ -187,7 +192,7 @@ def validate_and_read_passed_args(
     )
 
 
-def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args, return_A=True):
+def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     """Model inference. Get latent space and individual embeddings for the input data.
 
     Parameters
@@ -234,7 +239,29 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args, return_A=True
         index=True,
     )
 
-    visualise_cell_state_latent(zbase, adata.obs, output_dir, of_prefix, args)
+    visualise_cell_state_latent(
+        z=zbase,
+        cell_metadata=adata.obs,
+        output_dir=output_dir,
+        of_prefix=of_prefix,
+        format="png",
+        args=args,
+    )
+
+    cell_state_factors_heatmap(
+        cell_state_factors=zbase.values,
+        cell_idx=range(adata.obs.shape[0]),
+        cell_metadata=adata.obs,
+        celltype_column=args.celltype_column,
+        row_cluster=True,
+        column_cluster=False,
+        metric="euclidean",
+        factors=None,
+        zscore=None,
+        color_map="vlag",
+        savefig=os.path.join(output_dir, f"{of_prefix}.png"),
+        return_df=False,
+    )
 
     cell_state_decoder = livi_results["cell-state_decoder"].detach().numpy()
     cell_state_decoder = pd.DataFrame(
@@ -327,20 +354,21 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args, return_A=True
 
     if livi_results["Bernoulli_logits"] is not None and not LIVI_model.hparams.hierarchical_model:
         bernoulli_logits = livi_results["Bernoulli_logits"].detach().numpy()
-        if return_A:
-            A = torch.distributions.RelaxedBernoulli(
-                temperature=0.01, logits=livi_results["Bernoulli_logits"]
-            ).rsample()
-            A = torch.where(A < 0.5, 0, 1).to(torch.float).detach().numpy()
-            A = pd.DataFrame(A, index=zbase.columns, columns=U_context.columns)
-            A.to_csv(
-                os.path.join(output_dir, f"{of_prefix}_A_design_matrix.tsv"),
-                sep="\t",
-                header=True,
-                index=True,
-            )
+
+        A = torch.distributions.RelaxedBernoulli(
+            temperature=0.01, logits=livi_results["Bernoulli_logits"]
+        ).rsample()
+        A = torch.where(A < 0.5, 0, 1).to(torch.float).detach().numpy()
+        A = pd.DataFrame(A, index=zbase.columns, columns=U_context.columns)
+        A.to_csv(
+            os.path.join(output_dir, f"{of_prefix}_A_design_matrix.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
     else:
         bernoulli_logits = None
+        A = None
 
     return (
         zbase,
@@ -350,11 +378,75 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args, return_A=True
         V_persistent,
         persistent_decoder,
         bernoulli_logits,
+        A,
     )
 
 
 def compare_findings(results_sign_context, results_sign_persistent, ground_truth):
     raise NotImplementedError
+
+
+def main(args):
+    (
+        output_dir,
+        of_prefix,
+        LIVI_model,
+        adata,
+        GT_matrix_standardised,
+        bim,
+        kinship,
+    ) = validate_and_read_passed_args(args)
+
+    print("\n-------- Performing inference --------\n")
+
+    (
+        zbase,
+        cell_state_decoder,
+        U_context,
+        context_decoder,
+        V_persistent,
+        persistent_decoder,
+        bernoulli_logits,
+        A,
+    ) = LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args)
+
+    print("\n-------- Running genetic association testing --------\n")
+
+    covariates = set_up_covariates(args, adata.obs)
+
+    associations = run_LIVI_genetic_association_testing(
+        U_context=U_context,
+        V_persistent=V_persistent,
+        GT_matrix=GT_matrix_standardised,
+        bim=bim,
+        Kinship=kinship,
+        output_dir=output_dir,
+        output_file_prefix=of_prefix,
+        covariates=covariates,
+        quantile_norm=args.quantile_normalise,
+        variance_threshold=args.variance_threshold,
+        variable_factors=args.variable_factors,
+        qval_threshold=args.multiple_testing_threshold
+        if args.multiple_testing_threshold
+        else None,
+        return_associations=True,
+    )
+
+    associations = associations[0] if isinstance(associations, tuple) else associations
+
+    if A is not None:
+        plot_A_sparsity(
+            A=A,
+            associated_factors=associations.Factor.unique(),
+            plot_title=f"{of_prefix}\n $N$ fSNPS: {associations.SNP_id.nunique()}\n $N$ CxG factors: {associations.Factor.nunique()}",
+            savefig=os.path.join(output_dir, of_prefix),
+        )
+
+    plot_CxG_factor_cor(
+        U=U_context,
+        associated_factors=associations.Factor.unique(),
+        savefig=os.path.join(output_dir, of_prefix),
+    )
 
 
 if __name__ == "__main__":
@@ -469,46 +561,4 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    (
-        output_dir,
-        of_prefix,
-        LIVI_model,
-        adata,
-        GT_matrix_standardised,
-        bim,
-        kinship,
-    ) = validate_and_read_passed_args(args)
-
-    print("\n-------- Performing inference --------\n")
-
-    (
-        zbase,
-        cell_state_decoder,
-        U_context,
-        context_decoder,
-        V_persistent,
-        persistent_decoder,
-        bernoulli_logits,
-    ) = LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args)
-
-    print("\n-------- Running genetic association testing --------\n")
-
-    covariates = set_up_covariates(args, adata.obs)
-
-    run_LIVI_genetic_association_testing(
-        U_context=U_context,
-        V_persistent=V_persistent,
-        GT_matrix=GT_matrix_standardised,
-        bim=bim,
-        Kinship=kinship,
-        output_dir=output_dir,
-        output_file_prefix=of_prefix,
-        covariates=covariates,
-        quantile_norm=args.quantile_normalise,
-        variance_threshold=args.variance_threshold,
-        variable_factors=args.variable_factors,
-        qval_threshold=args.multiple_testing_threshold
-        if args.multiple_testing_threshold
-        else None,
-        return_associations=False,
-    )
+    main(args)

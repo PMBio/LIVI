@@ -2,6 +2,7 @@ import argparse
 import os
 import re
 import sys
+from textwrap import wrap
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -18,7 +19,7 @@ from matplotlib import cm, colormaps, colors
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredText
 from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
-from scipy.stats import probplot
+from scipy.stats import probplot, zscore
 from tqdm import tqdm
 
 from src.analysis._utils import add_livi_umaps_to_cell_metadata, compute_umap
@@ -34,6 +35,7 @@ def visualise_cell_state_latent(
     cell_metadata: pd.DataFrame,
     output_dir: str,
     of_prefix: str,
+    format: str,
     args: argparse.Namespace,
 ) -> None:
     """Visualize LIVI's cell-state latent space using UMAP (Uniform Manifold Approximation and
@@ -45,6 +47,7 @@ def visualise_cell_state_latent(
         cell_metadata (pd.DataFrame): DataFrame containing cell metadata.
         output_dir (str): Directory to save the figure.
         of_prefix (str): Prefix for the output figure.
+        format (str): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to.
         args (argparse.Namespace): Parsed command-line arguments; must include the name
         of cell-type and batch columns in cell_metadata.
 
@@ -55,7 +58,7 @@ def visualise_cell_state_latent(
 
     umap_df = compute_umap(z, colnames=["UMAP1", "UMAP2"], add_latent=False)
     umap_df = umap_df.merge(
-        cell_metadata.filter([args.celltype_column, args.batch_column, args.sex_column]),
+        cell_metadata.filter([args.celltype_column, args.batch_column]),
         how="left",
         right_index=True,
         left_index=True,
@@ -70,6 +73,7 @@ def visualise_cell_state_latent(
         ax=axs[0],
         s=3,
         palette="tab20",
+        rasterized=format == "svg",
     )
     axs[0].legend(
         title="Cell type",
@@ -82,7 +86,14 @@ def visualise_cell_state_latent(
         markerscale=3,
     )
     sns.scatterplot(
-        x="UMAP1", y="UMAP2", hue=args.batch_column, data=umap_df, ax=axs[1], s=3, palette="tab20"
+        x="UMAP1",
+        y="UMAP2",
+        hue=args.batch_column,
+        data=umap_df,
+        ax=axs[1],
+        s=3,
+        palette="tab20",
+        rasterized=format == "svg",
     )
     axs[1].legend(
         title="Batch",
@@ -96,7 +107,7 @@ def visualise_cell_state_latent(
     )
     plt.suptitle(f"{os.path.basename(args.model_run_dir)}")
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_cell-state_latent_UMAP.png"),
+        os.path.join(output_dir, f"{of_prefix}_cell-state_latent_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
@@ -108,6 +119,7 @@ def visualise_livi_embeddings(
     cell_metadata: pd.DataFrame,
     output_dir: str,
     of_prefix: str,
+    format: str,
     plot_title: str,
     celltype_column: str,
     batch_column: Optional[str] = None,
@@ -121,6 +133,7 @@ def visualise_livi_embeddings(
         cell_metadata (pd.DataFrame): DataFrame containing cell information.
         output_dir (str): Directory to save the figures.
         of_prefix (str): Prefix for the output figures.
+        format (str): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to.
         plot_title (str): Title for the plots.
         celltype_column (str): Column containing cell type information.
         batch_column (str, optional): Column containing batch information.
@@ -174,6 +187,7 @@ def visualise_livi_embeddings(
         ax=ax1,
         s=3,
         palette="tab20",
+        rasterized=format == "svg",
     )
     ax1.legend(
         title="Cell type",
@@ -194,6 +208,7 @@ def visualise_livi_embeddings(
             ax=ax2,
             s=3,
             palette="tab20",
+            rasterized=format == "svg",
         )
         ax2.legend(
             title="Batch",
@@ -206,7 +221,7 @@ def visualise_livi_embeddings(
         )
     plt.suptitle(plot_title)
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_cell-state_latent_UMAP.png"),
+        os.path.join(output_dir, f"{of_prefix}_cell-state_latent_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
@@ -246,6 +261,7 @@ def visualise_livi_embeddings(
         ax=ax1,
         s=3,
         palette="tab20",
+        rasterized=format == "svg",
     )
     ax1.legend(
         title="Cell type",
@@ -267,6 +283,7 @@ def visualise_livi_embeddings(
                 ax=ax3,
                 s=6,
                 palette="tab20",
+                rasterized=format == "svg",
             )
             ax3.legend(
                 title="Sex",
@@ -288,6 +305,7 @@ def visualise_livi_embeddings(
             ax=ax2,
             s=3,
             palette="tab20",
+            rasterized=format == "svg",
         )
         ax2.legend(
             title="Batch",
@@ -300,7 +318,7 @@ def visualise_livi_embeddings(
         )
     plt.suptitle(plot_title)
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_CxG_latent_UMAP.png"),
+        os.path.join(output_dir, f"{of_prefix}_CxG_latent_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
@@ -347,6 +365,7 @@ def visualise_livi_embeddings(
                 ax=ax2,
                 s=6,
                 palette="tab20",
+                rasterized=format == "svg",
             )
             ax2.legend(
                 title="Sex",
@@ -368,6 +387,7 @@ def visualise_livi_embeddings(
             ax=ax1,
             s=6,
             palette="tab20",
+            rasterized=format == "svg",
         )
         ax1.legend(
             title="Batch",
@@ -380,7 +400,7 @@ def visualise_livi_embeddings(
         )
     plt.suptitle(plot_title)
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_persistent_latent_UMAP.png"),
+        os.path.join(output_dir, f"{of_prefix}_persistent_latent_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
@@ -388,58 +408,54 @@ def visualise_livi_embeddings(
     plt.close()
 
 
-def plot_factors_heatmap(
-    latent_space: np.ndarray,
+def cell_state_factors_heatmap(
+    cell_state_factors: np.ndarray,
     cell_idx: Union[List[int], np.ndarray],
-    metadata_df: pd.DataFrame,
+    cell_metadata: pd.DataFrame,
     celltype_column: str,
     row_cluster: bool,
     column_cluster: bool,
-    donor_column: Union[str, None] = None,
     metric: str = "euclidean",
     factors: Optional[Union[List[int], np.ndarray]] = None,
     zscore: Optional[int] = None,
     color_map: Optional[str] = None,
-    filename: Optional[str] = None,
+    savefig: Optional[str] = None,
+    format: Optional[str] = None,
     return_df: bool = False,
-) -> Union[List[pd.DataFrame], pd.DataFrame, None]:
+) -> Union[pd.DataFrame, None]:
     """Make a heatmap of the (variational) autoencoder (AE) latent space (factors).
 
     Parameters
     ----------
-        latent_space: numpy 2D-array
-            The (V)AE latent space (factors).
-        cell_idx: list or numpy 1D-array
-            Integer-location based indices of the cells in the 'metadata_df'.
-        metadata_df: pandas.DataFrame
-            Dataframe containing information about the cells.
-        celltype_column, donor_column: colname of celltype/donor info in metadata_df
-        factors: numpy 1D-array
-            Selected factors to plot. If 'None' will use all factors (latent space dims).
-        metric: str
-            Distance metric to use for the hierarchical clustering
+        cell_state_factors (numpy 2D-array): LIVI's cell-state latent space (factors) (cells x factors).
+        cell_idx (list or numpy 1D-array): Integer-location based indices of the cells in the `cell_metadata`.
+        cell_metadata (pandas.DataFrame): Dataframe containing metadata information about the cells.
+        celltype_column (str): Column in cell_metadata containing the cell type information.
+        factors (numpy 1D-array): Selected factors to plot. If None all factors (latent space dims) will be used.
+        metric (str): Distance metric to use for the hierarchical clustering
             (see: https://docs.scipy.org/doc/scipy/reference/reference/generated/scipy.spatial.distance.pdist.html#scipy.spatial.distance.pdist)
-        zscore: int, optional
-            Whether to z-score the data row- (0) or column-wise (1).
-            Default is ``None``.
-        color_map: str, optional
-            Name of ``matplotlib`` colormap to use.
-        filename: str, optional
-            Absolute path of the file to save the plot.
+        zscore (int, optional): Whether to z-score the data row- (0) or column-wise (1). Default is None.
+        color_map (str, optional): Name of `matplotlib` colormap to use.
+        savefig (str, optional): Absolute filepath to save the figure. If None, the figure is not saved. Default is None.
+        format (str, optional): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
     """
 
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    import seaborn as sns
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
 
     if factors is not None:
-        df_plot = pd.DataFrame(latent_space[:, factors], columns=[str(t) for t in factors])
+        df_plot = pd.DataFrame(cell_state_factors[:, factors], columns=[str(t) for t in factors])
     else:
         df_plot = pd.DataFrame(
-            latent_space, columns=["Factor" + str(t) for t in range(1, latent_space.shape[1] + 1)]
+            cell_state_factors,
+            columns=["Factor" + str(t) for t in range(1, cell_state_factors.shape[1] + 1)],
         )
 
-    df_plot["Cell type"] = metadata_df.iloc[cell_idx][celltype_column].values
+    df_plot["Cell type"] = cell_metadata.iloc[cell_idx][celltype_column].values
     # Average of selected factors across cells belonging to the same day
     df_celltype = df_plot.groupby("Cell type").mean().reset_index().set_index("Cell type")
 
@@ -457,6 +473,7 @@ def plot_factors_heatmap(
             cmap=color_map,
             center=0.0,
             figsize=(10, 10),
+            rasterized=ext == ".svg",
         )
     else:
         sns.clustermap(
@@ -467,47 +484,23 @@ def plot_factors_heatmap(
             z_score=zscore,
             cmap=color_map,
             figsize=(10, 10),
+            rasterized=ext == ".svg",
         )
-    if filename is not None:
-        plt.savefig(str(filename + "_Celltype.png"), bbox_inches="tight", dpi=200)
-
-    if donor_column is not None:
-        df_plot["Individual"] = metadata_df.iloc[cell_idx][donor_column].values
-        # Average of selected factors across cells belonging to the same donor
-        df_donor = (
-            df_plot.groupby("Individual").mean().reset_index().set_index("Individual").dropna()
+    if savefig:
+        plt.savefig(
+            f"{prefix}_Heatmap_cell-state-Factors_Celltype{ext}",
+            bbox_inches="tight",
+            dpi=200,
+            transparent=True,
         )
-
-        if color_map == "vlag":
-            sns.clustermap(
-                df_donor,
-                row_cluster=row_cluster,
-                col_cluster=column_cluster,
-                metric=metric,
-                z_score=zscore,
-                center=0.0,
-                cmap=color_map,
-                figsize=(10, 10),
-            )
-        else:
-            sns.clustermap(
-                df_donor,
-                row_cluster=row_cluster,
-                col_cluster=column_cluster,
-                metric=metric,
-                z_score=zscore,
-                cmap=color_map,
-                figsize=(10, 10),
-            )
-        if filename is not None:
-            plt.savefig(str(filename + "_Individual.png"), bbox_inches="tight", dpi=200)
-
+    plt.close()
+    
     if return_df:
-        return [df_celltype, df_donor] if donor_column is not None else df_celltype
+        return df_celltype
 
 
 def plot_celltype_factors(
-    celltype_factor_df: pd.DataFrame,
+    cell_type_factor_df: pd.DataFrame,
     celltype_column: str,
     marker_size: int = 2,
     d: int = 10,
@@ -517,6 +510,7 @@ def plot_celltype_factors(
     zscore: bool = False,
     return_celltype_factors: bool = False,
     savefig: Optional[str] = None,
+    format: Optional[str] = None,
 ) -> Union[None, Tuple[dict, dict]]:
     """Plot factors that characterize each cell type on a latent space UMAP. Characteristic factor
     for each celltype is the one with the largest (zscored) value (factor values are z-scored
@@ -524,7 +518,7 @@ def plot_celltype_factors(
 
     Parameters
     ----------
-        celltype_factor_df (pd.DataFrame): DataFrame containing cell type label and factor values for each cell.
+        cell_type_factor_df (pd.DataFrame): DataFrame containing cell type label and factor values for each cell.
         celltype_column (str): Column in cell_metadata containing the cell type information.
         marker_size (int, optional): Size of markers in scatterplots. Default is 2.
         d (int, optional): Controls figure size. Resulting figure will have a size of ~ 2d x (d/2)n_unique_celltype_factors. Default is 10.
@@ -534,6 +528,8 @@ def plot_celltype_factors(
         zscore (bool, optional): Whether to z-score the factor values across factors for a given celltype. Default is False.
         return_celltype_factors (bool, optional): Whether to return the characteristic celltype factors. Default is False.
         savefig (str, optional): Absolute filepath to save the figure. If None, the figure is not saved. Default is None.
+        format (str, optional): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
 
     Returns
     -------
@@ -541,8 +537,14 @@ def plot_celltype_factors(
       of the factors with highest and lowest value for each cell type.
     """
 
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
     df_celltype = (
-        celltype_factor_df.groupby(celltype_column).mean().reset_index().set_index(celltype_column)
+        cell_type_factor_df.groupby(celltype_column).mean().reset_index().set_index(celltype_column)
     )
 
     if zscore:
@@ -557,10 +559,10 @@ def plot_celltype_factors(
         celltype_factor_high = df_celltype.idxmax(axis=1).to_dict()
         celltype_factor_low = df_celltype.idxmin(axis=1).to_dict()
         
-    if celltype_factor_df.filter(like="UMAP").shape[1] == 0:
-        latent = celltype_factor_df.filter(like="Factor")
+    if cell_type_factor_df.filter(like="UMAP").shape[1] == 0:
+        latent = cell_type_factor_df.filter(regex="F|factor")
         umap_df = compute_umap(latent, colnames=["UMAP1", "UMAP2"], add_latent=False)
-        celltype_factor_df = celltype_factor_df.merge(
+        cell_type_factor_df = cell_type_factor_df.merge(
             umap_df,
             how="left",
             right_index=True,
@@ -587,10 +589,11 @@ def plot_celltype_factors(
                 x="UMAP1",
                 y="UMAP2",
                 hue=celltype_column,
-                data=celltype_factor_df,
+                data=cell_type_factor_df,
                 ax=axs[0],
                 s=3,
                 palette="tab20",
+                rasterized=ext == ".svg",
             )
             axs[0].legend(
                 title="Cell type",
@@ -614,24 +617,25 @@ def plot_celltype_factors(
                 x="UMAP1",
                 y="UMAP2",
                 hue=unique_factors[i - 2],
-                data=celltype_factor_df,
+                data=cell_type_factor_df,
                 ax=ax,
                 s=marker_size,
                 palette="vlag",
                 legend=False,
+                rasterized=ext == ".svg",
             )
             sm = cm.ScalarMappable(
                 cmap="vlag",
                 norm=colors.Normalize(
-                    vmin=celltype_factor_df[unique_factors[i - 2]].min(),
-                    vmax=celltype_factor_df[unique_factors[i - 2]].max(),
+                    vmin=cell_type_factor_df[unique_factors[i - 2]].min(),
+                    vmax=cell_type_factor_df[unique_factors[i - 2]].max(),
                 ),
             )
             cb = plt.colorbar(sm, ax=ax)
             ax.set_title(
                 label=unique_factors[i - 2],
                 fontdict={"fontsize": axis_title_fontsize},
-                loc="center",
+               loc="center",
             )
             cb.ax.tick_params(labelsize=12)
             ax.xaxis.label.set_fontsize(axis_title_fontsize - 2)
@@ -640,9 +644,12 @@ def plot_celltype_factors(
         else:
             fig.delaxes(ax)
 
-    if savefig is not None:
-        plt.savefig(savefig, bbox_inches="tight", dpi=400, transparent=True)
-
+    if savefig:
+        plt.savefig(
+            f"{prefix}_celltype-factors_UMAP{ext}", bbox_inches="tight", dpi=400, transparent=True
+        )
+    plt.close()
+    
     if return_celltype_factors:
         return (celltype_factor_high, celltype_factor_low)
 
@@ -671,3 +678,157 @@ def QQplot(pvalues: Union[list, np.ndarray], savefig: Optional[str] = None) -> N
 
     if savefig is not None:
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
+
+
+def plot_A_sparsity(
+    A: pd.DataFrame,
+    associated_factors: list,
+    plot_title: str,
+    savefig: Optional[str] = None,
+    format: Optional[str] = None,
+) -> None:
+    """Plot the sparsity of LIVI's design matrix, A and clusters formed between CxG factors based
+    on their assignments to cell-state factors.
+
+    Parameters
+    ----------
+        A (pd.DataFrame): LIVI's design matrix, A.
+        associated_factors (list): List of CxG factors associated with genetic variables.
+        plot_title (str): Title for the plot.
+        savefig (str or None): If provided, the absolute path to save the generated plots. Default is None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
+
+    Returns
+    -------
+        None
+    """
+
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
+    fig, axs = plt.subplots(ncols=2, figsize=(12, 5))
+    sns.histplot(
+        A.apply(lambda x: x.sum(), axis=0),
+        kde=True,
+        color="cornflowerblue",
+        ax=axs[0],
+        rasterized=ext == ".svg",
+    )
+    axs[0].set_title(
+        "\n".join(wrap("Number of assigned cell-state factors for each GxC factor", 60)),
+        fontsize=13,
+    )
+    axs[0].tick_params(axis="both", labelsize=12)
+
+    sns.histplot(
+        A.filter(associated_factors).apply(lambda x: x.sum(), axis=0),
+        kde=True,
+        color="navy",
+        bins=20,
+        ax=axs[1],
+        rasterized=ext == ".svg",
+    )
+    axs[1].set_title(
+        "\n".join(
+            wrap("Number of assigned cell-state factors for each SIGNIFICANT GxC factor", 60)
+        ),
+        fontsize=13,
+    )
+    axs[1].tick_params(axis="both", labelsize=12)
+
+    fig.suptitle(plot_title)
+    fig.tight_layout()
+    if savefig:
+        plt.savefig(
+            f"{prefix}_A-design-matrix_sparsity{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
+        )
+    plt.close()
+
+    sns.clustermap(
+        A.filter(associated_factors).astype(int),
+        col_cluster=True,
+        row_cluster=False,
+        metric="hamming",
+        cmap="Reds",
+        rasterized=ext == ".svg",
+    )
+    if savefig:
+        plt.savefig(
+            f"{prefix}_A-design-matrix_CxG_factor_clustering{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
+        )
+    plt.close()
+
+
+def plot_CxG_factor_cor(
+    U: pd.DataFrame,
+    associated_factors: list,
+    savefig: Optional[str] = None,
+    format: Optional[str] = None,
+) -> None:
+    """Plot the pairwise correlations of SNP-associated CxG factors and clustering of the
+    individuals based on those.
+
+    Parameters
+    ----------
+        U (pd.DataFrame): Dataframe containing CxG factors (individuals x factors).
+        associated_factors (list): List of associated factors to filter and plot.
+        savefig (str or None): If provided, the path to save the generated plots. Default is None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
+
+    Returns
+    -------
+        None
+    """
+
+    U = U.filter(associated_factors)
+    pairwise_correlations = U.corr(method="pearson")
+
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
+    # Visualize pearson cor between significant factors
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(pairwise_correlations, cmap="vlag", center=0, rasterized=ext == ".svg")
+    plt.title("Pearson's $\\rho$ between significant CxG factors", fontsize=15, pad=20)
+    if savefig:
+        plt.savefig(
+            f"{prefix}_CxG_factor_correlations{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
+        )
+    plt.close()
+    # Cluster individuals based on significant factor values
+    clm = sns.clustermap(
+        U.filter(associated_factors),
+        col_cluster=False,
+        row_cluster=True,
+        cmap="vlag",
+        center=0,
+        cbar_pos=(0.99, 0.14, 0.022, 0.2),
+        rasterized=ext == ".svg",
+    )
+    # ax = clm.ax_heatmap
+    # ax.set_title("Clustering of individuals based on the cosine distance between CxG factors", fontsize=15, pad=20)
+    if savefig:
+        clm.savefig(
+            f"{prefix}_IID_clustering_based_on_CxG_factors{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
+        )
+    plt.close()
