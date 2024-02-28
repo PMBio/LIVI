@@ -83,6 +83,7 @@ def visualise_cell_state_latent(
         fontsize=13,
         title_fontsize=13,
         ncol=2,
+        markerscale=3,
     )
     sns.scatterplot(
         x="UMAP1",
@@ -102,6 +103,7 @@ def visualise_cell_state_latent(
         fontsize=13,
         title_fontsize=13,
         ncol=1,
+        markerscale=3,
     )
     plt.suptitle(f"{os.path.basename(args.model_run_dir)}")
     plt.savefig(
@@ -498,7 +500,7 @@ def cell_state_factors_heatmap(
 
 
 def plot_celltype_factors(
-    cell_metadata: pd.DataFrame,
+    cell_type_factor_df: pd.DataFrame,
     celltype_column: str,
     marker_size: int = 2,
     d: int = 10,
@@ -516,7 +518,7 @@ def plot_celltype_factors(
 
     Parameters
     ----------
-        cell_metadata (pd.DataFrame): DataFrame containing cell metadata, including factor values for each cell.
+        cell_type_factor_df (pd.DataFrame): DataFrame containing cell type label and factor values for each cell.
         celltype_column (str): Column in cell_metadata containing the cell type information.
         marker_size (int, optional): Size of markers in scatterplots. Default is 2.
         d (int, optional): Controls figure size. Resulting figure will have a size of ~ 2d x (d/2)n_unique_celltype_factors. Default is 10.
@@ -541,9 +543,8 @@ def plot_celltype_factors(
     else:
         ext = "." + format if format else ".png"
 
-    factor_df = cell_metadata.filter(regex=f"{celltype_column}|Base Factor")
     df_celltype = (
-        factor_df.groupby(celltype_column).mean().reset_index().set_index(celltype_column)
+        cell_type_factor_df.groupby(celltype_column).mean().reset_index().set_index(celltype_column)
     )
 
     if zscore:
@@ -557,6 +558,16 @@ def plot_celltype_factors(
     else:
         celltype_factor_high = df_celltype.idxmax(axis=1).to_dict()
         celltype_factor_low = df_celltype.idxmin(axis=1).to_dict()
+        
+    if cell_type_factor_df.filter(like="UMAP").shape[1] == 0:
+        latent = cell_type_factor_df.filter(regex="F|factor")
+        umap_df = compute_umap(latent, colnames=["UMAP1", "UMAP2"], add_latent=False)
+        cell_type_factor_df = cell_type_factor_df.merge(
+            umap_df,
+            how="left",
+            right_index=True,
+            left_index=True,
+        )
 
     unique_factors = list(
         set(list(celltype_factor_high.values()) + list(celltype_factor_low.values()))
@@ -575,10 +586,10 @@ def plot_celltype_factors(
     for i, ax in enumerate(tqdm(axs)):
         if i == 0:
             sns.scatterplot(
-                x="UMAP1_base",
-                y="UMAP2_base",
-                hue="cell_label",
-                data=cell_metadata,
+                x="UMAP1",
+                y="UMAP2",
+                hue=celltype_column,
+                data=cell_type_factor_df,
                 ax=axs[0],
                 s=3,
                 palette="tab20",
@@ -606,7 +617,7 @@ def plot_celltype_factors(
                 x="UMAP1",
                 y="UMAP2",
                 hue=unique_factors[i - 2],
-                data=cell_metadata,
+                data=cell_type_factor_df,
                 ax=ax,
                 s=marker_size,
                 palette="vlag",
@@ -616,15 +627,15 @@ def plot_celltype_factors(
             sm = cm.ScalarMappable(
                 cmap="vlag",
                 norm=colors.Normalize(
-                    vmin=cell_metadata[unique_factors[i - 2]].min(),
-                    vmax=cell_metadata[unique_factors[i - 2]].max(),
+                    vmin=cell_type_factor_df[unique_factors[i - 2]].min(),
+                    vmax=cell_type_factor_df[unique_factors[i - 2]].max(),
                 ),
             )
             cb = plt.colorbar(sm, ax=ax)
             ax.set_title(
                 label=unique_factors[i - 2],
                 fontdict={"fontsize": axis_title_fontsize},
-                loc="center",
+               loc="center",
             )
             cb.ax.tick_params(labelsize=12)
             ax.xaxis.label.set_fontsize(axis_title_fontsize - 2)
