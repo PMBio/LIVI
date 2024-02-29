@@ -247,6 +247,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         format="png",
         args=args,
     )
+    plt.close()
 
     cell_state_factors_heatmap(
         cell_state_factors=zbase.values,
@@ -262,7 +263,8 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         savefig=os.path.join(output_dir, f"{of_prefix}.png"),
         return_df=False,
     )
-
+    plt.close()
+    
     cell_state_decoder = livi_results["cell-state_decoder"].detach().numpy()
     cell_state_decoder = pd.DataFrame(
         cell_state_decoder, index=adata.var.index, columns=zbase.columns
@@ -301,7 +303,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         .set_index(args.individual_column)
     )
     U_context.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_cell-state-specific_effects.tsv"),
+        os.path.join(output_dir, f"{of_prefix}_CxG_embedding.tsv"),
         sep="\t",
         header=True,
         index=True,
@@ -311,7 +313,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         context_decoder, index=adata.var.index, columns=colnames_context
     )
     context_decoder.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_cell-state-effects_decoder.tsv"),
+        os.path.join(output_dir, f"{of_prefix}_CxG_decoder.tsv"),
         sep="\t",
         header=True,
         index=True,
@@ -333,7 +335,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             .set_index(args.individual_column)
         )
         V_persistent.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_persistent_effects.tsv"),
+            os.path.join(output_dir, f"{of_prefix}_persistent_embedding.tsv"),
             sep="\t",
             header=True,
             index=True,
@@ -343,7 +345,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             persistent_decoder, index=adata.var.index, columns=colnames_persistent
         )
         persistent_decoder.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_persistent-effects_decoder.tsv"),
+            os.path.join(output_dir, f"{of_prefix}_persistent_decoder.tsv"),
             sep="\t",
             header=True,
             index=True,

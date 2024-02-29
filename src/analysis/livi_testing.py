@@ -543,11 +543,10 @@ def validate_and_read_passed_args(
         for f in os.listdir(args.model_output_dir)
         if os.path.isfile(os.path.join(args.model_output_dir, f))
     ]
-    # zbase = [re.match("(zbase.*sv)", f) for f in files if re.match("zbase.*sv", f) is not None][0].groups()[0]
     U_context = [
-        re.match("(.*cell-state-specific_effects.tsv)", f)
+        re.match("(.*CxG_embedding.tsv)", f)
         for f in files
-        if re.match(".*cell-state-specific_effects.tsv", f) is not None
+        if re.match(".*CxG_embedding.tsv", f) is not None
     ]
     if len(U_context) > 0:
         U_context = U_context[0].groups()[0]
@@ -562,9 +561,9 @@ def validate_and_read_passed_args(
         U_context = None
 
     V_persistent = [
-        re.match("(.*persistent_effects.tsv)", f)
+        re.match("(.*persistent_embedding.tsv)", f)
         for f in files
-        if re.match(".*persistent_effects.tsv", f) is not None
+        if re.match(".*persistent_embedding.tsv", f) is not None
     ]
     if len(V_persistent) > 0:
         V_persistent = V_persistent[0].groups()[0]
@@ -575,14 +574,8 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in V_persistent do not match individual IDs in the genotype matrix."
             )
-        # V_persistent.columns = [
-        #     f"Individual_Persistent_Factor{i}" for i in range(1, V_persistent.shape[1] + 1)
-        # ]
     else:
         V_persistent = None
-    # base_decoder = [re.search("(.*decoder_basal.*sv)", f) for f in files if re.search(".*decoder_basal.*sv", f) is not None][0].groups()[0]
-    # context_decoder = [re.search("(.*context_specific_decoder.*sv)", f) for f in files if re.search(".*context_specific_decoder.*sv", f) is not None][0].groups()[0]
-    # persistent_decoder = [re.search("(.*persistent_decoder.*sv)", f) for f in files if re.search(".*persistent_decoder.*sv", f)  is not None][0].groups()[0]
 
     return (
         output_dir,
