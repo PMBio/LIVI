@@ -112,7 +112,6 @@ def visualise_cell_state_latent(
         dpi=300,
         transparent=True,
     )
-    plt.close()
 
 
 def visualise_livi_embeddings(
@@ -493,7 +492,6 @@ def cell_state_factors_heatmap(
             dpi=200,
             transparent=True,
         )
-    plt.close()
     
     if return_df:
         return df_celltype
