@@ -524,8 +524,14 @@ def main(args):
             A=A,
             savefig=os.path.join(output_dir, of_prefix),
         )
-    except OSError as err:
-        print(f"Could not plot U factor similarity: {err}")
+    except OSError:
+        print(f"Could not save U factor similarity plot under provided filename (filename too long).")
+        plot_U_factor_similarity(
+            U=U_context,
+            associated_factors=associations_CxG.Factor.unique(),
+            A=A,
+            savefig=os.path.join(output_dir, ""),
+        )
 
     try:
         plot_ID_similarity(
@@ -533,8 +539,13 @@ def main(args):
             associated_factors=associations_CxG.Factor.unique(),
             savefig=os.path.join(output_dir, of_prefix),
         )
-    except OSError as err:
-        print(f"Could not plot ID similarity: {err}")
+    except OSError:
+        print(f"Could not save individual similarity plot under provided filename (filename too long).")
+        plot_ID_similarity(
+            U=U_context,
+            associated_factors=associations_CxG.Factor.unique(),
+            savefig=os.path.join(output_dir, ""),
+        )
 
     try:
         overlap_with_known_eQTLs(
@@ -549,7 +560,18 @@ def main(args):
             format=None,
         )
     except OSError as err:
-        print(f"Could not plot overlap with known eQTLs: {err}")
+        print(f"Could not save overlap with known eQTLs plots under provided filename (filename too long).")
+        overlap_with_known_eQTLs(
+            known_trans_eQTLs=known_trans_eQTLs,
+            SNP_colname_trans=SNP_colname_trans,
+            CxG_effects_LIVI=associations_CxG,
+            factor_assignment_matrix=A,
+            known_cis_eQTLs=known_cis_eQTLs,
+            SNP_colname_cis=SNP_colname_cis,
+            persistent_effects_LIVI=associations_V,
+            savefig=os.path.join(output_dir, ""),
+            format=None,
+        )
 
 
 if __name__ == "__main__":
