@@ -1,5 +1,5 @@
 ### Run:
-# python src/analysis/livi_analysis.py --model_run_dir --checkpoint --adata -id --adata_layer --batch_column --sex_column --age_column -ct -GT_matrix --plink -K --quantile_normalise --fdr --ofp -od
+# python src/analysis/livi_analysis.py --model_run_dir --checkpoint --adata -id --adata_layer --batch_column --sex_column --age_column -ct -GT_matrix --plink -K --known_trans_eQTLs --known_cis_eQTLs --quantile_normalise --fdr -ofp -od
 ###
 
 import pyrootutils
@@ -35,17 +35,30 @@ from src.analysis.livi_testing import (
 )
 from src.analysis.plotting import (
     cell_state_factors_heatmap,
+    overlap_with_known_eQTLs,
     plot_A_sparsity,
-    plot_CxG_factor_cor,
+    plot_ID_similarity,
+    plot_U_factor_similarity,
     visualise_cell_state_latent,
 )
 from src.data_modules.livi_data import LIVIDataModule
-from src.models.livi2 import LIVI2_experimental, LIVI2_freeze
+from src.models.livi2 import (
+    LIVI2_experimental,
+    LIVI2_freeze,
+    LIVI2_freeze_continuous_A2,
+)
 
 
 def validate_and_read_passed_args(
     args: argparse.Namespace,
-) -> Tuple[str, str, AnnData, pd.DataFrame, pd.DataFrame, pd.DataFrame,]:
+) -> Tuple[
+    str,
+    str,
+    AnnData,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+]:
     """Validate the passed arguments and read the corresponding files.
 
     Parameters
@@ -74,44 +87,6 @@ def validate_and_read_passed_args(
             os.mkdir(output_dir)
     else:
         output_dir = args.model_run_dir
-
-    if args.checkpoint == "last":
-        checkpoint = "last.ckpt"
-    else:
-        checkpoint = [
-            f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
-        ][0]
-
-    LIVI_model = LIVI2_experimental.load_from_checkpoint(
-        os.path.join(args.model_run_dir, "checkpoints", checkpoint), device="cpu"
-    )
-
-    if args.output_file_prefix:
-        if args.output_file_prefix == "descriptive":
-            zdim = LIVI_model.z_dim
-            n_gxc = LIVI_model.n_gxc_factors
-            n_persistent = LIVI_model.n_persistent_factors
-            encoder_h = "_".join([str(d) for d in LIVI_model.hparams.encoder_hidden_dims])
-            layer_norm = LIVI_model.hparams.layer_norm
-            try:
-                batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
-            except AttributeError:
-                batch_norm_dec = False
-            lr = LIVI_model.hparams.learning_rate
-            adversary_weight = LIVI_model.hparams.adversary_weight
-            adversary_h = "_".join([str(d) for d in LIVI_model.hparams.adversary_hidden_dims])
-            adversary_lr = LIVI_model.hparams.adversary_learning_rate
-            adversary_steps = LIVI_model.hparams.adversary_steps
-            l1_weight = LIVI_model.hparams.l1_weight
-            warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
-            warmup_epochs_G = LIVI_model.warmup_epochs_G
-            hierarchical = "fixed-A" if LIVI_model.hparams.hierarchical_model else "learnable-A"
-
-            of_prefix = f"{hierarchical}_zdim{zdim}_{n_gxc}-context-factors_{n_persistent}-persistent-factors_BatchNorm-decoder-{batch_norm_dec}_layer-norm-{layer_norm}_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}"
-        else:
-            of_prefix = args.output_file_prefix
-    else:
-        of_prefix = os.path.basename(args.output_dir)
 
     adata = sc.read_h5ad(args.adata)
 
@@ -163,7 +138,7 @@ def validate_and_read_passed_args(
     )
     del GT_matrix
 
-    if args.kinship is not None:
+    if args.kinship:
         assert os.path.isfile(args.kinship), "Kinship matrix file not found."
         _, ext = os.path.splitext(args.kinship)
         if ext not in [".tsv", ".csv"]:
@@ -181,6 +156,89 @@ def validate_and_read_passed_args(
     else:
         kinship = None
 
+    SNP_colname_trans = None
+    if args.known_trans_eQTLs:
+        assert os.path.isfile(args.known_trans_eQTLs), "Known trans eQTLs file not found."
+        _, ext = os.path.splitext(args.known_trans_eQTLs)
+        known_trans_eQTLs = pd.read_csv(args.known_trans_eQTLs, sep="\t" if ext == ".tsv" else ",")
+        SNP_colnames = [
+            c for c in known_trans_eQTLs.columns if "SNP" in c or "snp" in c or "variant" in c
+        ]
+        for c in SNP_colnames:
+            if (
+                known_trans_eQTLs.loc[
+                    known_trans_eQTLs[c].isin(GT_matrix_standardised.columns)
+                ].shape[0]
+                != 0
+            ):
+                SNP_colname_trans = c
+        if SNP_colname_trans is None and c == SNP_colnames[-1]:
+            raise ValueError(
+                "SNP IDs in known trans eQTLs do not match SNP IDs in the genotype matrix."
+            )
+    else:
+        known_trans_eQTLs = None
+    SNP_colname_cis = None
+    if args.known_cis_eQTLs:
+        assert os.path.isfile(args.known_cis_eQTLs), "Known cis eQTLs file not found."
+        _, ext = os.path.splitext(args.known_cis_eQTLs)
+        known_cis_eQTLs = pd.read_csv(args.known_cis_eQTLs, sep="\t" if ext == ".tsv" else ",")
+        SNP_colnames = [
+            c for c in known_cis_eQTLs.columns if "SNP" in c or "snp" in c or "variant" in c
+        ]
+        for c in SNP_colnames:
+            if (
+                known_cis_eQTLs.loc[known_cis_eQTLs[c].isin(GT_matrix_standardised.columns)].shape[
+                    0
+                ]
+                != 0
+            ):
+                SNP_colname_cis = c
+        if SNP_colname_cis is None and c == SNP_colnames[-1]:
+            raise ValueError(
+                "SNP IDs in known cis eQTLs do not match SNP IDs in the genotype matrix."
+            )
+    else:
+        known_cis_eQTLs = None
+
+    if args.checkpoint == "last":
+        checkpoint = "last.ckpt"
+    else:
+        checkpoint = [
+            f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
+        ][0]
+
+    LIVI_model = LIVI2_experimental.load_from_checkpoint(
+        os.path.join(args.model_run_dir, "checkpoints", checkpoint), device="cpu"
+    )
+
+    if args.output_file_prefix:
+        if args.output_file_prefix == "descriptive":
+            zdim = LIVI_model.z_dim
+            n_gxc = LIVI_model.n_gxc_factors
+            n_persistent = LIVI_model.n_persistent_factors
+            encoder_h = "_".join([str(d) for d in LIVI_model.hparams.encoder_hidden_dims])
+            layer_norm = LIVI_model.hparams.layer_norm
+            try:
+                batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
+            except AttributeError:
+                batch_norm_dec = False
+            lr = LIVI_model.hparams.learning_rate
+            adversary_weight = LIVI_model.hparams.adversary_weight
+            adversary_h = "_".join([str(d) for d in LIVI_model.hparams.adversary_hidden_dims])
+            adversary_lr = LIVI_model.hparams.adversary_learning_rate
+            adversary_steps = LIVI_model.hparams.adversary_steps
+            l1_weight = LIVI_model.hparams.l1_weight
+            warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
+            warmup_epochs_G = LIVI_model.warmup_epochs_G
+            hierarchical = "fixed-A" if LIVI_model.hparams.hierarchical_model else "learnable-A"
+
+            of_prefix = f"{hierarchical}_zdim{zdim}_{n_gxc}-context-factors_{n_persistent}-persistent-factors_BatchNorm-decoder-{batch_norm_dec}_layer-norm-{layer_norm}_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}"
+        else:
+            of_prefix = args.output_file_prefix
+    else:
+        of_prefix = os.path.basename(args.output_dir)
+
     return (
         output_dir,
         of_prefix,
@@ -189,6 +247,10 @@ def validate_and_read_passed_args(
         GT_matrix_standardised,
         bim,
         kinship,
+        known_trans_eQTLs,
+        SNP_colname_trans,
+        known_cis_eQTLs,
+        SNP_colname_cis,
     )
 
 
@@ -264,7 +326,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         return_df=False,
     )
     plt.close()
-    
+
     cell_state_decoder = livi_results["cell-state_decoder"].detach().numpy()
     cell_state_decoder = pd.DataFrame(
         cell_state_decoder, index=adata.var.index, columns=zbase.columns
@@ -284,15 +346,17 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         U_context = U_context.astype(np.float32)
 
     colnames_context = (
-        [f"CxG_Factor{f}" for f in variable_factors + 1]
+        [f"U_Factor{f}" for f in variable_factors + 1]
         if args.variance_threshold
-        else [
-            f"CxG_Factor{f}_{gf}"
-            for f in range(1, int(LIVI_model.z_dim) + 1)
-            for gf in range(1, LIVI_model.n_gxc_factors + 1)
-        ]
-        if LIVI_model.hparams.hierarchical_model
-        else [f"CxG_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
+        else (
+            [
+                f"U_Factor{f}_{gf}"
+                for f in range(1, int(LIVI_model.z_dim) + 1)
+                for gf in range(1, LIVI_model.n_gxc_factors + 1)
+            ]
+            if LIVI_model.hparams.hierarchical_model
+            else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
+        )
     )
     U_context = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
     U_context = (
@@ -303,7 +367,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         .set_index(args.individual_column)
     )
     U_context.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_CxG_embedding.tsv"),
+        os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
         sep="\t",
         header=True,
         index=True,
@@ -313,7 +377,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         context_decoder, index=adata.var.index, columns=colnames_context
     )
     context_decoder.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_CxG_decoder.tsv"),
+        os.path.join(output_dir, f"{of_prefix}_U_decoder.tsv"),
         sep="\t",
         header=True,
         index=True,
@@ -322,7 +386,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     if livi_results["persistent_effects"] is not None:
         V_persistent = livi_results["persistent_effects"].detach().numpy()
         colnames_persistent = [
-            f"Persistent_Factor{f}" for f in range(1, LIVI_model.n_persistent_factors + 1)
+            f"V_Factor{f}" for f in range(1, LIVI_model.n_persistent_factors + 1)
         ]
         V_persistent = pd.DataFrame(
             V_persistent, index=adata.obs.index, columns=colnames_persistent
@@ -335,7 +399,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             .set_index(args.individual_column)
         )
         V_persistent.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_persistent_embedding.tsv"),
+            os.path.join(output_dir, f"{of_prefix}_V_embedding.tsv"),
             sep="\t",
             header=True,
             index=True,
@@ -345,7 +409,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             persistent_decoder, index=adata.var.index, columns=colnames_persistent
         )
         persistent_decoder.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_persistent_decoder.tsv"),
+            os.path.join(output_dir, f"{of_prefix}_V_decoder.tsv"),
             sep="\t",
             header=True,
             index=True,
@@ -356,21 +420,29 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
     if livi_results["Bernoulli_logits"] is not None and not LIVI_model.hparams.hierarchical_model:
         bernoulli_logits = livi_results["Bernoulli_logits"].detach().numpy()
-
-        A = torch.distributions.RelaxedBernoulli(
-            temperature=0.01, logits=livi_results["Bernoulli_logits"]
-        ).rsample()
-        A = torch.where(A < 0.5, 0, 1).to(torch.float).detach().numpy()
-        A = pd.DataFrame(A, index=zbase.columns, columns=U_context.columns)
-        A.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_A_design_matrix.tsv"),
+        # Sample 50 times from the learned distribution to define the factor assignments
+        # As = [torch.where(torch.distributions.RelaxedBernoulli(temperature=0.01, logits=LIVI_model.bernoulli_logits).sample() < 0.5, 0, 1).to(torch.float).detach().numpy() for _ in range(10)]
+        As = [
+            torch.distributions.ContinuousBernoulli(logits=livi_results["Bernoulli_logits"])
+            .sample()
+            .detach()
+            .numpy()
+            for _ in range(50)
+        ]
+        As = np.stack(As)
+        assignment_matrix = np.median(As, axis=0)
+        assignment_matrix = pd.DataFrame(
+            assignment_matrix, index=zbase.columns, columns=U_context.columns
+        )
+        assignment_matrix.to_csv(
+            os.path.join(output_dir, f"{of_prefix}_factor_assignment_matrix.tsv"),
             sep="\t",
             header=True,
             index=True,
         )
     else:
         bernoulli_logits = None
-        A = None
+        assignment_matrix = None
 
     return (
         zbase,
@@ -380,12 +452,8 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         V_persistent,
         persistent_decoder,
         bernoulli_logits,
-        A,
+        assignment_matrix,
     )
-
-
-def compare_findings(results_sign_context, results_sign_persistent, ground_truth):
-    raise NotImplementedError
 
 
 def main(args):
@@ -397,6 +465,10 @@ def main(args):
         GT_matrix_standardised,
         bim,
         kinship,
+        known_trans_eQTLs,
+        SNP_colname_trans,
+        known_cis_eQTLs,
+        SNP_colname_cis,
     ) = validate_and_read_passed_args(args)
 
     print("\n-------- Performing inference --------\n")
@@ -428,27 +500,56 @@ def main(args):
         quantile_norm=args.quantile_normalise,
         variance_threshold=args.variance_threshold,
         variable_factors=args.variable_factors,
-        qval_threshold=args.multiple_testing_threshold
-        if args.multiple_testing_threshold
-        else None,
+        qval_threshold=(
+            args.multiple_testing_threshold if args.multiple_testing_threshold else None
+        ),
         return_associations=True,
     )
 
-    associations = associations[0] if isinstance(associations, tuple) else associations
+    associations_CxG = associations[0] if isinstance(associations, tuple) else associations
+    associations_V = associations[1] if isinstance(associations, tuple) else None
 
     if A is not None:
         plot_A_sparsity(
             A=A,
-            associated_factors=associations.Factor.unique(),
-            plot_title=f"{of_prefix}\n $N$ fSNPS: {associations.SNP_id.nunique()}\n $N$ CxG factors: {associations.Factor.nunique()}",
+            associated_factors=associations_CxG.Factor.unique(),
+            plot_title=f"{of_prefix}\n $N$ fSNPS: {associations_CxG.SNP_id.nunique()}\n $N$ CxG factors: {associations_CxG.Factor.nunique()}",
             savefig=os.path.join(output_dir, of_prefix),
         )
+    ## Exceptions for too-long filenames
+    try:
+        plot_U_factor_similarity(
+            U=U_context,
+            associated_factors=associations_CxG.Factor.unique(),
+            A=A,
+            savefig=os.path.join(output_dir, of_prefix),
+        )
+    except OSError as err:
+        print(f"Could not plot U factor similarity: {err}")
 
-    plot_CxG_factor_cor(
-        U=U_context,
-        associated_factors=associations.Factor.unique(),
-        savefig=os.path.join(output_dir, of_prefix),
-    )
+    try:
+        plot_ID_similarity(
+            U=U_context,
+            associated_factors=associations_CxG.Factor.unique(),
+            savefig=os.path.join(output_dir, of_prefix),
+        )
+    except OSError as err:
+        print(f"Could not plot ID similarity: {err}")
+
+    try:
+        overlap_with_known_eQTLs(
+            known_trans_eQTLs=known_trans_eQTLs,
+            SNP_colname_trans=SNP_colname_trans,
+            CxG_effects_LIVI=associations_CxG,
+            factor_assignment_matrix=A,
+            known_cis_eQTLs=known_cis_eQTLs,
+            SNP_colname_cis=SNP_colname_cis,
+            persistent_effects_LIVI=associations_V,
+            savefig=os.path.join(output_dir, of_prefix),
+            format=None,
+        )
+    except OSError as err:
+        print(f"Could not plot overlap with known eQTLs: {err}")
 
 
 if __name__ == "__main__":
@@ -546,6 +647,16 @@ if __name__ == "__main__":
         "-fdr",
         type=float,
         help="Storey q-value threshold for multiple testing correction.",
+    )
+    parser.add_argument(
+        "--known_trans_eQTLs",
+        help="Absolute path of the .tsv file with known trans eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
+        type=str,
+    )
+    parser.add_argument(
+        "--known_cis_eQTLs",
+        help="Absolute path of the .tsv file with known cis eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
+        type=str,
     )
     parser.add_argument(
         "--output_file_prefix",
