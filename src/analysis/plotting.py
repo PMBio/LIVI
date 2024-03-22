@@ -868,7 +868,7 @@ def plot_ID_similarity(
     )
     if savefig:
         clm.savefig(
-            f"{prefix}_IID_clustering_based_on_CxG_factors{ext}",
+            f"{prefix}_IID_clustering_based_on_U_factors{ext}",
             dpi=200,
             transparent=True,
             bbox_inches="tight",
@@ -885,7 +885,7 @@ def plot_ID_similarity(
         "Cosine distance between individuals based on significant CxG factors", fontsize=15, pad=20
     )
     plt.savefig(
-        f"{prefix}_Heatmap_IID_cosine-distance_based_on_CxG_factors{ext}",
+        f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
         bbox_inches="tight",
         dpi=300,
         transparent=True,
