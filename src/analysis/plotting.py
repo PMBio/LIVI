@@ -894,7 +894,7 @@ def plot_ID_similarity(
 
 
 ### Edited from venny4py package ###
-def venny4py_custom_colors(sets={}, out="./", asax=False, ext="png", dpi=300, size=3.5):
+def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dpi=300, size=3.5):
     from itertools import combinations
 
     import matplotlib.patches as mpatches
@@ -989,7 +989,7 @@ def venny4py_custom_colors(sets={}, out="./", asax=False, ext="png", dpi=300, si
             handletextpad=0.5,
         )
         plt.title(
-            "Overlap between $U$ Factors associated with SNPs that are (not) known eQTLs",
+            plot_title,
             fontdict={"weight": "bold", "fontsize": 8},
         )
         if asax is False:
@@ -1105,6 +1105,7 @@ def overlap_with_known_eQTLs(
 
         venny4py_custom_colors(
             ssets,
+            plot_title="Overlap between $U$ Factors associated with SNPs that are (not) known eQTLs",
             out=f"{prefix}_Venn_U-factor-overlap-LIVI-vs-known-eQTLs",
             asax=False,
             ext=ext,
@@ -1241,6 +1242,7 @@ def overlap_with_known_eQTLs(
 
             venny4py_custom_colors(
                 ssets,
+                plot_title="Overlap between signififcant SNPs",
                 out=f"{prefix}_Venn_LIVI-persistent-vs-known-eQTLs",
                 asax=False,
                 ext=ext,
