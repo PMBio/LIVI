@@ -150,6 +150,23 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
     """
 
     covariates = pd.DataFrame(index=metadata[args.individual_column].unique())
+    if args.other_covars is not None:
+        scaled_covars = StandardScaler().fit_transform(
+            metadata.filter(args.other_covars).to_numpy()
+        )
+        scaled_covars = pd.DataFrame(
+            scaled_covars,
+            index=metadata.index,
+            columns=[f"{cov}_scaled" for cov in args.other_covars],
+        )
+        scaled_covars = scaled_covars.merge(
+            metadata.filter([args.individual_column]), left_index=True, right_index=True
+        )
+        covariates = covariates.merge(
+            scaled_covars.drop_duplicates().set_index(args.individual_column),
+            right_index=True,
+            left_index=True,
+        )
     if args.batch_column is not None:
         metadata[args.batch_column] = metadata[args.batch_column].astype(np.int32)
         covariates = covariates.merge(
@@ -745,6 +762,13 @@ if __name__ == "__main__":
         default=None,
         type=str,
         help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
+    )
+    parser.add_argument(
+        "--other_covars",
+        nargs="*",
+        default=None,
+        type=str,
+        help="Column names in cell metadata (adata.obs) of other individual covariates to use in the null LMM.",
     )
     parser.add_argument(
         "--multiple_testing_threshold",
