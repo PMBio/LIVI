@@ -14,6 +14,7 @@ root = pyrootutils.setup_root(
 import argparse
 import os
 import re
+import warnings
 from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -24,6 +25,7 @@ from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
 from pandas_plink import read_plink
 from scipy.stats import chi2, norm
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, quantile_transform
 
 from src.analysis.plotting import QQplot
@@ -86,11 +88,12 @@ def LMM_test_feature(
     feature_phenotype = feature_phenotype.dropna()
 
     if covariates_df.empty:
-        covariates_matrix = np.ones(feature_phenotype.shape[0], 1)
+        covariates_matrix = np.ones((feature_phenotype.shape[0], 1))
     else:
         covariates_matrix = covariates_df.loc[
             covariates_df.index.isin(feature_phenotype.index)
         ].values.astype(np.float32)
+        # covariates_matrix = np.append(np.ones((feature_phenotype.shape[0], 1)), covariates_matrix, axis=1)
 
     # Subset Genetics matrix
     G_matrix = G_scaled.loc[
@@ -149,7 +152,6 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
     covariates = pd.DataFrame(index=metadata[args.individual_column].unique())
     if args.batch_column is not None:
         metadata[args.batch_column] = metadata[args.batch_column].astype(np.int32)
-        # adata.obs[args.batch_column] = pd.Categorical(adata.obs[args.batch_column])
         covariates = covariates.merge(
             metadata.filter([args.individual_column, args.batch_column])
             .drop_duplicates()
@@ -157,15 +159,13 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
             right_index=True,
             left_index=True,
         )
-
     if args.sex_column is not None:
         metadata[args.sex_column] = pd.Categorical(metadata[args.sex_column])
-        metadata[args.sex_column].replace(
+        metadata[args.sex_column] = metadata[args.sex_column].cat.rename_categories(
             {
                 metadata[args.sex_column].cat.categories[0]: 1,
                 metadata[args.sex_column].cat.categories[1]: 0,
             },
-            inplace=True,
         )
         covariates = covariates.merge(
             metadata.filter([args.individual_column, args.sex_column])
@@ -174,7 +174,6 @@ def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.Da
             right_index=True,
             left_index=True,
         )
-
     if args.age_column is not None:
         if "age_scaled" not in metadata.columns:
             age_scaled = StandardScaler().fit_transform(
@@ -239,7 +238,6 @@ def run_LIVI_genetic_association_testing(
 
     if covariates is not None:
         GT_matrix = GT_matrix.loc[covariates.index]
-    #   U_context = U_context.loc[covariates.index]
 
     if Kinship is not None:
         kinship = Kinship
@@ -306,30 +304,63 @@ def run_LIVI_genetic_association_testing(
                 on="SNP_id",
                 how="left",
             )
-        filename = (
-            f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
-            if variable_factors or variance_threshold
-            else f"{output_file_prefix}_LMM_results_Ucontext.tsv"
-        )
-
-        results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-        QQplot(
-            results.p_value,
-            savefig=os.path.join(
-                output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"
-            ),
-        )
-        plt.close()
+        try:
+            filename = (
+                f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
+                if variable_factors or variance_threshold
+                else f"{output_file_prefix}_LMM_results_Ucontext.tsv"
+            )
+            results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+        except OSError:
+            filename = (
+                "_LMM_results_Ucontext_variable-factors.tsv"
+                if variable_factors or variance_threshold
+                else "_LMM_results_Ucontext.tsv"
+            )
+            results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+            warnings.warn(
+                f"Could not save testing results for U under provided filename (filename too long).\nSaved as '{filename}' instead."
+            )
+        try:
+            QQplot(
+                results.p_value,
+                savefig=os.path.join(
+                    output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"
+                ),
+            )
+            plt.close()
+        except OSError:
+            QQplot(
+                results.p_value,
+                savefig=os.path.join(output_dir, "_QQplot_context-specific-effects.png"),
+            )
+            plt.close()
+            warnings.warn(
+                "Could not save QQplot for U under provided filename (filename too long).\nSaved as '_QQplot_context-specific-effects.png' instead."
+            )
         if qval_threshold is not None:
             results_sign_context = FDR_correction(results, cut_off=qval_threshold)
-            filename_sign = (
-                f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
-                if variable_factors or variance_threshold
-                else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
-            )
-            results_sign_context.to_csv(
-                os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
-            )
+            try:
+                filename_sign = (
+                    f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                    if variable_factors or variance_threshold
+                    else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+                )
+                results_sign_context.to_csv(
+                    os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+                )
+            except OSError:
+                filename_sign = (
+                    f"_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                    if variable_factors or variance_threshold
+                    else f"_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+                )
+                results_sign_context.to_csv(
+                    os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+                )
+                warnings.warn(
+                    f"Could not save significant results for U under provided filename (filename too long).\nSaved as '{filename_sign}' instead."
+                )
 
         print("----- Done ----- \n")
 
@@ -369,24 +400,50 @@ def run_LIVI_genetic_association_testing(
                 on="SNP_id",
                 how="left",
             )
-        filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
+        try:
+            filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
+            results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+        except OSError:
+            filename = "_LMM_results_Vpersistent.tsv"
+            results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
+            warnings.warn(
+                f"Could not save testing results for V under provided filename (filename too long).\nSaved as '{filename}' instead."
+            )
+        try:
+            QQplot(
+                results.p_value,
+                savefig=os.path.join(
+                    output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"
+                ),
+            )
+            plt.close()
+        except OSError:
+            QQplot(
+                results.p_value,
+                savefig=os.path.join(output_dir, "_QQplot_persistent-effects.png"),
+            )
+            plt.close()
+            warnings.warn(
+                "Could not save QQplot for V under provided filename (filename too long).\nSaved as '_QQplot_persistent-effects.png' instead."
+            )
 
-        results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
-        QQplot(
-            results.p_value,
-            savefig=os.path.join(
-                output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"
-            ),
-        )
-        plt.close()
         if qval_threshold is not None:
             results_sign_persistent = FDR_correction(results, cut_off=qval_threshold)
-            filename_sign = (
-                f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
-            )
-            results_sign_persistent.to_csv(
-                os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
-            )
+            try:
+                filename_sign = (
+                    f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+                )
+                results_sign_persistent.to_csv(
+                    os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+                )
+            except OSError:
+                filename_sign = f"_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+                results_sign_persistent.to_csv(
+                    os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
+                )
+                warnings.warn(
+                    f"Could not save significant results for V under provided filename (filename too long).\nSaved as '{filename_sign}' instead."
+                )
 
         print("----- Done ----- \n")
 
@@ -496,7 +553,7 @@ def validate_and_read_passed_args(
         bim, fam, bed = read_plink(args.genotype_matrix, verbose=False)
         GT_matrix = pd.DataFrame(bed.compute(), index=bim.snp, columns=fam.iid)
     else:
-        assert os.path.isfile(args.genotype_matrix), "Genotype matrix not found"
+        assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
         _, ext = os.path.splitext(args.genotype_matrix)
         if ext not in [".tsv", ".csv"]:
             raise TypeError(
@@ -535,8 +592,25 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in cell metadata do not match individual IDs in the kinship matrix."
             )
+        # gt_pcs = None
     else:
         kinship = None
+        # if args.genotype_pcs is not None:
+        #     assert os.path.isfile(args.genotype_pcs), "Genotype PCs file not found."
+        #     _, ext = os.path.splitext(args.genotype_pcs)
+        #     if ext not in [".tsv", ".csv"]:
+        #         raise TypeError(
+        #             f"Genotype PCs file must be either .tsv or .csv. File format provided: {ext}."
+        #         )
+        #     gt_pcs = pd.read_csv(args.genotype_pcs, index_col=0, sep="\t" if ext == ".tsv" else ",")
+        #     gt_pcs = gt_pcs.loc[metadata[args.individual_column].unique()]
+        #     if gt_pcs.shape[0] == 0:
+        #         raise ValueError(
+        #             "Individual IDs in cell metadata do not match individual IDs in the genotype PCs."
+        #         )
+        # else:
+        #     pca = PCA(n_components=20).fit_transform(GT_matrix_standardised.values)
+        #     gt_pcs = pd.DataFrame(pca, index = GT_matrix_standardised.index, columns = ["PC"+str(i) for i in range(1,21)])
 
     files = [
         f
@@ -544,9 +618,9 @@ def validate_and_read_passed_args(
         if os.path.isfile(os.path.join(args.model_output_dir, f))
     ]
     U_context = [
-        re.match("(.*CxG_embedding.tsv)", f)
+        re.match("(.*U_embedding.tsv)", f)
         for f in files
-        if re.match(".*CxG_embedding.tsv", f) is not None
+        if re.match(".*U_embedding.tsv", f) is not None
     ]
     if len(U_context) > 0:
         U_context = U_context[0].groups()[0]
@@ -561,9 +635,9 @@ def validate_and_read_passed_args(
         U_context = None
 
     V_persistent = [
-        re.match("(.*persistent_embedding.tsv)", f)
+        re.match("(.*V_embedding.tsv)", f)
         for f in files
-        if re.match(".*persistent_embedding.tsv", f) is not None
+        if re.match(".*V_embedding.tsv", f) is not None
     ]
     if len(V_persistent) > 0:
         V_persistent = V_persistent[0].groups()[0]
@@ -593,90 +667,105 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model_output_dir",
-        help="Absolute path of the directory containing the inference results (embeddings) files of the LIVI model.",
         type=str,
         required=True,
+        help="Absolute path of the directory containing the inference results (embeddings) files of the LIVI model.",
     )
     parser.add_argument(
         "--cell_metadata_file",
-        help="Absolute path of the file containing metadata info (individual ID, batch etc.) for each cell. Similar to adata.obs. ATTENTION: Cell IDs must be the first column!",
         type=str,
         required=True,
+        help="Absolute path of the file containing metadata info (individual ID, batch etc.) for each cell. Similar to adata.obs. ATTENTION: Cell IDs must be the first column!",
     )
     parser.add_argument(
         "--individual_column",
         "-id",
-        help="Column name in cell metadata (adata.obs) indicating the individual the sample (cell) comes from.",
         type=str,
         required=True,
+        help="Column name in cell metadata (adata.obs) indicating the individual the sample (cell) comes from.",
     )
     parser.add_argument(
         "--genotype_matrix",
         "-GT_matrix",
-        help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
         type=str,
         required=True,
+        help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
     )
     parser.add_argument(
         "--plink",
         action="store_true",
-        help="If PLINK genotype files (bim, bed, fam) are provided instead of a GT matrix in .tsv format.",
         default=False,
+        help="If PLINK genotype files (bim, bed, fam) are provided instead of a GT matrix in .tsv format.",
     )
     parser.add_argument(
         "--kinship",
         "-K",
-        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
         type=str,
+        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
     )
+    # parser.add_argument(
+    #     "--genotype_pcs",
+    #     "-GT_pcs",
+    #     default=None,
+    #     type=str,
+    #     help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing.",
+    # )
     parser.add_argument(
         "--quantile_normalise",
         action="store_true",
-        help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
         default=False,
+        help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
     )
     parser.add_argument(
         "--variable_factors",
         nargs="*",
+        default=None,
         help="Test only those variable factors for interaction effects (zero-based index).",
     )
     parser.add_argument(
         "--variance_threshold",
+        default=None,
         type=float,
         help="Test only those factors whose variance across cells is above this threshold. Ignored if `variable_factors` are provided.",
     )
     parser.add_argument(
         "--batch_column",
-        help="Column name in cell metadata (adata.obs) indicating the batch the sample (cell) comes from.",
+        default=None,
         type=str,
+        help="Column name in cell metadata (adata.obs) indicating the batch the sample (cell) comes from.",
     )
     parser.add_argument(
         "--age_column",
-        help="Column name in cell metadata (adata.obs) indicating the age of the individual.",
+        default=None,
         type=str,
+        help="Column name in cell metadata (adata.obs) indicating the age of the individual.",
     )
     parser.add_argument(
         "--sex_column",
-        help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
+        default=None,
         type=str,
+        help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
     )
     parser.add_argument(
         "--multiple_testing_threshold",
         "-fdr",
+        default=None,
         type=float,
         help="Storey q-value threshold for multiple testing correction.",
     )
     parser.add_argument(
         "--output_dir",
         "-od",
-        help="Absolute path of the directory to save the testing results.",
+        default=None,
         type=str,
+        help="Absolute path of the directory to save the testing results.",
     )
     parser.add_argument(
         "--output_file_prefix",
         "-ofp",
-        help="Common prefix of the output results files.",
+        default=None,
         type=str,
+        help="Common prefix of the output results files.",
     )
 
     args = parser.parse_args()
@@ -688,14 +777,14 @@ if __name__ == "__main__":
         GT_matrix_standardised,
         bim,
         kinship,
-        Uint,
-        Vadd,
+        U,
+        V,
     ) = validate_and_read_passed_args(args)
     covariates = set_up_covariates(args, metadata)
 
     run_LIVI_genetic_association_testing(
-        U_context=Uint,
-        V_persistent=Vadd,
+        U_context=U,
+        V_persistent=V,
         GT_matrix=GT_matrix_standardised,
         bim=bim,
         Kinship=kinship,
@@ -705,7 +794,7 @@ if __name__ == "__main__":
         quantile_norm=args.quantile_normalise,
         variance_threshold=args.variance_threshold,
         variable_factors=args.variable_factors,
-        qval_threshold=args.multiple_testing_threshold
-        if args.multiple_testing_threshold
-        else None,
+        qval_threshold=(
+            args.multiple_testing_threshold if args.multiple_testing_threshold else None
+        ),
     )
