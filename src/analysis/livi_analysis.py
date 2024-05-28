@@ -15,6 +15,7 @@ import argparse
 import os
 import re
 import sys
+import warnings
 from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -36,17 +37,12 @@ from src.analysis.livi_testing import (
 from src.analysis.plotting import (
     cell_state_factors_heatmap,
     overlap_with_known_eQTLs,
-    plot_A_sparsity,
     plot_ID_similarity,
     plot_U_factor_similarity,
     visualise_cell_state_latent,
 )
 from src.data_modules.livi_data import LIVIDataModule
-from src.models.livi2 import (
-    LIVI2_experimental,
-    LIVI2_freeze,
-    LIVI2_freeze_continuous_A2,
-)
+from src.models.livi2 import LIVI2_experimental_continuous_A, LIVI2_final
 
 
 def validate_and_read_passed_args(
@@ -208,8 +204,9 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI2_experimental.load_from_checkpoint(
-        os.path.join(args.model_run_dir, "checkpoints", checkpoint), device="cpu"
+    LIVI_model = LIVI2_final.load_from_checkpoint(
+        os.path.join(args.model_run_dir, "checkpoints", checkpoint),
+        map_location=torch.device("cpu"),
     )
 
     if args.output_file_prefix:
@@ -219,21 +216,18 @@ def validate_and_read_passed_args(
             n_persistent = LIVI_model.n_persistent_factors
             encoder_h = "_".join([str(d) for d in LIVI_model.hparams.encoder_hidden_dims])
             layer_norm = LIVI_model.hparams.layer_norm
-            try:
-                batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
-            except AttributeError:
-                batch_norm_dec = False
+            batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
             lr = LIVI_model.hparams.learning_rate
             adversary_weight = LIVI_model.hparams.adversary_weight
             adversary_h = "_".join([str(d) for d in LIVI_model.hparams.adversary_hidden_dims])
             adversary_lr = LIVI_model.hparams.adversary_learning_rate
             adversary_steps = LIVI_model.hparams.adversary_steps
             l1_weight = LIVI_model.hparams.l1_weight
+            l1_weight_A = LIVI_model.hparams.l1_weight_A
             warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
             warmup_epochs_G = LIVI_model.warmup_epochs_G
-            hierarchical = "fixed-A" if LIVI_model.hparams.hierarchical_model else "learnable-A"
 
-            of_prefix = f"{hierarchical}_zdim{zdim}_{n_gxc}-context-factors_{n_persistent}-persistent-factors_BatchNorm-decoder-{batch_norm_dec}_layer-norm-{layer_norm}_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}"
+            of_prefix = f"zdim{zdim}_{n_gxc}-U-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
         else:
             of_prefix = args.output_file_prefix
     else:
@@ -269,11 +263,11 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         'cell-state_latent' (torch.Tensor): Cell state latent space.
         'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
         'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
-        'context_effects' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-        'context_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
-        'Bernoulli_logits' (torch.Tensor): Learned Bernoulli logits for the assignment of context-specific factors to cell-state factors, if not a fixed hierarchical model.
-        'persistent_effects' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
-        'persistent_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
+        'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
+        'CxG_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+        'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
+        'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
+        'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
     """
 
     X = (
@@ -294,51 +288,136 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         index=adata.obs.index,
         columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)],
     )
-    zbase.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_cell-state_latent.tsv"),
-        sep="\t",
-        header=True,
-        index=True,
-    )
-
-    visualise_cell_state_latent(
-        z=zbase,
-        cell_metadata=adata.obs,
-        output_dir=output_dir,
-        of_prefix=of_prefix,
-        format="png",
-        args=args,
-    )
-    plt.close()
-
-    cell_state_factors_heatmap(
-        cell_state_factors=zbase.values,
-        cell_idx=range(adata.obs.shape[0]),
-        cell_metadata=adata.obs,
-        celltype_column=args.celltype_column,
-        row_cluster=True,
-        column_cluster=False,
-        metric="euclidean",
-        factors=None,
-        zscore=None,
-        color_map="vlag",
-        savefig=os.path.join(output_dir, f"{of_prefix}.png"),
-        return_df=False,
-    )
-    plt.close()
+    try:
+        zbase.to_csv(
+            os.path.join(output_dir, f"{of_prefix}_cell-state_latent.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+    except OSError:
+        zbase.to_csv(
+            os.path.join(output_dir, "_cell-state_latent.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+        warnings.warn(
+            "Could not save cell-state latent dataframe under provided filename (filename too long).\nSaved as '_cell-state_latent.tsv' instead."
+        )
+    try:
+        visualise_cell_state_latent(
+            z=zbase,
+            cell_metadata=adata.obs,
+            output_dir=output_dir,
+            of_prefix=of_prefix,
+            format="png",
+            args=args,
+        )
+        plt.close()
+    except OSError:
+        visualise_cell_state_latent(
+            z=zbase,
+            cell_metadata=adata.obs,
+            output_dir=output_dir,
+            of_prefix="",
+            format="png",
+            args=args,
+        )
+        plt.close()
+        warnings.warn(
+            "Could not save cell-state factor UMAP under provided filename (filename too long).\nSaved with default filename instead."
+        )
+    try:
+        cell_state_factors_heatmap(
+            cell_state_factors=zbase.to_numpy(),
+            cell_idx=range(adata.obs.shape[0]),
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
+            row_cluster=True,
+            column_cluster=False,
+            metric="euclidean",
+            factors=None,
+            z_score=None,
+            color_map="vlag",
+            savefig=os.path.join(output_dir, f"{of_prefix}.png"),
+            return_df=False,
+        )
+        plt.close()
+        # Z-score across celltypes
+        cell_state_factors_heatmap(
+            cell_state_factors=zbase.to_numpy(),
+            cell_idx=range(adata.obs.shape[0]),
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
+            color_map="vlag",
+            row_cluster=True,
+            column_cluster=False,
+            z_score=1,
+            savefig=os.path.join(output_dir, f"{of_prefix}_Zscored.png"),
+            return_df=False,
+        )
+        plt.close()
+    except OSError:
+        cell_state_factors_heatmap(
+            cell_state_factors=zbase.to_numpy(),
+            cell_idx=range(adata.obs.shape[0]),
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
+            row_cluster=True,
+            column_cluster=False,
+            metric="euclidean",
+            factors=None,
+            z_score=None,
+            color_map="vlag",
+            savefig=os.path.join(output_dir, ""),
+            format="png",
+            return_df=False,
+        )
+        plt.close()
+        # Z-score across celltypes
+        cell_state_factors_heatmap(
+            cell_state_factors=zbase.to_numpy(),
+            cell_idx=range(adata.obs.shape[0]),
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
+            row_cluster=True,
+            column_cluster=False,
+            metric="euclidean",
+            factors=None,
+            z_score=1,
+            color_map="vlag",
+            savefig=os.path.join(output_dir, "Zscored.png"),
+            return_df=False,
+        )
+        plt.close()
+        warnings.warn(
+            "Could not save cell-state factor heatmap under provided filename (filename too long).\nSaved with default filename instead."
+        )
 
     cell_state_decoder = livi_results["cell-state_decoder"].detach().numpy()
     cell_state_decoder = pd.DataFrame(
         cell_state_decoder, index=adata.var.index, columns=zbase.columns
     )
-    cell_state_decoder.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_cell-state_decoder.tsv"),
-        sep="\t",
-        header=True,
-        index=True,
-    )
+    try:
+        cell_state_decoder.to_csv(
+            os.path.join(output_dir, f"{of_prefix}_cell-state_decoder.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+    except OSError:
+        cell_state_decoder.to_csv(
+            os.path.join(output_dir, "_cell-state_decoder.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+        warnings.warn(
+            "Could not save cell-state decoder dataframe under provided filename (filename too long).\nSaved as '_cell-state_decoder.tsv' instead."
+        )
 
-    U_context = livi_results["CxG_effects"].detach().numpy()
+    U_context = livi_results["U_embedding"].detach().numpy()
     if args.variance_threshold:
         variable_factors = np.where(np.var(U_context, axis=0) >= args.variance_threshold)[0]
         U_context = U_context[:, variable_factors].astype(np.float32)
@@ -348,15 +427,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     colnames_context = (
         [f"U_Factor{f}" for f in variable_factors + 1]
         if args.variance_threshold
-        else (
-            [
-                f"U_Factor{f}_{gf}"
-                for f in range(1, int(LIVI_model.z_dim) + 1)
-                for gf in range(1, LIVI_model.n_gxc_factors + 1)
-            ]
-            if LIVI_model.hparams.hierarchical_model
-            else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
-        )
+        else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
     )
     U_context = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
     U_context = (
@@ -366,25 +437,50 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         .drop_duplicates()
         .set_index(args.individual_column)
     )
-    U_context.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
-        sep="\t",
-        header=True,
-        index=True,
-    )
+    try:
+        U_context.to_csv(
+            os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+    except OSError:
+        U_context.to_csv(
+            os.path.join(output_dir, "_U_embedding.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+        warnings.warn(
+            "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
+        )
+
     context_decoder = livi_results["CxG_decoder"].detach().numpy()
     context_decoder = pd.DataFrame(
-        context_decoder, index=adata.var.index, columns=colnames_context
+        context_decoder,
+        index=adata.var.index,
+        columns=[f"CxG_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
     )
-    context_decoder.to_csv(
-        os.path.join(output_dir, f"{of_prefix}_U_decoder.tsv"),
-        sep="\t",
-        header=True,
-        index=True,
-    )
+    try:
+        context_decoder.to_csv(
+            os.path.join(output_dir, f"{of_prefix}_CxG_decoder.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+    except OSError:
+        context_decoder.to_csv(
+            os.path.join(output_dir, "_CxG_decoder.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+        warnings.warn(
+            "Could not save CxG decoder dataframe under provided filename (filename too long).\nSaved as '_CxG_decoder.tsv' instead."
+        )
 
-    if livi_results["persistent_effects"] is not None:
-        V_persistent = livi_results["persistent_effects"].detach().numpy()
+    if livi_results["V_embedding"] is not None:
+        V_persistent = livi_results["V_embedding"].detach().numpy()
         colnames_persistent = [
             f"V_Factor{f}" for f in range(1, LIVI_model.n_persistent_factors + 1)
         ]
@@ -398,51 +494,72 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             .drop_duplicates()
             .set_index(args.individual_column)
         )
-        V_persistent.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_V_embedding.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
-        persistent_decoder = livi_results["persistent_decoder"].detach().numpy()
+        try:
+            V_persistent.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_V_embedding.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+        except OSError:
+            V_persistent.to_csv(
+                os.path.join(output_dir, "_V_embedding.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+            warnings.warn(
+                "Could not save V embedding dataframe under provided filename (filename too long).\nSaved as '_V_embedding.tsv' instead."
+            )
+
+        persistent_decoder = livi_results["V_decoder"].detach().numpy()
         persistent_decoder = pd.DataFrame(
             persistent_decoder, index=adata.var.index, columns=colnames_persistent
         )
-        persistent_decoder.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_V_decoder.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
+        try:
+            persistent_decoder.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_V_decoder.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+        except OSError:
+            persistent_decoder.to_csv(
+                os.path.join(output_dir, "_V_decoder.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+            warnings.warn(
+                "Could not save V decoder dataframe under provided filename (filename too long).\nSaved as '_V_decoder.tsv' instead"
+            )
+
     else:
         V_persistent = None
         persistent_decoder = None
 
-    if livi_results["Bernoulli_logits"] is not None and not LIVI_model.hparams.hierarchical_model:
-        bernoulli_logits = livi_results["Bernoulli_logits"].detach().numpy()
-        # Sample 50 times from the learned distribution to define the factor assignments
-        # As = [torch.where(torch.distributions.RelaxedBernoulli(temperature=0.01, logits=LIVI_model.bernoulli_logits).sample() < 0.5, 0, 1).to(torch.float).detach().numpy() for _ in range(10)]
-        As = [
-            torch.distributions.ContinuousBernoulli(logits=livi_results["Bernoulli_logits"])
-            .sample()
-            .detach()
-            .numpy()
-            for _ in range(50)
-        ]
-        As = np.stack(As)
-        assignment_matrix = np.median(As, axis=0)
-        assignment_matrix = pd.DataFrame(
-            assignment_matrix, index=zbase.columns, columns=U_context.columns
-        )
+    assignment_matrix = torch.sigmoid(livi_results["assignment_matrix"]).detach().numpy()
+
+    assignment_matrix = pd.DataFrame(
+        assignment_matrix, index=zbase.columns, columns=U_context.columns
+    )
+    try:
         assignment_matrix.to_csv(
             os.path.join(output_dir, f"{of_prefix}_factor_assignment_matrix.tsv"),
             sep="\t",
             header=True,
             index=True,
         )
-    else:
-        bernoulli_logits = None
-        assignment_matrix = None
+    except OSError:
+        assignment_matrix.to_csv(
+            os.path.join(output_dir, "_factor_assignment_matrix.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+        warnings.warn(
+            "Could not save A matrix dataframe under provided filename (filename too long).\nSaved as '_factor_assignment_matrix.tsv' instead."
+        )
 
     return (
         zbase,
@@ -451,7 +568,6 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         context_decoder,
         V_persistent,
         persistent_decoder,
-        bernoulli_logits,
         assignment_matrix,
     )
 
@@ -480,7 +596,6 @@ def main(args):
         context_decoder,
         V_persistent,
         persistent_decoder,
-        bernoulli_logits,
         A,
     ) = LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args)
 
@@ -509,28 +624,31 @@ def main(args):
     associations_CxG = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
 
-    if A is not None:
-        plot_A_sparsity(
-            A=A,
-            associated_factors=associations_CxG.Factor.unique(),
-            plot_title=f"{of_prefix}\n $N$ fSNPS: {associations_CxG.SNP_id.nunique()}\n $N$ CxG factors: {associations_CxG.Factor.nunique()}",
-            savefig=os.path.join(output_dir, of_prefix),
-        )
     ## Exceptions for too-long filenames
     try:
         plot_U_factor_similarity(
             U=U_context,
             associated_factors=associations_CxG.Factor.unique(),
             A=A,
+            assign_to_celltypes=True,
+            cell_state_factors=zbase,
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
             savefig=os.path.join(output_dir, of_prefix),
         )
     except OSError:
-        print(f"Could not save U factor similarity plot under provided filename (filename too long).")
         plot_U_factor_similarity(
             U=U_context,
             associated_factors=associations_CxG.Factor.unique(),
             A=A,
+            assign_to_celltypes=True,
+            cell_state_factors=zbase,
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
             savefig=os.path.join(output_dir, ""),
+        )
+        warnings.warn(
+            "Could not save U factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
         )
 
     try:
@@ -540,11 +658,13 @@ def main(args):
             savefig=os.path.join(output_dir, of_prefix),
         )
     except OSError:
-        print(f"Could not save individual similarity plot under provided filename (filename too long).")
         plot_ID_similarity(
             U=U_context,
             associated_factors=associations_CxG.Factor.unique(),
             savefig=os.path.join(output_dir, ""),
+        )
+        warnings.warn(
+            "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
         )
 
     try:
@@ -560,7 +680,6 @@ def main(args):
             format=None,
         )
     except OSError as err:
-        print(f"Could not save overlap with known eQTLs plots under provided filename (filename too long).")
         overlap_with_known_eQTLs(
             known_trans_eQTLs=known_trans_eQTLs,
             SNP_colname_trans=SNP_colname_trans,
@@ -572,97 +691,114 @@ def main(args):
             savefig=os.path.join(output_dir, ""),
             format=None,
         )
+        warnings.warn(
+            "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+        )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--model_run_dir",
-        help="Absolute path of the directory containing the config files and checkpoints of the LIVI model.",
         type=str,
         required=True,
+        help="Absolute path of the directory containing the config files and checkpoints of the LIVI model.",
     )
     parser.add_argument(
         "--checkpoint",
-        help="Which checkpoint to use; either 'last' or 'best'. ",
         type=str,
         default="last",
         choices=["best", "last"],
         required=True,
+        help="Which checkpoint to use; either 'last' or 'best'. ",
     )
     parser.add_argument(
         "--adata",
-        help="Absolute path of the AnnData file containing the scRNA-seq data to be used for inference.",
         type=str,
         required=True,
+        help="Absolute path of the AnnData file containing the scRNA-seq data to be used for inference.",
+    )
+    parser.add_argument(
+        "--celltype_column",
+        "-ct",
+        type=str,
+        required=True,
+        help="Column name in cell metadata (adata.obs) indicating the celltype.",
     )
     parser.add_argument(
         "--individual_column",
         "-id",
-        help="Column name in cell metadata (adata.obs) indicating the individual the sample (cell) comes from.",
         type=str,
         required=True,
+        help="Column name in cell metadata (adata.obs) indicating the individual the sample (cell) comes from.",
     )
     parser.add_argument(
         "--genotype_matrix",
         "-GT_matrix",
-        help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
         type=str,
         required=True,
+        help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
     )
     parser.add_argument(
         "--plink",
         action="store_true",
-        help="If PLINK genotype files (bim, bed, fam) are provided instead of a GT matrix in .tsv format.",
         default=False,
+        help="If PLINK genotype files (bim, bed, fam) are provided instead of a GT matrix in .tsv format.",
     )
     parser.add_argument(
         "--kinship",
         "-K",
-        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
         type=str,
+        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
     )
     parser.add_argument(
         "--quantile_normalise",
         action="store_true",
-        help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
         default=False,
+        help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
     )
     parser.add_argument(
         "--variable_factors",
         nargs="*",
+        default=None,
         help="Test only those variable factors for interaction effects (zero-based index).",
     )
     parser.add_argument(
         "--variance_threshold",
+        default=None,
         type=float,
         help="Test only factors whose variance across cells is above this threshold. Ignored if `variable_factors` are provided.",
     )
     parser.add_argument(
         "--adata_layer",
-        help="key in adata layers containing the raw counts. If `None`, then adata.X is used .",
+        default=None,
         type=str,
+        help="key in adata layers containing the raw counts. If `None`, then adata.X is used .",
     )
     parser.add_argument(
         "--batch_column",
-        help="Column name in cell metadata (adata.obs) indicating the experimental batch the sample (cell) comes from.",
+        default=None,
         type=str,
+        help="Column name in cell metadata (adata.obs) indicating the experimental batch the sample (cell) comes from.",
     )
     parser.add_argument(
         "--sex_column",
-        help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
+        default=None,
         type=str,
+        help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
     )
     parser.add_argument(
         "--age_column",
-        help="Column name in cell metadata (adata.obs) indicating the age of the individual.",
+        default=None,
         type=str,
+        help="Column name in cell metadata (adata.obs) indicating the age of the individual.",
     )
     parser.add_argument(
-        "--celltype_column",
-        "-ct",
-        help="Column name in cell metadata (adata.obs) indicating the celltype.",
+        "--other_covars",
+        nargs="*",
+        default=None,
         type=str,
+        help="Column names in cell metadata (adata.obs) of other individual covariates to use in the null LMM.",
     )
     parser.add_argument(
         "--multiple_testing_threshold",
@@ -672,26 +808,29 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--known_trans_eQTLs",
-        help="Absolute path of the .tsv file with known trans eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
+        default=None,
         type=str,
+        help="Absolute path of the .tsv file with known trans eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
     )
     parser.add_argument(
         "--known_cis_eQTLs",
-        help="Absolute path of the .tsv file with known cis eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
+        default=None,
         type=str,
+        help="Absolute path of the .tsv file with known cis eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
     )
     parser.add_argument(
         "--output_file_prefix",
         "-ofp",
-        help="Common prefix of the output files.",
+        default=None,
         type=str,
+        help="Common prefix of the output files.",
     )
     parser.add_argument(
         "--output_dir",
         "-od",
-        help="Absolute path of the directory to save the inference results.",
+        default=None,
         type=str,
-        required=True,
+        help="Absolute path of the directory to save the inference results.",
     )
 
     args = parser.parse_args()
