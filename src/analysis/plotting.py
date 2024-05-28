@@ -456,8 +456,10 @@ def cell_state_factors_heatmap(
         )
 
     df_plot["Cell type"] = cell_metadata.iloc[cell_idx][celltype_column].values
-    # Average of selected factors across cells belonging to the same day
-    df_celltype = df_plot.groupby("Cell type").mean().reset_index().set_index("Cell type")
+    # Average of selected factors across cells belonging to the same celltype
+    df_celltype = (
+        df_plot.groupby(by="Cell type", observed=True).mean().reset_index().set_index("Cell type")
+    )
 
     sns.set_style("white")
 
@@ -543,7 +545,7 @@ def plot_celltype_factors(
         ext = "." + format if format else ".png"
 
     df_celltype = (
-        cell_type_factor_df.groupby(celltype_column)
+        cell_type_factor_df.groupby(by=celltype_column, observed=True)
         .mean()
         .reset_index()
         .set_index(celltype_column)
@@ -757,7 +759,11 @@ def plot_A_sparsity(
 def plot_U_factor_similarity(
     U: pd.DataFrame,
     associated_factors: list,
-    A: Optional[pd.DataFrame] = None,
+    A: pd.DataFrame,
+    assign_to_celltypes: bool = False,
+    cell_state_factors: Optional[pd.DataFrame] = None,
+    cell_metadata: Optional[pd.DataFrame] = None,
+    celltype_column: Optional[str] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
 ) -> None:
@@ -778,6 +784,7 @@ def plot_U_factor_similarity(
         None
     """
 
+    A = A.filter(associated_factors)
     U = U.filter(associated_factors)
     pairwise_correlations = U.corr(method="pearson")
 
@@ -799,9 +806,35 @@ def plot_U_factor_similarity(
             bbox_inches="tight",
         )
     plt.close()
+    # Assign cell-state factors to known cell types
+    if assign_to_celltypes:
+        assert (
+            cell_state_factors is not None
+            and cell_metadata is not None
+            and celltype_column is not None
+        ), "To assign cell-state factors to celltypes, the `cell_state_factors`, `cell_metadata` and `celltype_column` arguments are required."
+        df_celltype = cell_state_factors.copy()
+        df_celltype["Cell type"] = cell_metadata[celltype_column].values
+        # Average of each factor across cells belonging to the same celltype
+        df_celltype = (
+            df_celltype.groupby(by="Cell type", observed=True)
+            .mean()
+            .reset_index()
+            .set_index("Cell type")
+        )
+        # zscore factor values across celltypes
+        df_celltype = pd.DataFrame(
+            zscore(df_celltype.to_numpy(), axis=0),
+            index=df_celltype.index,
+            columns=df_celltype.columns,
+        )
+        # Assign each factor to the celltype with the highest value
+        temp_dict = df_celltype.idxmax(axis=0).to_dict()
+        A = A.rename(index=temp_dict)
+
     # Cluster cell-state factors based on the U factors that are assigned to them
     clm = sns.clustermap(
-        A.filter(associated_factors),
+        A,
         col_cluster=False,
         row_cluster=True,
         metric="cosine",
@@ -820,26 +853,25 @@ def plot_U_factor_similarity(
         )
     plt.close()
 
-    if A is not None:
-        # Cluster U factors based on the cell-state factors in which they are active
-        clm = sns.clustermap(
-            A.filter(associated_factors),
-            col_cluster=True,
-            row_cluster=False,
-            metric="cosine",
-            cmap="RdBu",
-            cbar_pos=(0.99, 0.14, 0.022, 0.2),
-            center=1,
-            rasterized=ext == ".svg",
+    # Cluster U factors based on the cell-state factors in which they are active
+    clm = sns.clustermap(
+        A,
+        col_cluster=True,
+        row_cluster=False,
+        metric="cosine",
+        cmap="RdBu",
+        cbar_pos=(0.99, 0.14, 0.022, 0.2),
+        center=1,
+        rasterized=ext == ".svg",
+    )
+    if savefig:
+        clm.savefig(
+            f"{prefix}_U-factor_clustering_based_on_cell-state-factors{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
         )
-        if savefig:
-            clm.savefig(
-                f"{prefix}_U-factor_clustering_based_on_cell-state-factors{ext}",
-                dpi=200,
-                transparent=True,
-                bbox_inches="tight",
-            )
-        plt.close()
+    plt.close()
 
 
 def plot_ID_similarity(
@@ -856,8 +888,10 @@ def plot_ID_similarity(
         ext = "." + format if format else ".png"
 
     # Cluster individuals based on significant U factor values
+    U = U.filter(associated_factors)
+
     clm = sns.clustermap(
-        U.filter(associated_factors),
+        U,
         col_cluster=False,
         row_cluster=True,
         metric="cosine",
@@ -876,7 +910,7 @@ def plot_ID_similarity(
     plt.close()
 
     iid_distances = squareform(
-        pdist(U.filter(associated_factors), metric="cosine")
+        pdist(U, metric="cosine")
     )  # 0: identical, 1: unrelated, 2: opposite
     iid_distances = pd.DataFrame(iid_distances, index=U.index, columns=U.index)
     plt.figure(figsize=(12, 10))
@@ -989,7 +1023,7 @@ def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dp
             handletextpad=0.5,
         )
         plt.title(
-            plot_title,
+            label=plot_title,
             fontdict={"weight": "bold", "fontsize": 8},
         )
         if asax is False:
@@ -1209,7 +1243,7 @@ def overlap_with_known_eQTLs(
             )
             .set_index("index")
         )
-        plot_df = plot_df.groupby("Group").mean()
+        plot_df = plot_df.groupby(by="Group", observed=True).mean()
 
         plt.figure(figsize=(10, 8))
         sns.heatmap(
@@ -1242,7 +1276,7 @@ def overlap_with_known_eQTLs(
 
             venny4py_custom_colors(
                 ssets,
-                plot_title="Overlap between signififcant SNPs",
+                plot_title="Overlap between significant SNPs",
                 out=f"{prefix}_Venn_LIVI-persistent-vs-known-eQTLs",
                 asax=False,
                 ext=ext,
@@ -1338,7 +1372,7 @@ def overlap_with_known_eQTLs(
             )
             .set_index("index")
         )
-        plot_df = plot_df.groupby("Group").mean()
+        plot_df = plot_df.groupby(by="Group", observed=True).mean()
 
         plt.figure(figsize=(10, 8))
         sns.heatmap(
