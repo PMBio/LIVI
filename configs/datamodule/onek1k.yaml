@@ -1,17 +1,17 @@
 _target_: src.data_modules.livi_data.LIVIDataModule
 
-adata: ${paths.data_dir}/OneK1K/LogNorm_counts_across_celltypes_DCRM_protein-coding_Azimuth_300k_HVG-HEX_immune.h5ad
+adata: ${paths.data_dir}/OneK1K/LogNorm_counts_across_celltypes_DCRM_protein-coding_Azimuth_only-immune-cells_HVG-HEX_reduced.h5ad
 y_key: individual
 use_size_factor: True
 size_factor_key: null
 donor_sex_key: sex
-experimental_batch_key: latent
+experimental_batch_key: pool
 layer_key: counts
 data_split: [1.0]
-batch_size: 528
-num_workers: 0
+batch_size: 1024
+num_workers: 5
 seed: 32
 shuffle: True
-pin_memory: False
+pin_memory: True
 drop_last: False
 strict: False

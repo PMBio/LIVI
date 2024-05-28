@@ -1,5 +1,6 @@
-"""Base class for LIVI models."""
+"""Base class for LIVI model."""
 
+from math import sqrt
 from typing import List, Optional, Union
 
 import pytorch_lightning as pl
@@ -42,7 +43,6 @@ class Encoder(nn.Module):
             layer_norm=layer_norm,
             device=self.device,
         )
-
         # map to mean and diagonal covariance of Gaussian
         self.mean = nn.Linear(encoder_hidden_dims[-1], z_dim, device=self.device)
         self.log_scale = nn.Linear(encoder_hidden_dims[-1], z_dim, device=self.device)
@@ -196,7 +196,7 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
 
 
-class LIVI2_Decoder(nn.Module):
+class LIVI_Decoder(nn.Module):
     """Decoder module with Negative Binomial likelihood and batch and sex effect correction.
 
     This module encompasses separate (linear) decoders for cell-state and genetic factors.
@@ -210,11 +210,11 @@ class LIVI2_Decoder(nn.Module):
         layer_norm: bool,
         n_gxc_factors: int,
         n_persistent_factors: int,
-        hierarchical_decoder: bool = True,
         pretrain_VAE: bool = True,
         pretrain_G: bool = False,
-        batch_norm: bool = False,
+        batch_norm: bool = True,
         device: str = "cuda",
+        genetics_seed: Optional[int] = None,
     ):
         """Initialize module.
 
@@ -234,6 +234,7 @@ class LIVI2_Decoder(nn.Module):
         self._pretrain_G = pretrain_G
         self.batch_norm = batch_norm
         self.device = device
+        self.G_seed = genetics_seed
 
         self.mean = create_mlp(
             input_size=self._z_dim,
@@ -245,17 +246,19 @@ class LIVI2_Decoder(nn.Module):
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
         if self._num_genetic_factors != 0:
-            self.context_decoder = create_mlp(
-                input_size=(
-                    self._z_dim * self._num_genetic_factors
-                    if hierarchical_decoder
-                    else self._num_genetic_factors
-                ),
+            self.CxG_decoder = create_mlp(
+                input_size=self._num_genetic_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
                 layer_norm=layer_norm,
                 device=self.device,
             )
+            if self.G_seed is not None:  # Initialise weights with the given random seed
+                current_state = torch.get_rng_state()
+                torch.manual_seed(self.G_seed)
+                self.CxG_decoder[0].reset_parameters()
+                torch.set_rng_state(current_state)
+
         if self._num_persistent_factors != 0:
             self.persistent_decoder = create_mlp(
                 input_size=self._num_persistent_factors,
@@ -264,6 +267,11 @@ class LIVI2_Decoder(nn.Module):
                 layer_norm=layer_norm,
                 device=self.device,
             )
+            if self.G_seed is not None:  # Initialise weights with the given random seed
+                current_state = torch.get_rng_state()
+                torch.manual_seed(self.G_seed)
+                self.persistent_decoder[0].reset_parameters()
+                torch.set_rng_state(current_state)
 
         if self.batch_norm:
             self.BN_decoder = nn.BatchNorm1d(self._x_dim, device=self.device)
@@ -307,7 +315,7 @@ class LIVI2_Decoder(nn.Module):
             y_add = self.persistent_decoder(persistent_G)
             decoder_out = decoder_out + y_add
         if not self.pretrain_G and self._num_genetic_factors != 0 and GxC is not None:
-            y_gc = self.context_decoder(GxC)
+            y_gc = self.CxG_decoder(GxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)

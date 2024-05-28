@@ -1,7 +1,7 @@
 # --------- pytorch --------- #
-torch>=1.10.0
+torch>=2.2.0
 torchvision>=0.11.0
-pytorch-lightning==1.8.1
+pytorch-lightning>=1.8.1
 torchmetrics==0.10.0
 
 # --------- hydra --------- #
@@ -15,10 +15,11 @@ hydra-joblib-launcher==1.2.0
 # neptune-client
 # mlflow
 # comet-ml
+tensorboard==2.16.2
 
 # --------- others --------- #
 pyrootutils     # standardizing the project root setup
-pre-commit      # hooks for applying linters on commit
+pre-commit>=3.7.0      # hooks for applying linters on commit
 rich            # beautiful text formatting in terminal
 pytest          # tests
 #  sh            # for running bash commaneds in some tests (linux/macos only)
@@ -27,9 +28,12 @@ scanpy[leiden]>=1.9.1
 statsmodels>=0.13.1
 jupyterlab
 glimix_core
-pandas_plink
+pandas_plink>=2.2.9
 multipy @ git+https://github.com/puolival/multipy
 matplotlib-venn==0.11.10
+venny4py==1.0.2
 gseapy==1.1.1
 plotnine==0.12.4
 plotnine-prism==0.3.0
+reportlab>=3.6.12
+cairosvg>=2.7.1

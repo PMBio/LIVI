@@ -19,6 +19,7 @@ from matplotlib import cm, colormaps, colors
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredText
 from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
+from scipy.spatial.distance import pdist, squareform
 from scipy.stats import probplot, zscore
 from tqdm import tqdm
 
@@ -112,7 +113,6 @@ def visualise_cell_state_latent(
         dpi=300,
         transparent=True,
     )
-    plt.close()
 
 
 def visualise_livi_embeddings(
@@ -417,7 +417,7 @@ def cell_state_factors_heatmap(
     column_cluster: bool,
     metric: str = "euclidean",
     factors: Optional[Union[List[int], np.ndarray]] = None,
-    zscore: Optional[int] = None,
+    z_score: Optional[int] = None,
     color_map: Optional[str] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
@@ -456,20 +456,22 @@ def cell_state_factors_heatmap(
         )
 
     df_plot["Cell type"] = cell_metadata.iloc[cell_idx][celltype_column].values
-    # Average of selected factors across cells belonging to the same day
-    df_celltype = df_plot.groupby("Cell type").mean().reset_index().set_index("Cell type")
+    # Average of selected factors across cells belonging to the same celltype
+    df_celltype = (
+        df_plot.groupby(by="Cell type", observed=True).mean().reset_index().set_index("Cell type")
+    )
 
     sns.set_style("white")
 
     if color_map is None:
-        color_map = "vlag" if zscore is not None else None
+        color_map = "vlag" if z_score is not None else None
     if color_map == "vlag":
         sns.clustermap(
             df_celltype,
             row_cluster=row_cluster,
             col_cluster=column_cluster,
             metric=metric,
-            z_score=zscore,
+            z_score=z_score,
             cmap=color_map,
             center=0.0,
             figsize=(10, 10),
@@ -481,7 +483,7 @@ def cell_state_factors_heatmap(
             row_cluster=row_cluster,
             col_cluster=column_cluster,
             metric=metric,
-            z_score=zscore,
+            z_score=z_score,
             cmap=color_map,
             figsize=(10, 10),
             rasterized=ext == ".svg",
@@ -493,8 +495,7 @@ def cell_state_factors_heatmap(
             dpi=200,
             transparent=True,
         )
-    plt.close()
-    
+
     if return_df:
         return df_celltype
 
@@ -507,7 +508,7 @@ def plot_celltype_factors(
     legend_fontsize: int = 20,
     axis_title_fontsize: int = 26,
     heatmap_color_map: str = "vlag",
-    zscore: bool = False,
+    z_score: bool = False,
     return_celltype_factors: bool = False,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
@@ -544,10 +545,13 @@ def plot_celltype_factors(
         ext = "." + format if format else ".png"
 
     df_celltype = (
-        cell_type_factor_df.groupby(celltype_column).mean().reset_index().set_index(celltype_column)
+        cell_type_factor_df.groupby(by=celltype_column, observed=True)
+        .mean()
+        .reset_index()
+        .set_index(celltype_column)
     )
 
-    if zscore:
+    if z_score:
         df_celltype_zscored = pd.DataFrame(
             zscore(df_celltype.to_numpy(), axis=1),
             index=df_celltype.index,
@@ -558,7 +562,7 @@ def plot_celltype_factors(
     else:
         celltype_factor_high = df_celltype.idxmax(axis=1).to_dict()
         celltype_factor_low = df_celltype.idxmin(axis=1).to_dict()
-        
+
     if cell_type_factor_df.filter(like="UMAP").shape[1] == 0:
         latent = cell_type_factor_df.filter(regex="F|factor")
         umap_df = compute_umap(latent, colnames=["UMAP1", "UMAP2"], add_latent=False)
@@ -635,7 +639,7 @@ def plot_celltype_factors(
             ax.set_title(
                 label=unique_factors[i - 2],
                 fontdict={"fontsize": axis_title_fontsize},
-               loc="center",
+                loc="center",
             )
             cb.ax.tick_params(labelsize=12)
             ax.xaxis.label.set_fontsize(axis_title_fontsize - 2)
@@ -649,7 +653,7 @@ def plot_celltype_factors(
             f"{prefix}_celltype-factors_UMAP{ext}", bbox_inches="tight", dpi=400, transparent=True
         )
     plt.close()
-    
+
     if return_celltype_factors:
         return (celltype_factor_high, celltype_factor_low)
 
@@ -751,27 +755,15 @@ def plot_A_sparsity(
         )
     plt.close()
 
-    sns.clustermap(
-        A.filter(associated_factors).astype(int),
-        col_cluster=True,
-        row_cluster=False,
-        metric="hamming",
-        cmap="Reds",
-        rasterized=ext == ".svg",
-    )
-    if savefig:
-        plt.savefig(
-            f"{prefix}_A-design-matrix_CxG_factor_clustering{ext}",
-            dpi=200,
-            transparent=True,
-            bbox_inches="tight",
-        )
-    plt.close()
 
-
-def plot_CxG_factor_cor(
+def plot_U_factor_similarity(
     U: pd.DataFrame,
     associated_factors: list,
+    A: pd.DataFrame,
+    assign_to_celltypes: bool = False,
+    cell_state_factors: Optional[pd.DataFrame] = None,
+    cell_metadata: Optional[pd.DataFrame] = None,
+    celltype_column: Optional[str] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
 ) -> None:
@@ -782,6 +774,7 @@ def plot_CxG_factor_cor(
     ----------
         U (pd.DataFrame): Dataframe containing CxG factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
+        A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
         format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
@@ -791,6 +784,7 @@ def plot_CxG_factor_cor(
         None
     """
 
+    A = A.filter(associated_factors)
     U = U.filter(associated_factors)
     pairwise_correlations = U.corr(method="pearson")
 
@@ -800,10 +794,10 @@ def plot_CxG_factor_cor(
     else:
         ext = "." + format if format else ".png"
 
-    # Visualize pearson cor between significant factors
+    # Visualize pearson cor between significant U factors
     plt.figure(figsize=(12, 10))
     sns.heatmap(pairwise_correlations, cmap="vlag", center=0, rasterized=ext == ".svg")
-    plt.title("Pearson's $\\rho$ between significant CxG factors", fontsize=15, pad=20)
+    plt.title("Pearson's $\\rho$ between significant $U$ factors", fontsize=15, pad=20)
     if savefig:
         plt.savefig(
             f"{prefix}_CxG_factor_correlations{ext}",
@@ -812,23 +806,618 @@ def plot_CxG_factor_cor(
             bbox_inches="tight",
         )
     plt.close()
-    # Cluster individuals based on significant factor values
+    # Assign cell-state factors to known cell types
+    if assign_to_celltypes:
+        assert (
+            cell_state_factors is not None
+            and cell_metadata is not None
+            and celltype_column is not None
+        ), "To assign cell-state factors to celltypes, the `cell_state_factors`, `cell_metadata` and `celltype_column` arguments are required."
+        df_celltype = cell_state_factors.copy()
+        df_celltype["Cell type"] = cell_metadata[celltype_column].values
+        # Average of each factor across cells belonging to the same celltype
+        df_celltype = (
+            df_celltype.groupby(by="Cell type", observed=True)
+            .mean()
+            .reset_index()
+            .set_index("Cell type")
+        )
+        # zscore factor values across celltypes
+        df_celltype = pd.DataFrame(
+            zscore(df_celltype.to_numpy(), axis=0),
+            index=df_celltype.index,
+            columns=df_celltype.columns,
+        )
+        # Assign each factor to the celltype with the highest value
+        temp_dict = df_celltype.idxmax(axis=0).to_dict()
+        A = A.rename(index=temp_dict)
+
+    # Cluster cell-state factors based on the U factors that are assigned to them
     clm = sns.clustermap(
-        U.filter(associated_factors),
+        A,
         col_cluster=False,
         row_cluster=True,
-        cmap="vlag",
-        center=0,
+        metric="cosine",
+        cmap="RdBu",
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
+        center=1,
         rasterized=ext == ".svg",
     )
-    # ax = clm.ax_heatmap
-    # ax.set_title("Clustering of individuals based on the cosine distance between CxG factors", fontsize=15, pad=20)
+    # clm.fig.suptitle("", fontsize=16, y=1.05)
     if savefig:
         clm.savefig(
-            f"{prefix}_IID_clustering_based_on_CxG_factors{ext}",
+            f"{prefix}_cell-state-factor_clustering_based_on_U-factors{ext}",
             dpi=200,
             transparent=True,
             bbox_inches="tight",
         )
     plt.close()
+
+    # Cluster U factors based on the cell-state factors in which they are active
+    clm = sns.clustermap(
+        A,
+        col_cluster=True,
+        row_cluster=False,
+        metric="cosine",
+        cmap="RdBu",
+        cbar_pos=(0.99, 0.14, 0.022, 0.2),
+        center=1,
+        rasterized=ext == ".svg",
+    )
+    if savefig:
+        clm.savefig(
+            f"{prefix}_U-factor_clustering_based_on_cell-state-factors{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
+        )
+    plt.close()
+
+
+def plot_ID_similarity(
+    U: pd.DataFrame,
+    associated_factors: list,
+    savefig: Optional[str] = None,
+    format: Optional[str] = None,
+):
+
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
+    # Cluster individuals based on significant U factor values
+    U = U.filter(associated_factors)
+
+    clm = sns.clustermap(
+        U,
+        col_cluster=False,
+        row_cluster=True,
+        metric="cosine",
+        cmap="RdBu",
+        center=1,
+        cbar_pos=(0.99, 0.14, 0.022, 0.2),
+        rasterized=ext == ".svg",
+    )
+    if savefig:
+        clm.savefig(
+            f"{prefix}_IID_clustering_based_on_U_factors{ext}",
+            dpi=200,
+            transparent=True,
+            bbox_inches="tight",
+        )
+    plt.close()
+
+    iid_distances = squareform(
+        pdist(U, metric="cosine")
+    )  # 0: identical, 1: unrelated, 2: opposite
+    iid_distances = pd.DataFrame(iid_distances, index=U.index, columns=U.index)
+    plt.figure(figsize=(12, 10))
+    sns.heatmap(iid_distances, cmap="RdBu", center=1, rasterized=True)
+    plt.title(
+        "Cosine distance between individuals based on significant CxG factors", fontsize=15, pad=20
+    )
+    plt.savefig(
+        f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
+        bbox_inches="tight",
+        dpi=300,
+        transparent=True,
+    )
+    plt.close()
+
+
+### Edited from venny4py package ###
+def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dpi=300, size=3.5):
+    from itertools import combinations
+
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import Ellipse
+    from venny4py.venny4py import get_shared as vp_get_shared
+    from venny4py.venny4py import get_unique as vp_get_unique
+
+    shared = vp_get_shared(sets)
+    unique = vp_get_unique(shared)
+    ce = ["green", "darkorange", "maroon", "royalblue"]  # colors
+    lw = size * 0.12  # line width
+    fs = size * 2  # font size
+    nc = 2  # legend cols
+    cs = 4  # columnspacing
+
+    if asax is False:
+        plt.rcParams["figure.dpi"] = 200  # dpi in notebook
+        plt.rcParams["savefig.dpi"] = dpi  # dpi in saved figure
+        fig, ax = plt.subplots(1, 1, figsize=(size, size))
+    else:
+        ax = asax
+
+    ax.set_xlim(0, 100)
+    ax.set_ylim(0, 100)
+    ax.axis("off")
+
+    # 4 sets
+    if len(sets) == 4:
+        # draw ellipses
+        ew = 45  # width
+        eh = 75  # height
+        xe = [35, 48, 52, 65]  # x coordinates
+        ye = [35, 45, 45, 35]  # y coordinates
+        ae = [225, 225, 315, 315]  # angles
+
+        for i, s in enumerate(sets):
+            ax.add_artist(
+                Ellipse(xy=(xe[i], ye[i]), width=ew, height=eh, fc=ce[i], angle=ae[i], alpha=0.3)
+            )
+            ax.add_artist(
+                Ellipse(
+                    xy=(xe[i], ye[i]),
+                    width=ew,
+                    height=eh,
+                    fc="None",
+                    angle=ae[i],
+                    ec="black",
+                    lw=lw,
+                )
+            )
+
+        # annotate
+        xt = [12, 32, 68, 88, 14, 34, 66, 86, 26, 28, 50, 50, 72, 74, 37, 60, 40, 63, 50]  # x
+        yt = [67, 79, 79, 67, 41, 70, 70, 41, 59, 26, 11, 60, 26, 59, 51, 17, 17, 51, 35]  # y
+
+        for j, s in enumerate(sets):
+            ax.text(
+                xt[j],
+                yt[j],
+                len(sets[s]),
+                ha="center",
+                va="center",
+                fontsize=fs,
+                transform=ax.transData,
+            )
+
+        for k in unique:
+            j += 1
+            ax.text(
+                xt[j],
+                yt[j],
+                len(unique[k]),
+                ha="center",
+                va="center",
+                fontsize=fs,
+                transform=ax.transData,
+            )
+
+        # legend
+        handles = [mpatches.Patch(color=ce[i], label=l, alpha=0.3) for i, l in enumerate(sets)]
+        ax.legend(
+            labels=sets,
+            handles=handles,
+            fontsize=fs * 1.1,
+            frameon=False,
+            bbox_to_anchor=(0.5, 0.99),
+            bbox_transform=ax.transAxes,
+            loc=9,
+            handlelength=1.5,
+            ncol=nc,
+            columnspacing=cs,
+            handletextpad=0.5,
+        )
+        plt.title(
+            label=plot_title,
+            fontdict={"weight": "bold", "fontsize": 8},
+        )
+        if asax is False:
+            fig.savefig(
+                f"{out}{ext}",
+                dpi=dpi,
+                bbox_inches="tight",
+                transparent=True,
+            )
+
+
+def overlap_with_known_eQTLs(
+    known_trans_eQTLs: pd.DataFrame,
+    SNP_colname_trans: str,
+    CxG_effects_LIVI: pd.DataFrame,
+    factor_assignment_matrix: pd.DataFrame,
+    known_cis_eQTLs: Optional[pd.DataFrame] = None,
+    SNP_colname_cis: Optional[str] = None,
+    persistent_effects_LIVI: Optional[pd.DataFrame] = None,
+    savefig: Optional[str] = None,
+    format: Optional[str] = None,
+):
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
+    if known_cis_eQTLs is not None:
+        only_trans_eQTLs = (
+            known_trans_eQTLs.loc[
+                ~known_trans_eQTLs[SNP_colname_trans].isin(known_cis_eQTLs[SNP_colname_cis])
+            ][SNP_colname_trans]
+            .unique()
+            .tolist()
+        )
+        only_cis_eQTLs = (
+            known_cis_eQTLs.loc[
+                ~known_cis_eQTLs[SNP_colname_cis].isin(known_trans_eQTLs[SNP_colname_trans])
+            ][SNP_colname_cis]
+            .unique()
+            .tolist()
+        )
+        both_eQTLs = (
+            known_trans_eQTLs.loc[
+                known_trans_eQTLs[SNP_colname_trans].isin(known_cis_eQTLs[SNP_colname_cis])
+            ][SNP_colname_cis]
+            .unique()
+            .tolist()
+        )
+
+        CxG_effects_LIVI = CxG_effects_LIVI.assign(
+            is_known_eQTL=CxG_effects_LIVI.apply(
+                lambda x: (
+                    "only trans-eQTLs"
+                    if x.SNP_id in only_trans_eQTLs
+                    else (
+                        "only cis-eQTLs"
+                        if x.SNP_id in only_cis_eQTLs
+                        else "cis and trans eQTLs" if x.SNP_id in both_eQTLs else "only LIVI"
+                    )
+                ),
+                axis=1,
+            )
+        )
+        # Overlap between SNPs
+        v = venn3(
+            subsets=[
+                set(CxG_effects_LIVI.SNP_id),
+                set(known_trans_eQTLs[SNP_colname_trans]),
+                set(known_cis_eQTLs[SNP_colname_cis]),
+            ],
+            set_labels=("LIVI CxG", "known $trans$-eQTLs", "known $cis$-eQTLs"),
+        )
+        [lbl.set_fontsize(15) for lbl in v.set_labels]
+        for lbl in v.subset_labels:
+            try:
+                lbl.set_fontsize(12)
+            except AttributeError:
+                pass
+        plt.title(
+            "Overlap between significant SNPs\n", fontdict={"fontsize": 18, "weight": "bold"}
+        )
+        plt.tight_layout()
+        plt.savefig(
+            f"{prefix}_Venn_LIVI-CxG-vs-known-eQTLs{ext}",
+            transparent=True,
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+        # Overlap between associated factors
+        ssets = {
+            "only cis-eQTLs": set(
+                CxG_effects_LIVI.loc[
+                    CxG_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                ].Factor.unique()
+            ),
+            "only trans-eQTLs": set(
+                CxG_effects_LIVI.loc[
+                    CxG_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                ].Factor.unique()
+            ),
+            "cis and trans eQTLs": set(
+                CxG_effects_LIVI.loc[
+                    CxG_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                ].Factor.unique()
+            ),
+            "only LIVI CxG": set(
+                CxG_effects_LIVI.loc[CxG_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
+            ),
+        }
+
+        venny4py_custom_colors(
+            ssets,
+            plot_title="Overlap between $U$ Factors associated with SNPs that are (not) known eQTLs",
+            out=f"{prefix}_Venn_U-factor-overlap-LIVI-vs-known-eQTLs",
+            asax=False,
+            ext=ext,
+            dpi=300,
+            size=3.5,
+        )
+        plt.close()
+
+        cis_factors = list(
+            set(
+                CxG_effects_LIVI.loc[
+                    CxG_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                ].Factor.unique()
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    ].Factor.unique()
+                )
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "only LIVI"
+                    ].Factor.unique()
+                )
+            )
+        )
+
+        trans_factors = list(
+            set(
+                CxG_effects_LIVI.loc[
+                    CxG_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                ].Factor.unique()
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    ].Factor.unique()
+                )
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "only LIVI"
+                    ].Factor.unique()
+                )
+            )
+        )
+
+        LIVIonly_factors = list(
+            set(
+                CxG_effects_LIVI.loc[CxG_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                    ].Factor.unique()
+                )
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                    ].Factor.unique()
+                )
+            )
+            .difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    ].Factor.unique()
+                )
+            )
+        )
+
+        plot_df = factor_assignment_matrix.filter(CxG_effects_LIVI.Factor.unique()).T
+
+        plot_df = (
+            plot_df.reset_index()
+            .assign(
+                Group=plot_df.reset_index().apply(
+                    lambda x: (
+                        "only LIVI CxG"
+                        if x["index"] in LIVIonly_factors
+                        else (
+                            "LIVI CxG and $trans$-eQTL"
+                            if x["index"] in trans_factors
+                            else (
+                                "LIVI CxG and $cis$-eQTL"
+                                if x["index"] in cis_factors
+                                else "LIVI CxG and both $cis$ and $trans$ eQTL"
+                            )
+                        )
+                    ),
+                    axis=1,
+                )
+            )
+            .set_index("index")
+        )
+        plot_df = plot_df.groupby(by="Group", observed=True).mean()
+
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(
+            plot_df,
+            annot=False,
+            cmap="inferno",
+            cbar_kws={"label": "mean $A$ across $U$ factors"},
+            rasterized=True,
+        )
+        plt.title("Cell-state factor prevalence among significant $U$ factors")
+        plt.ylabel("")
+        plt.xlabel("")
+        plt.tight_layout()
+        plt.savefig(
+            f"{prefix}_Cell-state-factor-prevalence-among-significant-U-factors{ext}",
+            dpi=500,
+            transparent=True,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+        if persistent_effects_LIVI is not None:
+            # Overlap between SNPs
+            ssets = {
+                "known cis-eQTLs": set(known_cis_eQTLs[SNP_colname_cis].tolist()),
+                "known trans-eQTLs": set(known_trans_eQTLs[SNP_colname_trans].tolist()),
+                "LIVI CxG": set(CxG_effects_LIVI.SNP_id.tolist()),
+                "LIVI persistent": set(persistent_effects_LIVI.SNP_id.tolist()),
+            }
+
+            venny4py_custom_colors(
+                ssets,
+                plot_title="Overlap between significant SNPs",
+                out=f"{prefix}_Venn_LIVI-persistent-vs-known-eQTLs",
+                asax=False,
+                ext=ext,
+                dpi=300,
+                size=3.5,
+            )
+            plt.close()
+
+    else:
+        # Overlap between SNPs
+        v = venn2(
+            subsets=[set(CxG_effects_LIVI.SNP_id), set(known_trans_eQTLs[SNP_colname_trans])],
+            set_labels=("LIVI CxG", "known $trans$-eQTLs"),
+        )
+        [lbl.set_fontsize(15) for lbl in v.set_labels]
+        for lbl in v.subset_labels:
+            try:
+                lbl.set_fontsize(12)
+            except AttributeError:
+                pass
+        plt.title(
+            "Overlap between significant SNPs\n", fontdict={"fontsize": 18, "weight": "bold"}
+        )
+        plt.tight_layout()
+        plt.savefig(
+            f"{prefix}_Venn_LIVI_vs_known-eQTLs{ext}",
+            transparent=True,
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+        # Overlap between associated factors
+        v = venn2(
+            subsets=[
+                set(
+                    CxG_effects_LIVI.loc[
+                        ~CxG_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    ].Factor.tolist()
+                ),
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    ].Factor.tolist()
+                ),
+            ],
+            set_labels=("only LIVI CxG", "known $trans$-eQTLs"),
+        )
+        [lbl.set_fontsize(15) for lbl in v.set_labels]
+        for lbl in v.subset_labels:
+            try:
+                lbl.set_fontsize(12)
+            except AttributeError:
+                pass
+        plt.title(
+            "Overlap between $U$ Factors associated with SNPs that are (not) known $trans$ eQTLs\n",
+            fontdict={"fontsize": 18, "weight": "bold"},
+        )
+        plt.tight_layout()
+        plt.savefig(
+            f"{prefix}_Venn_U-factor-overlap-LIVI-vs-known-eQTLs{ext}",
+            transparent=True,
+            dpi=300,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+        LIVIonly_factors = list(
+            set(
+                CxG_effects_LIVI.loc[
+                    ~CxG_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                ].Factor.tolist()
+            ).difference(
+                set(
+                    CxG_effects_LIVI.loc[
+                        CxG_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    ].Factor.tolist()
+                )
+            )
+        )
+
+        plot_df = factor_assignment_matrix.filter(CxG_effects_LIVI.Factor.unique()).T
+        plot_df = (
+            plot_df.reset_index()
+            .assign(
+                Group=plot_df.reset_index().apply(
+                    lambda x: (
+                        "only LIVI CxG"
+                        if x["index"] in LIVIonly_factors
+                        else "LIVI and $trans$-eQTL"
+                    ),
+                    axis=1,
+                )
+            )
+            .set_index("index")
+        )
+        plot_df = plot_df.groupby(by="Group", observed=True).mean()
+
+        plt.figure(figsize=(10, 8))
+        sns.heatmap(
+            plot_df,
+            annot=False,
+            cmap="inferno",
+            cbar_kws={"label": "mean $A$ across $U$ factors"},
+            rasterized=True,
+        )
+        plt.title("Cell-state factor prevalence among significant $U$ factors")
+        plt.ylabel("")
+        plt.xlabel("")
+        plt.tight_layout()
+        plt.savefig(
+            f"{prefix}_Cell-state-factor-prevalence-among-significant-U-factors{ext}",
+            dpi=500,
+            transparent=True,
+            bbox_inches="tight",
+        )
+        plt.close()
+
+        if persistent_effects_LIVI is not None:
+            # Overlap between SNPs
+            v = venn3(
+                subsets=[
+                    set(CxG_effects_LIVI.SNP_id),
+                    set(known_trans_eQTLs[SNP_colname_trans]),
+                    set(persistent_effects_LIVI.SNP_id),
+                ],
+                set_labels=("LIVI CxG", "known $trans$-eQTLs", "LIVI persistent"),
+            )
+            [lbl.set_fontsize(15) for lbl in v.set_labels]
+            for lbl in v.subset_labels:
+                try:
+                    lbl.set_fontsize(12)
+                except AttributeError:
+                    pass
+            plt.title(
+                "Overlap between significant SNPs\n", fontdict={"fontsize": 18, "weight": "bold"}
+            )
+            plt.tight_layout()
+            plt.savefig(
+                f"{prefix}_Venn_LIVI-persistent-vs-known-eQTLs{ext}",
+                transparent=True,
+                dpi=300,
+                bbox_inches="tight",
+            )
+            plt.close()
