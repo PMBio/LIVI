@@ -42,7 +42,7 @@ from src.analysis.plotting import (
     visualise_cell_state_latent,
 )
 from src.data_modules.livi_data import LIVIDataModule
-from src.models.livi2 import LIVI2_experimental_continuous_A, LIVI2_final
+from src.models.livi import LIVI
 
 
 def validate_and_read_passed_args(
@@ -204,7 +204,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI2_final.load_from_checkpoint(
+    LIVI_model = LIVI.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
