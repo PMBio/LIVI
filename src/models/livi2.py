@@ -36,6 +36,7 @@ class LIVI2_experimental(pl.LightningModule):
         adversary_steps: int = 2,
         batch_norm_decoder: bool = False,
         device: str = "cuda",
+        #      genetics_seed: int = 32,
     ):
         """Initializes LIVI.
 
@@ -73,6 +74,8 @@ class LIVI2_experimental(pl.LightningModule):
         self.pretrain_mode = True if warmup_epochs_vae > 0 else False
         self.pretrain_G_mode = True if self.pretrain_mode or self.warmup_epochs_G > 0 else False
         self.checkpointing_epoch = warmup_epochs_vae + self.warmup_epochs_G
+        #    self.G_gen = torch.Generator(device=device)
+        #   self.G_gen.manual_seed(genetics_seed)
 
         self.encoder = Encoder(
             x_dim=x_dim,
@@ -98,16 +101,21 @@ class LIVI2_experimental(pl.LightningModule):
 
         if n_gxc_factors != 0:
             if hierarchical_model:
-                # hierarchical model with fixed design matrix A
+                # hierarchical model with fixed factor assignment matrix A
                 self.U_context = nn.Embedding(y_dim, z_dim * n_gxc_factors, device=device)
+            # nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
             else:
-                # learnable design matrix A
+                # learnable factor assignment matrix A
                 self.bernoulli_logits = nn.Parameter(
-                    torch.rand(z_dim, n_gxc_factors, device=device)
+                    torch.rand(z_dim, n_gxc_factors, device=device)  # generator=self.G_gen,
                 )
+
                 self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+            #  nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
+
         if n_persistent_factors != 0:
             self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
+        #    nn.init.normal_(self.V_persistent.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
         self.decoder = LIVI2_Decoder(
             z_dim=z_dim,
@@ -121,6 +129,7 @@ class LIVI2_experimental(pl.LightningModule):
             batch_norm=batch_norm_decoder,
             hierarchical_decoder=hierarchical_model,
             device=device,
+            #  genetics_generator=self.G_gen,
         )
 
         # Sex and batch correction per gene
@@ -130,10 +139,22 @@ class LIVI2_experimental(pl.LightningModule):
             self.sex_effect = None
         self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
 
+        # self.set_pretrain_mode(True) if warmup_epochs_vae > 0 else self.set_pretrain_mode(False)
+        # self.set_pretrain_G_mode(True) if self.pretrain_mode or self.warmup_epochs_G > 0 else self.set_pretrain_mode(False)
+
         self.set_pretrain_mode(self.pretrain_mode)
         self.set_pretrain_G_mode(self.pretrain_G_mode)
 
         self.automatic_optimization = False
+
+    # def init_individual_embedding(self, embedding, seed):
+    #     # Save the current random state
+    #     rng_state = torch.get_rng_state()
+    #     torch.manual_seed(seed)
+    #     # Initialize the embedding from a Normal distro, using the specified random seed
+    #     embedding.weight.data.normal_(mean=0.0, std=1)
+    #     # Restore the original random state
+    #     torch.set_rng_state(rng_state)
 
     def set_pretrain_mode(self, mode: bool):
         """Set VAE pretrain mode.
@@ -150,12 +171,12 @@ class LIVI2_experimental(pl.LightningModule):
                 for p in self.U_context.parameters():
                     p.requires_grad = False
                 self.decoder.context_decoder[0].weight.requires_grad = False
+                if not self.hparams.hierarchical_model:
+                    self.bernoulli_logits.requires_grad = False
             if self.n_persistent_factors != 0:
                 for p in self.V_persistent.parameters():
                     p.requires_grad = False
                 self.decoder.persistent_decoder[0].weight.requires_grad = False
-            if not self.hparams.hierarchical_model:
-                self.bernoulli_logits.requires_grad = False
         else:
             # unfreeze parameters
             for p in self.adversary.parameters():
@@ -294,13 +315,17 @@ class LIVI2_experimental(pl.LightningModule):
                 l1_loss_context = torch.zeros([1], device=self.device)
             else:
                 l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.context_decoder.parameters()]), ord=1, dim=(0,1)
+                    torch.cat([p for p in self.decoder.context_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
                 )
             if self.pretrain_mode or self.n_persistent_factors == 0:
                 l1_loss_persistent = torch.zeros([1], device=self.device)
             else:
                 l1_loss_persistent = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1, dim=(0,1)
+                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
                 )
             logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
             logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
@@ -429,7 +454,9 @@ class LIVI2_experimental(pl.LightningModule):
 
 
 class LIVI2_freeze(LIVI2_experimental):
-    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training is completed.
+    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training
+    is completed.
+
     Then only the individual embeddings are learned.
     """
 
@@ -455,6 +482,7 @@ class LIVI2_freeze(LIVI2_experimental):
         adversary_steps: int = 2,
         batch_norm_decoder: bool = False,
         device: str = "cuda",
+        #    genetics_seed: int=32,
     ):
         """Initializes LIVI.
 
@@ -502,12 +530,16 @@ class LIVI2_freeze(LIVI2_experimental):
             adversary_steps=adversary_steps,
             batch_norm_decoder=batch_norm_decoder,
             device=device,
+            #      genetics_seed=genetics_seed,
         )
 
         self.frozen = False
         self.save_hyperparameters()
         self.train_epochs_adversary = train_epochs_adversary if adversary_weight > 0 else 0
-        self.checkpointing_epoch = warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary
+        self.checkpointing_epoch = (
+            warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary
+        )
+        self.set_pretrain_mode(self.pretrain_mode)
         self.automatic_optimization = False
 
     def step(self, batch, batch_idx, mode="train"):
@@ -521,7 +553,7 @@ class LIVI2_freeze(LIVI2_experimental):
 
         z_dist = self(x)
 
-        if self.pretrain_mode:
+        if self.pretrain_mode or self.frozen:
             # no adversary signal
             adversarial_loss = torch.zeros([1], device=self.device)
         else:
@@ -542,13 +574,17 @@ class LIVI2_freeze(LIVI2_experimental):
                 l1_loss_context = torch.zeros([1], device=self.device)
             else:
                 l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.context_decoder.parameters()]), ord=1, dim=(0,1)
+                    torch.cat([p for p in self.decoder.context_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
                 )
             if self.pretrain_mode or self.n_persistent_factors == 0:
                 l1_loss_persistent = torch.zeros([1], device=self.device)
             else:
                 l1_loss_persistent = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1, dim=(0,1)
+                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
                 )
             logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
             logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
@@ -589,12 +625,12 @@ class LIVI2_freeze(LIVI2_experimental):
                 for p in self.U_context.parameters():
                     p.requires_grad = False
                 self.decoder.context_decoder[0].weight.requires_grad = False
+                if not self.hparams.hierarchical_model:
+                    self.bernoulli_logits.requires_grad = False
             if self.n_persistent_factors != 0:
                 for p in self.V_persistent.parameters():
                     p.requires_grad = False
                 self.decoder.persistent_decoder[0].weight.requires_grad = False
-            if not self.hparams.hierarchical_model:
-                self.bernoulli_logits.requires_grad = False
         else:
             # unfreeze adversary
             for p in self.adversary.parameters():
@@ -657,27 +693,493 @@ class LIVI2_freeze(LIVI2_experimental):
             self.set_pretrain_mode(False)
             print("VAE pretraining completed.")
 
-        if (
-            self.current_epoch
-            == self.hparams.warmup_epochs_vae + self.train_epochs_adversary
-        ):
+        if self.current_epoch == self.hparams.warmup_epochs_vae + self.train_epochs_adversary:
             self.freeze_vae(True)
             print("VAE and Adversary training completed.")
 
         if (
             self.current_epoch
-            == self.hparams.warmup_epochs_vae
-            + self.train_epochs_adversary
-            + self.warmup_epochs_G
+            == self.hparams.warmup_epochs_vae + self.train_epochs_adversary + self.warmup_epochs_G
         ):
             print("Start learning GxC effects.")
             self.set_pretrain_G_mode(False)
 
+    def on_save_checkpoint(self, checkpoint: dict):
+        # Save model's pretraining and frozen state
+        attributes_to_save = {
+            k: v
+            for k, v in self.__dict__.items()
+            if not k.startswith("_")
+            and k not in list(self.__dict__["_hparams"].keys())
+            and "G_gen" not in k
+        }
+        checkpoint["model_attributes"] = attributes_to_save
 
+    def on_load_checkpoint(self, checkpoint: dict):
+        # Restore model's attributes
+        model_attributes = checkpoint.get("model_attributes", {})
+        for attr_name, attr_value in model_attributes.items():
+            setattr(self, attr_name, attr_value)
+
+
+class LIVI2_freeze_continuous_A2(LIVI2_freeze):
+    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training
+    is completed.
+
+    Then only the individual embeddings are learned.
+    """
+
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        y_dim: int,
+        n_gxc_factors: int,
+        n_persistent_factors: int,
+        exbatch_dim: int,
+        encoder_hidden_dims: List[int],
+        learning_rate: float,
+        warmup_epochs_vae: int = 30,
+        warmup_epochs_G: int = 10,
+        train_epochs_adversary: int = 20,
+        hierarchical_model: bool = True,
+        donor_sex_dim: int = 2,
+        l1_weight: float = 0.001,
+        l1_weight_A: float = 0.01,
+        adversary_weight: float = 1.0,
+        adversary_hidden_dims: List[int] = [256, 256],
+        adversary_learning_rate: float = 1e-4,
+        adversary_steps: int = 2,
+        batch_norm_decoder: bool = False,
+        device: str = "cuda",
+    ):
+        """Initializes LIVI.
+
+        Parameters
+        ----------
+            x_dim (int): Dimensionality of input data.
+            z_dim (int): Dimensionality of cell-state latent space.
+            exbatch_dim (int): Number of experimental batches in the dataset.
+            donor_sex_dim (int): Number of potential donor sexes in the dataset.
+            y_dim (int): Number of individuals in the dataset.
+            encoder_hidden_dims (List[int]): List of hidden dimensions for each encoder layer.
+            hierarchical_model (bool): Whether the context-specific genetic factors have fixed assignments to
+                cell-state factors (`True`) or the assignments are learned (`False`).
+            warmup_epochs_vae (int): Initially train only the VAE part of the model for `warmup_epochs_vae` number of epochs.
+            warmup_epochs_G (int): Initially learn only the persistent genetic effects for `warmup_epochs_G` number of epochs.
+                Applied only after the VAE warm-up is finished.
+            train_epochs_adversary (int): Train adversasial network together with the VAE for `train_epochs_adversary`
+                number of epochs before freezing their parameters.
+            learning_rate (float): Learning rate.
+            l1_weight (float): Weight of the L1 penalty, which is applied on the genetic decoders.
+            batch_norm_decoder (bool): Whether to apply batch normalisation to the combined decoder output.
+            adversarial_weight (float): If > 0, add adversarial loss to remove individual effects from the cell-state latent space.
+            adversary_hidden_dims (List[int]): List of hidden dimensions for each adversary layer.
+            adversary_learning_rate (float): Learning rate for adversary.
+            adversary_steps (int): Number of steps to train adversary for every step of VAE.
+            device (str): Accelerator to use for training.
+        """
+        super().__init__(
+            x_dim=x_dim,
+            z_dim=z_dim,
+            y_dim=y_dim,
+            n_gxc_factors=n_gxc_factors,
+            n_persistent_factors=n_persistent_factors,
+            exbatch_dim=exbatch_dim,
+            encoder_hidden_dims=encoder_hidden_dims,
+            learning_rate=learning_rate,
+            warmup_epochs_vae=warmup_epochs_vae,
+            warmup_epochs_G=warmup_epochs_G,
+            train_epochs_adversary=train_epochs_adversary,
+            hierarchical_model=hierarchical_model,
+            donor_sex_dim=donor_sex_dim,
+            l1_weight=l1_weight,
+            adversary_weight=adversary_weight,
+            adversary_hidden_dims=adversary_hidden_dims,
+            adversary_learning_rate=adversary_learning_rate,
+            adversary_steps=adversary_steps,
+            batch_norm_decoder=batch_norm_decoder,
+            device=device,
+        )
+
+        if n_gxc_factors != 0:
+            if hierarchical_model:
+                # hierarchical model with fixed factor assignment matrix A
+                self.U_context = nn.Embedding(y_dim, z_dim * n_gxc_factors, device=device)
+            else:
+                # learnable factor assignment matrix A
+                # # Random init from Uniform
+                # self.bernoulli_logits = nn.Parameter(
+                #     torch.rand(z_dim, n_gxc_factors, device=device)
+                # )
+                # Random init from Normal
+                self.bernoulli_logits = nn.Parameter(
+                    torch.randn(z_dim, n_gxc_factors, device=device)
+                )
+                self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+
+        self.save_hyperparameters()
+        self.set_pretrain_mode(self.pretrain_mode)
+        self.set_pretrain_G_mode(self.pretrain_G_mode)
+        self.automatic_optimization = False
+
+    def compute_elbo(
+        self,
+        z_dist: torch.distributions.Distribution,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        dsex: torch.Tensor,
+        eb: torch.Tensor,
+        size_factor: torch.Tensor = None,
+    ):
+        """Computes evidence lower bound (ELBO).
+
+        Parameters
+        ----------
+            z_dist: Variational distribution.
+            x: Input data.
+            y: Donor IDs.
+            dsex: Donor sex.
+            eb: Experimental batch IDs.
+            size_factor: Size factor to correct for gene count differences.
+
+        Returns
+        -------
+            Mean evidence lower bound (ELBO).
+        """
+        z = z_dist.rsample()
+        # z = nn.Softmax(dim=1)(z)
+        kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
+
+        if self.hparams.hierarchical_model and self.n_gxc_factors != 0:
+            z_interaction = self.U_context(y) * z.repeat_interleave(self.n_gxc_factors, dim=1)
+        elif not self.hparams.hierarchical_model and self.n_gxc_factors != 0:
+            A = torch.distributions.ContinuousBernoulli(logits=self.bernoulli_logits).rsample()
+            z_interaction = (z @ A) * self.U_context(y)
+        else:
+            z_interaction = None
+
+        log_lik = (
+            self.decoder(
+                z=z,
+                GxC=z_interaction,
+                persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
+                size_factor=size_factor,
+                batch_effect=self.batch_effect(eb),
+                donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
+            )
+            .log_prob(x)
+            .mean()
+        )
+
+        return log_lik - kl_div, A
+
+    def step(self, batch, batch_idx, mode="train"):
+        """Performs a single training or validation step."""
+        x, y, donor_sex, exp_batch_ids, size_factor = self.prepare_batch(batch)
+        optim_vae, optim_adversary = self.optimizers()
+
+        train_adversary = batch_idx % self.adversary_steps == 0
+        train_adversary = train_adversary & (not self.pretrain_mode) & (not self.frozen)
+        train_adversary = train_adversary * (mode == "train")
+
+        z_dist = self(x)
+
+        if self.pretrain_mode:
+            # no adversary signal
+            adversarial_loss = torch.zeros([1], device=self.device)
+        else:
+            z = z_dist.rsample()
+            adversarial_loss = F.cross_entropy(self.adversary(z), y)
+        logs = {f"{mode}/adversarial_loss": adversarial_loss.item()}
+
+        if train_adversary:
+            # train adversary
+            optim_adversary.zero_grad()
+            self.manual_backward(adversarial_loss)
+            optim_adversary.step()
+        else:
+            # train vae
+            elbo, A = self.compute_elbo(z_dist, x, y, donor_sex, exp_batch_ids, size_factor)
+            logs[f"{mode}/elbo"] = elbo.item()
+            if self.pretrain_G_mode or self.n_gxc_factors == 0:
+                l1_loss_context = torch.zeros([1], device=self.device)
+                l1_loss_A = torch.zeros([1], device=self.device)
+            else:
+                l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
+                    torch.cat([p for p in self.decoder.context_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
+                )
+                A_penalty = (A * (1 - A)).pow(2)  # forces entries of A to be towards 0 or 1
+                l1_loss_A = (
+                    self.hparams.l1_weight_A * A_penalty.sum()
+                )  # torch.linalg.vector_norm(A, ord=1, dim=(0,1)) # A_penalty.sum()
+            if self.pretrain_mode or self.n_persistent_factors == 0:
+                l1_loss_persistent = torch.zeros([1], device=self.device)
+            else:
+                l1_loss_persistent = self.hparams.l1_weight * torch.linalg.vector_norm(
+                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
+                )
+            logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
+            logs[f"{mode}/L1_penalty_A"] = l1_loss_A.item()
+            logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
+            loss = (
+                -elbo
+                - self.hparams.adversary_weight * adversarial_loss
+                + l1_loss_context
+                + l1_loss_A
+                + l1_loss_persistent
+            )
+            logs[f"{mode}/livi_loss"] = loss.item()
+            logs["hp_metric"] = loss.item()
+
+            if mode == "train":
+                optim_vae.zero_grad()
+                self.manual_backward(loss)
+                optim_vae.step()
+
+        self.log_dict(
+            logs,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+
+
+class LIVI2_experimental_continuous_A(LIVI2_freeze):
+    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training
+    is completed.
+
+    Then only the individual embeddings are learned.
+    """
+
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        y_dim: int,
+        n_gxc_factors: int,
+        n_persistent_factors: int,
+        exbatch_dim: int,
+        encoder_hidden_dims: List[int],
+        learning_rate: float,
+        warmup_epochs_vae: int = 30,
+        warmup_epochs_G: int = 10,
+        train_epochs_adversary: int = 20,
+        donor_sex_dim: int = 2,
+        l1_weight: float = 0.001,
+        l1_weight_A: float = 0.01,
+        adversary_weight: float = 1.0,
+        adversary_hidden_dims: List[int] = [256, 256],
+        adversary_learning_rate: float = 1e-4,
+        adversary_steps: int = 2,
+        batch_norm_decoder: bool = False,
+        device: str = "cuda",
+        #  genetics_seed: int = 32,
+    ):
+        """Initializes LIVI.
+
+        Parameters
+        ----------
+            x_dim (int): Dimensionality of input data.
+            z_dim (int): Dimensionality of cell-state latent space.
+            exbatch_dim (int): Number of experimental batches in the dataset.
+            donor_sex_dim (int): Number of potential donor sexes in the dataset.
+            y_dim (int): Number of individuals in the dataset.
+            encoder_hidden_dims (List[int]): List of hidden dimensions for each encoder layer.
+            hierarchical_model (bool): Whether the context-specific genetic factors have fixed assignments to
+                cell-state factors (`True`) or the assignments are learned (`False`).
+            warmup_epochs_vae (int): Initially train only the VAE part of the model for `warmup_epochs_vae` number of epochs.
+            warmup_epochs_G (int): Initially learn only the persistent genetic effects for `warmup_epochs_G` number of epochs.
+                Applied only after the VAE warm-up is finished.
+            train_epochs_adversary (int): Train adversasial network together with the VAE for `train_epochs_adversary`
+                number of epochs before freezing their parameters.
+            learning_rate (float): Learning rate.
+            l1_weight (float): Weight of the L1 penalty, which is applied on the genetic decoders.
+            batch_norm_decoder (bool): Whether to apply batch normalisation to the combined decoder output.
+            adversarial_weight (float): If > 0, add adversarial loss to remove individual effects from the cell-state latent space.
+            adversary_hidden_dims (List[int]): List of hidden dimensions for each adversary layer.
+            adversary_learning_rate (float): Learning rate for adversary.
+            adversary_steps (int): Number of steps to train adversary for every step of VAE.
+            device (str): Accelerator to use for training.
+        """
+        super().__init__(
+            x_dim=x_dim,
+            z_dim=z_dim,
+            y_dim=y_dim,
+            n_gxc_factors=n_gxc_factors,
+            n_persistent_factors=n_persistent_factors,
+            exbatch_dim=exbatch_dim,
+            encoder_hidden_dims=encoder_hidden_dims,
+            learning_rate=learning_rate,
+            warmup_epochs_vae=warmup_epochs_vae,
+            warmup_epochs_G=warmup_epochs_G,
+            train_epochs_adversary=train_epochs_adversary,
+            hierarchical_model=False,
+            donor_sex_dim=donor_sex_dim,
+            l1_weight=l1_weight,
+            adversary_weight=adversary_weight,
+            adversary_hidden_dims=adversary_hidden_dims,
+            adversary_learning_rate=adversary_learning_rate,
+            adversary_steps=adversary_steps,
+            batch_norm_decoder=batch_norm_decoder,
+            device=device,
+            #    genetics_seed=genetics_seed,
+        )
+
+        if n_gxc_factors != 0:
+            # Random init from Normal
+            self.bernoulli_logits = nn.Parameter(
+                torch.randn(z_dim, n_gxc_factors, device=device)  # generator=self.G_gen,
+            )
+            self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+        # nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0,) # generator=self.G_gen)
+
+        if n_persistent_factors != 0:
+            self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
+        #  nn.init.normal_(self.V_persistent.weight.data, mean=0.0, std=1.0,) # generator=self.G_gen)
+
+        self.save_hyperparameters()
+        self.set_pretrain_mode(self.pretrain_mode)
+        self.set_pretrain_G_mode(self.pretrain_G_mode)
+        self.automatic_optimization = False
+
+    def compute_elbo(
+        self,
+        z_dist: torch.distributions.Distribution,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        dsex: torch.Tensor,
+        eb: torch.Tensor,
+        size_factor: torch.Tensor = None,
+    ):
+        """Computes evidence lower bound (ELBO).
+
+        Parameters
+        ----------
+            z_dist: Variational distribution.
+            x: Input data.
+            y: Donor IDs.
+            dsex: Donor sex.
+            eb: Experimental batch IDs.
+            size_factor: Size factor to correct for gene count differences.
+
+        Returns
+        -------
+            Mean evidence lower bound (ELBO).
+        """
+        z = z_dist.rsample()
+        z = nn.Softmax(dim=1)(z)
+        kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
+
+        if self.hparams.hierarchical_model and self.n_gxc_factors != 0:
+            z_interaction = self.U_context(y) * z.repeat_interleave(self.n_gxc_factors, dim=1)
+        elif not self.hparams.hierarchical_model and self.n_gxc_factors != 0:
+            A = torch.sigmoid(self.bernoulli_logits)
+            z_interaction = (z @ A) * self.U_context(y)
+        else:
+            z_interaction = None
+
+        log_lik = (
+            self.decoder(
+                z=z,
+                GxC=z_interaction,
+                persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
+                size_factor=size_factor,
+                batch_effect=self.batch_effect(eb),
+                donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
+            )
+            .log_prob(x)
+            .mean()
+        )
+
+        return log_lik - kl_div, A
+
+    def step(self, batch, batch_idx, mode="train"):
+        """Performs a single training or validation step."""
+        x, y, donor_sex, exp_batch_ids, size_factor = self.prepare_batch(batch)
+        optim_vae, optim_adversary = self.optimizers()
+
+        train_adversary = batch_idx % self.adversary_steps == 0
+        train_adversary = train_adversary & (not self.pretrain_mode) & (not self.frozen)
+        train_adversary = train_adversary * (mode == "train")
+
+        z_dist = self(x)
+
+        if self.pretrain_mode or self.frozen:
+            # no adversary signal
+            adversarial_loss = torch.zeros([1], device=self.device)
+        else:
+            z = z_dist.rsample()
+            # z = nn.Softmax(dim=1)(z)
+            adversarial_loss = F.cross_entropy(self.adversary(z), y)
+        logs = {f"{mode}/adversarial_loss": adversarial_loss.item()}
+
+        if train_adversary:
+            # train adversary
+            optim_adversary.zero_grad()
+            self.manual_backward(adversarial_loss)
+            optim_adversary.step()
+        else:
+            # train vae
+            elbo, A = self.compute_elbo(z_dist, x, y, donor_sex, exp_batch_ids, size_factor)
+            logs[f"{mode}/elbo"] = elbo.item()
+            if not self.frozen or self.n_gxc_factors == 0:
+                l1_loss_context = torch.zeros([1], device=self.device)
+                l1_loss_A = torch.zeros([1], device=self.device)
+            else:
+                l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
+                    torch.cat([p for p in self.decoder.context_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
+                )
+                A_penalty = (A * (1 - A)).pow(2)  # forces entries of A to be towards 0 or 1
+                l1_loss_A = (
+                    self.hparams.l1_weight_A * A_penalty.sum()
+                )  # torch.linalg.vector_norm(A, ord=1, dim=(0,1)) # A_penalty.sum()
+            if not self.frozen or self.n_persistent_factors == 0:
+                l1_loss_persistent = torch.zeros([1], device=self.device)
+            else:
+                l1_loss_persistent = self.hparams.l1_weight * torch.linalg.vector_norm(
+                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
+                )
+            logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
+            logs[f"{mode}/L1_penalty_A"] = l1_loss_A.item()
+            logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
+            loss = (
+                -elbo
+                - self.hparams.adversary_weight * adversarial_loss
+                + l1_loss_context
+                + l1_loss_A
+                + l1_loss_persistent
+            )
+            logs[f"{mode}/livi_loss"] = loss.item()
+            logs["hp_metric"] = loss.item()
+
+            if mode == "train":
+                optim_vae.zero_grad()
+                self.manual_backward(loss)
+                optim_vae.step()
+
+        self.log_dict(
+            logs,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
 
 
 class LIVI2_freeze_VAE(LIVI2_experimental):
-    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training is completed.
+    """LIVI model where additionally the VAE and adversary parameters are frozen after pre-training
+    is completed.
+
     Then only the individual embeddings are learned.
     """
 
@@ -755,7 +1257,9 @@ class LIVI2_freeze_VAE(LIVI2_experimental):
         self.frozen = False
         self.save_hyperparameters()
         self.train_epochs_adversary = train_epochs_adversary if adversary_weight > 0 else 0
-        self.checkpointing_epoch = warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary
+        self.checkpointing_epoch = (
+            warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary
+        )
         self.automatic_optimization = False
 
     def step(self, batch, batch_idx, mode="train"):
@@ -790,13 +1294,17 @@ class LIVI2_freeze_VAE(LIVI2_experimental):
                 l1_loss_context = torch.zeros([1], device=self.device)
             else:
                 l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.context_decoder.parameters()]), ord=1, dim=(0,1)
+                    torch.cat([p for p in self.decoder.context_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
                 )
             if self.pretrain_mode or self.n_persistent_factors == 0:
                 l1_loss_persistent = torch.zeros([1], device=self.device)
             else:
                 l1_loss_persistent = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]), ord=1, dim=(0,1)
+                    torch.cat([p for p in self.decoder.persistent_decoder.parameters()]),
+                    ord=1,
+                    dim=(0, 1),
                 )
             logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
             logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
@@ -858,7 +1366,7 @@ class LIVI2_freeze_VAE(LIVI2_experimental):
             for p in self.encoder.parameters():
                 p.requires_grad = False
             self.decoder.mean[0].weight.requires_grad = False
-          #  self.decoder.log_total_count.requires_grad = False
+            #  self.decoder.log_total_count.requires_grad = False
             # freeze adversary
             for p in self.adversary.parameters():
                 p.requires_grad = False
@@ -879,7 +1387,7 @@ class LIVI2_freeze_VAE(LIVI2_experimental):
             for p in self.encoder.parameters():
                 p.requires_grad = True
             self.decoder.mean[0].weight.requires_grad = True
-         #   self.decoder.log_total_count.requires_grad = True
+            #   self.decoder.log_total_count.requires_grad = True
             # train adversary
             for p in self.adversary.parameters():
                 p.requires_grad = True
@@ -905,18 +1413,13 @@ class LIVI2_freeze_VAE(LIVI2_experimental):
             self.set_pretrain_mode(False)
             print("VAE pretraining completed.")
 
-        if (
-            self.current_epoch
-            == self.hparams.warmup_epochs_vae + self.train_epochs_adversary
-        ):
+        if self.current_epoch == self.hparams.warmup_epochs_vae + self.train_epochs_adversary:
             self.freeze_vae(True)
             print("VAE and Adversary training completed.")
 
         if (
             self.current_epoch
-            == self.hparams.warmup_epochs_vae
-            + self.train_epochs_adversary
-            + self.warmup_epochs_G
+            == self.hparams.warmup_epochs_vae + self.train_epochs_adversary + self.warmup_epochs_G
         ):
             print("Start learning GxC effects.")
             self.set_pretrain_G_mode(False)
