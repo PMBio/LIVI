@@ -196,7 +196,7 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
 
 
-class LIVI2_Decoder(nn.Module):
+class LIVI_Decoder(nn.Module):
     """Decoder module with Negative Binomial likelihood and batch and sex effect correction.
 
     This module encompasses separate (linear) decoders for cell-state and genetic factors.
