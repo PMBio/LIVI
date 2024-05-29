@@ -1,0 +1,23 @@
+_target_: src.models.livi.LIVI
+
+x_dim: 6407
+y_dim: 981
+z_dim: 15
+n_gxc_factors: 500
+n_persistent_factors: 5
+exbatch_dim: 75
+donor_sex_dim: 2
+encoder_hidden_dims: [2000, 1000, 500, 100]
+learning_rate: 8e-4
+warmup_epochs_vae: 90
+warmup_epochs_G: 0
+train_epochs_adversary: 30
+l1_weight: 1e-3
+l1_weight_A: 1e-3
+adversary_weight: 100
+adversary_hidden_dims: [2000, 500, 200]
+adversary_learning_rate: 1e-4
+adversary_steps: 2
+batch_norm_decoder: True
+device: cuda
+genetics_seed: null
