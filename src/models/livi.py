@@ -454,7 +454,7 @@ class LIVI(pl.LightningModule):
             if self.n_persistent_factors != 0:
                 for p in self.V_persistent.parameters():
                     p.requires_grad = False
-                self.decoder.persistent_decoder[0].weight.requires_grad = True
+                self.decoder.persistent_decoder[0].weight.requires_grad = False
 
     def on_train_epoch_end(self):
         """After each epoch checks whether the number of warm-up epochs for the VAE, discriminator
