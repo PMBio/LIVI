@@ -25,13 +25,13 @@ class LIVI(pl.LightningModule):
         exbatch_dim: int,
         encoder_hidden_dims: List[int],
         learning_rate: float,
-        warmup_epochs_vae: int = 30,
-        warmup_epochs_G: int = 10,
-        train_epochs_adversary: int = 20,
+        warmup_epochs_vae: int = 60,
+        warmup_epochs_G: int = 0,
+        train_epochs_adversary: int = 30,
         donor_sex_dim: int = 2,
         l1_weight: float = 0.001,
         l1_weight_A: float = 0.001,
-        adversary_weight: float = 1.0,
+        adversary_weight: float = 10,
         adversary_hidden_dims: List[int] = [256, 256],
         adversary_learning_rate: float = 1e-4,
         adversary_steps: int = 2,
@@ -179,9 +179,9 @@ class LIVI(pl.LightningModule):
         z_dist: torch.distributions.Distribution,
         x: torch.Tensor,
         y: torch.Tensor,
-        dsex: torch.Tensor,
         eb: torch.Tensor,
-        size_factor: torch.Tensor = None,
+        dsex: Optional[torch.Tensor] = None,
+        size_factor: Optional[torch.Tensor] = None,
     ):
         """Computes evidence lower bound (ELBO).
 
@@ -211,9 +211,9 @@ class LIVI(pl.LightningModule):
         log_lik = (
             self.decoder(
                 z=z,
+                size_factor=size_factor,
                 GxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
-                size_factor=size_factor,
                 batch_effect=self.batch_effect(eb),
                 donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
             )
@@ -250,7 +250,7 @@ class LIVI(pl.LightningModule):
             optim_adversary.step()
         else:
             # train vae
-            elbo, A = self.compute_elbo(z_dist, x, y, donor_sex, exp_batch_ids, size_factor)
+            elbo, A = self.compute_elbo(z_dist, x, y, exp_batch_ids, donor_sex, size_factor)
             logs[f"{mode}/elbo"] = elbo.item()
             if not self.frozen or self.n_gxc_factors == 0:
                 l1_loss_context = torch.zeros([1], device=self.device)

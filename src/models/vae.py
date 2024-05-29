@@ -295,11 +295,11 @@ class LIVI_Decoder(nn.Module):
     def forward(
         self,
         z: torch.Tensor,
-        GxC: Union[torch.Tensor, None],
-        persistent_G: Union[torch.Tensor, None],
         size_factor: torch.Tensor,
-        batch_effect: Union[torch.Tensor, None],
-        donor_sex_effect: Union[torch.Tensor, None],
+        GxC: Optional[torch.Tensor] = None,
+        persistent_G: Optional[torch.Tensor] = None,
+        batch_effect: Optional[torch.Tensor] = None,
+        donor_sex_effect: Optional[torch.Tensor] = None,
     ) -> tdist.Distribution:
         total_count = self.log_total_count.exp()
         decoder_out = self.mean(z)
