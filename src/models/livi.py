@@ -75,8 +75,9 @@ class LIVI(pl.LightningModule):
         self.train_epochs_adversary = train_epochs_adversary if adversary_weight > 0 else 0
         self.pretrain_mode = True if warmup_epochs_vae > 0 else False
         self.pretrain_G_mode = True if self.pretrain_mode or self.warmup_epochs_G > 0 else False
+        # Enable checkpointing after VAE + Dis training is completed and 5 epochs after U,V,A training has started
         self.checkpointing_epoch = (
-            warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary
+            warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary + 5
         )
         self.frozen = False
 
