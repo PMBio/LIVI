@@ -23,7 +23,11 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import probplot, zscore
 from tqdm import tqdm
 
-from src.analysis._utils import add_livi_umaps_to_cell_metadata, compute_umap
+from src.analysis._utils import (
+    add_livi_umaps_to_cell_metadata,
+    calculate_CxG_effect,
+    compute_umap,
+)
 
 sc.settings.set_figure_params(
     dpi=100, dpi_save=400, facecolor="white", transparent=True, figsize=(7, 6)
@@ -775,6 +779,10 @@ def plot_U_factor_similarity(
         U (pd.DataFrame): Dataframe containing CxG factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
         A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
+        assign_to_celltypes (bool): Whether to assign U factors to cell-types by z-scoring the cell-state factor loadings across cells.
+        cell_state_factors (pd.DataFrame or None): Dataframe containing LIVI cell-state latent.
+        cell_metadata (pd.DataFrame or None): Dataframe containing cell metadata.
+        celltype_column (str or None): Column name in cell metadata indicating the celltype.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
         format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
@@ -1421,3 +1429,214 @@ def overlap_with_known_eQTLs(
                 bbox_inches="tight",
             )
             plt.close()
+
+
+def visualize_CxG_effect(
+    SNP: str,
+    adata: AnnData,
+    celltype_column: str,
+    model_results_dir: Optional[str] = None,
+    cell_state_latent: Optional[pd.DataFrame] = None,
+    CxG_associations: Optional[pd.DataFrame] = None,
+    assignment_matrix: Optional[pd.DataFrame] = None,
+    UMAP_cell_state: Optional[Union[str, pd.DataFrame]] = None,
+    savefig: Optional[str] = None,
+    format: Optional[str] = None,
+):
+    """Visualise SNP effect on cell-state.
+
+    Parameters
+    ----------
+        SNP (str): ID of the SNP, whose effect should be calculated.
+        adata (AnnData): AnnData object containing the cell metadata in adata.obs.
+        celltype_column (str): Column name in adata.obs indicating the celltype.
+        model_results_dir (str or None): Absolute path of the directory containing the inference and testing results files of the LIVI model. Must be provided if `cell_state_latent`, `CxG_associations`, `assignment_matrix` are None. Default is None.
+        cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead of `model_results_dir`. Default is None.
+        CxG_associations (pd.DataFrame or None): Dataframe containing LIVI CxG effects. Can be used instead of `model_results_dir`. Default is None.
+        assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead of `model_results_dir`. Default is None.
+        UMAP_cell_state (str, pd.DataFrame or None): Dataframe or name of the file containing a precomputed 2D UMAP of LIVI cell-state latent. If None, the UMAP is computed. Default is None.
+        savefig (str or None): If provided, save the generated plots in this path (and prefix). Default is None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
+    """
+    if all(
+        [
+            arg is None
+            for arg in [model_results_dir, cell_state_latent, CxG_associations, assignment_matrix]
+        ]
+    ):
+        raise ValueError(
+            "Either provide pd.DataFrames with LIVI inference and testing results or an absolute path to the directory that contains them."
+        )
+
+    if model_results_dir is not None:
+        assert os.path.isdir(model_results_dir), "Model results directory doesn't exist."
+
+        files = [
+            f
+            for f in os.listdir(model_results_dir)
+            if os.path.isfile(os.path.join(model_results_dir, f))
+        ]
+
+        if cell_state_latent is None:
+            cell_state_latent = [
+                re.match("(.*cell-state_latent.tsv)", f)
+                for f in files
+                if re.match("(.*cell-state_latent.tsv)", f) is not None
+            ]
+            if len(cell_state_latent) > 0:
+                cell_state_latent = cell_state_latent[0].groups()[0]
+                cell_state_latent = pd.read_csv(
+                    os.path.join(model_results_dir, cell_state_latent), sep="\t", index_col=0
+                )
+            else:
+                raise FileNotFoundError(
+                    "No cell-state latent found in `model_results_dir`. Make sure the filename ends in 'cell-state_latent.tsv'."
+                )
+
+        if CxG_associations is None:
+            CxG_associations = [
+                re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f)
+                for f in files
+                if re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f) is not None
+            ]
+            if len(CxG_associations) > 0:
+                CxG_associations = CxG_associations[0].groups()[0]
+                CxG_associations = pd.read_csv(
+                    os.path.join(model_results_dir, CxG_associations), sep="\t", index_col=False
+                )
+            else:
+                raise FileNotFoundError(
+                    "No genetic associations found in `model_results_dir`. Make sure the filename ends in 'LMM_results_StoreyQ<alpha-threshold>_Ucontext.tsv'."
+                )
+
+        if assignment_matrix is None:
+            assignment_matrix = [
+                re.match("(.*factor_assignment_matrix.tsv)", f)
+                for f in files
+                if re.match("(.*factor_assignment_matrix.tsv)", f) is not None
+            ]
+            if len(assignment_matrix) > 0:
+                assignment_matrix = assignment_matrix[0].groups()[0]
+                assignment_matrix = pd.read_csv(
+                    os.path.join(model_results_dir, assignment_matrix), sep="\t", index_col=0
+                )
+            else:
+                raise FileNotFoundError(
+                    "No factor assignment matrix found in `model_results_dir`. Make sure the filename ends in 'factor_assignment_matrix.tsv'."
+                )
+
+    CxG_effect = calculate_CxG_effect(
+        LIVI_associations=CxG_associations,
+        SNP_id=SNP,
+        cell_state_latent=cell_state_latent,
+        A=assignment_matrix,
+    )
+
+    if UMAP_cell_state is not None:
+        if isinstance(UMAP_cell_state, pd.DataFrame):
+            umap_base = UMAP_cell_state
+        else:
+            if not os.path.isfile(UMAP_cell_state) and not os.path.isfile(
+                os.path.join(model_results_dir, UMAP_cell_state)
+            ):
+                raise FileNotFoundError("UMAP cell state file not found.")
+            else:
+                umap_base = (
+                    UMAP_cell_state
+                    if os.path.isfile(UMAP_cell_state)
+                    else os.path.join(model_results_dir, UMAP_cell_state)
+                )
+                umap_base = pd.read_csv(umap_base, sep="\t", index_col=0)
+    else:
+        umap_base = compute_umap(cell_state_latent, colnames=["UMAP1", "UMAP2"], add_latent=False)
+
+    umap_base = umap_base.drop(columns=[c for c in adata.obs.columns if c in umap_base.columns])
+    umap_base = umap_base.merge(
+        adata.obs.filter([celltype_column]), how="left", right_index=True, left_index=True
+    )
+    umap_base = umap_base.merge(CxG_effect, right_index=True, left_index=True)
+
+    marker_size = 2
+    d = 10
+    legend_fontsize = 20
+    axis_title_fontsize = 26
+    # Plot the effect for each factor (column in `CxG_effect`) associated with the given SNP
+    if len(CxG_effect.columns) % 2 == 0:
+        n_rows = len(CxG_effect.columns) // 2 + 1
+    else:
+        n_rows = int(len(CxG_effect.columns) // 2) + 1
+
+    d = d
+    figure_size = (2.5 * d, n_rows * d)
+    fig, axs = plt.subplots(ncols=2, nrows=n_rows, figsize=figure_size, constrained_layout=False)
+    axs = axs.flatten()
+
+    for i, ax in enumerate(tqdm(axs)):
+        if i == 0:
+            sns.scatterplot(
+                x="UMAP1",
+                y="UMAP2",
+                hue=celltype_column,
+                data=umap_base,
+                ax=axs[0],
+                s=3,
+                palette=list(adata.uns[f"{celltype_column}_colors"]),
+                rasterized=True,
+            )
+            axs[0].legend(
+                title="Cell type",
+                loc="center left",
+                bbox_to_anchor=(1.03, 0.5),
+                frameon=False,
+                fontsize=legend_fontsize,
+                title_fontsize=legend_fontsize + 2,
+                ncol=2,
+                markerscale=5,
+            )
+            axs[0].set_title(
+                label="Cell type", fontdict={"fontsize": axis_title_fontsize}, loc="center"
+            )
+        elif 0 < i < len(CxG_effect.columns) + 1:
+            sns.scatterplot(
+                x="UMAP1",
+                y="UMAP2",
+                hue=CxG_effect.columns[i - 1],
+                data=umap_base,
+                ax=ax,
+                s=marker_size,
+                palette="vlag",
+                legend=False,
+                rasterized=True,
+            )
+            sm = cm.ScalarMappable(
+                cmap="vlag",
+                norm=colors.TwoSlopeNorm(
+                    vcenter=0.0,
+                    vmin=umap_base[CxG_effect.columns[i - 1]].min(),
+                    vmax=umap_base[CxG_effect.columns[i - 1]].max(),
+                ),
+            )
+            cb = plt.colorbar(sm, ax=ax)
+            ax.set_title(
+                label=f"{SNP} - {CxG_effect.columns[i - 1]}",
+                fontdict={"fontsize": axis_title_fontsize},
+                loc="center",
+            )
+            cb.ax.tick_params(labelsize=12)
+            ax.xaxis.label.set_fontsize(axis_title_fontsize - 2)
+            ax.yaxis.label.set_fontsize(axis_title_fontsize - 2)
+            ax.tick_params(labelsize=legend_fontsize)
+        else:
+            fig.delaxes(ax)
+
+    plt.tight_layout()
+    if savefig is not None:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format is not None else ".png" if ext == "" else ext
+        plt.savefig(
+            f"{prefix}_SNP-{SNP}-effect-on-cells{ext}",
+            bbox_inches="tight",
+            dpi=500,
+            transparent=True,
+        )
