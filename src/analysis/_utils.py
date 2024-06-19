@@ -75,7 +75,7 @@ def add_livi_umaps_to_cell_metadata(
         else:
             raise ValueError("Parameter 'latent_space' must be either a list of str or a str")
 
-    if not all([l in [k for k in livi_results.keys()] for l in latent_space]):
+    if not all([ls in [key for key in livi_results.keys()] for ls in latent_space]):
         raise KeyError("`latent space` not in `livi_results` ")
 
     umap_df = pd.DataFrame()
@@ -163,3 +163,46 @@ def select_important_genes_for_factor_IQR(
         plt.vlines(x=lower_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
 
     return gene_names[important_genes_factor].tolist()
+
+
+def calculate_CxG_effect(
+    LIVI_associations: pd.DataFrame,
+    SNP_id: str,
+    cell_state_latent: pd.DataFrame,
+    A: pd.DataFrame,
+):
+    """Compute effect of a given SNP on cell-states.
+
+    Parameters
+    ----------
+        LIVI_associations (pd.DataFrame): Dataframe containing LIVI CxG effects.
+        SNP_id (str): ID of the SNP, whose effect should be calculated.
+        cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
+        A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
+
+    Returns
+    -------
+        CxG_effect (pd.DataFrame): Dataframe containing the effect of the given SNP on each associated cell-state factor.
+    """
+
+    snp_associations = LIVI_associations.loc[LIVI_associations.SNP_id == SNP_id]
+    factor_beta = snp_associations.filter(["Factor", "effect_size"]).set_index("Factor").T
+    ## Visualise the effect as if all individuals had the assessed allele
+    # genotypes = GT_matrix.loc[SNP_id, IIDs].astype(int)
+    # genotypes = genotypes.replace({2:1})
+    # genotypes = genotypes.to_numpy().reshape(-1,1) # genotypes is now n_cells x 1  SNP
+
+    ## G_effect = genotypes*factor_beta.values
+
+    A = A.filter(snp_associations.Factor)
+
+    CxG_effect = (
+        cell_state_latent.to_numpy() @ A.to_numpy() * factor_beta.to_numpy()  # G_effect.to_numpy()
+    )
+    CxG_effect = pd.DataFrame(
+        CxG_effect,
+        index=cell_state_latent.index,
+        columns=["CxG_" + f[1] for f in snp_associations.Factor.str.split("_")],
+    )
+
+    return CxG_effect
