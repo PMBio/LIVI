@@ -8,76 +8,13 @@ import torch
 from anndata import AnnData
 from pytorch_lightning import LightningDataModule
 from scipy.sparse import issparse
-from torch.utils.data import DataLoader, Dataset, sampler
-
-
-class BatchSampler(sampler.Sampler):
-    """Custom torch Sampler that returns a list of indices of size batch_size.
-
-    Original: https://github.com/scverse/scvi-tools/blob/2772a09177d4f57be7d6af655f272876af5141af/scvi/dataloaders/_ann_dataloader.py#L16
-
-    Args:
-        indices: List of indices to sample from
-        batch_size: Batch size of each iteration
-        shuffle: If ``True``, shuffles indices before sampling
-        drop_last: If int, drops the last batch if its length is less than
-            drop_last. If drop_last == True, drops last non-full batch. If
-            drop_last == False, iterate over all batches.
-    """
-
-    def __init__(
-        self,
-        indices: np.ndarray,
-        batch_size: int,
-        shuffle: bool,
-        drop_last: Union[bool, int] = False,
-    ):
-        self.indices = indices
-        self.n_obs = len(indices)
-        self.batch_size = batch_size
-        self.shuffle = shuffle
-
-        if drop_last > batch_size:
-            raise ValueError(
-                "drop_last can't be greater than batch_size. "
-                + f"drop_last is {drop_last} but batch_size is {batch_size}."
-            )
-
-        last_batch_len = self.n_obs % self.batch_size
-        if (drop_last is True) or (last_batch_len < drop_last):
-            drop_last_n = last_batch_len
-        elif (drop_last is False) or (last_batch_len >= drop_last):
-            drop_last_n = 0
-        else:
-            raise ValueError("Invalid input for drop_last param. Must be bool or int.")
-
-        self.drop_last_n = drop_last_n
-
-    def __iter__(self):
-        if self.shuffle is True:
-            idx = torch.randperm(self.n_obs).tolist()
-        else:
-            idx = torch.arange(self.n_obs).tolist()
-
-        if self.drop_last_n != 0:
-            idx = idx[: -self.drop_last_n]
-
-        data_iter = iter(
-            [
-                self.indices[idx[i : i + self.batch_size]].tolist()
-                for i in range(0, len(idx), self.batch_size)
-            ]
-        )
-        return data_iter
-
-    def __len__(self):
-        from math import ceil
-
-        if self.drop_last_n != 0:
-            length = self.n_obs // self.batch_size
-        else:
-            length = ceil(self.n_obs / self.batch_size)
-        return length
+from torch.utils.data import (
+    BatchSampler,
+    DataLoader,
+    Dataset,
+    RandomSampler,
+    SequentialSampler,
+)
 
 
 class LIVIDataset(Dataset):
@@ -254,19 +191,17 @@ class LIVIDataModule(LightningDataModule):
 
     def _data_loader(self, dataset: Dataset, shuffle: Optional[bool] = None) -> DataLoader:
         shuffle = self.shuffle if shuffle is None else shuffle
-        sampler_kwargs = {
-            "batch_size": self.batch_size,
-            "shuffle": shuffle,
-            "drop_last": self.drop_last,
-        }
-
-        indices = np.arange(len(dataset))
-        sampler_kwargs["indices"] = indices
-        sampler = BatchSampler(**sampler_kwargs)
+        if shuffle:
+            base_sampler = RandomSampler(dataset)
+        else:
+            base_sampler = SequentialSampler(dataset)
+        sampler = BatchSampler(
+            sampler=base_sampler, batch_size=self.batch_size, drop_last=self.drop_last
+        )
         data_loader_kwargs = copy.copy(self.data_loader_kwargs)
         data_loader_kwargs.update({"sampler": sampler, "batch_size": None})
         return DataLoader(dataset, **data_loader_kwargs)
 
     def get_num_features(self) -> int:
-        """Returns dimennsion of observed space."""
+        """Returns dimension of observed space."""
         return self.dataset.adata.shape[1]
