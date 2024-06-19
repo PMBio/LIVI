@@ -22,13 +22,13 @@ class LIVI(pl.LightningModule):
         y_dim: int,
         n_gxc_factors: int,
         n_persistent_factors: int,
-        exbatch_dim: int,
         encoder_hidden_dims: List[int],
         learning_rate: float,
         warmup_epochs_vae: int = 60,
         warmup_epochs_G: int = 0,
         train_epochs_adversary: int = 30,
-        donor_sex_dim: int = 2,
+        exbatch_dim: Optional[int] = None,
+        donor_sex_dim: Optional[int] = None,
         l1_weight: float = 0.001,
         l1_weight_A: float = 0.001,
         adversary_weight: float = 10,
@@ -143,7 +143,10 @@ class LIVI(pl.LightningModule):
             self.sex_effect = nn.Embedding(donor_sex_dim, x_dim, device=device)
         else:
             self.sex_effect = None
-        self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
+        if exbatch_dim is not None:
+            self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
+        else:
+            self.batch_effect = None
 
         self.set_pretrain_mode(self.pretrain_mode)
         self.set_pretrain_G_mode(self.pretrain_G_mode)
@@ -163,7 +166,7 @@ class LIVI(pl.LightningModule):
         x = batch["x"]
         y = batch["y"]
         dsex = None if self.hparams.donor_sex_dim is None else batch["dsex"]
-        eb = batch["eb"]
+        eb = None if self.hparams.exbatch_dim is None else batch["eb"]
         size_factor = batch["size_factor"]
         return x, y, dsex, eb, size_factor
 
@@ -215,7 +218,7 @@ class LIVI(pl.LightningModule):
                 size_factor=size_factor,
                 GxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
-                batch_effect=self.batch_effect(eb),
+                batch_effect=self.batch_effect(eb) if eb is not None else None,
                 donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
             )
             .log_prob(x)
@@ -421,10 +424,12 @@ class LIVI(pl.LightningModule):
             for p in self.adversary.parameters():
                 p.requires_grad = False
             # freeze covariate embeddings
-            for p in self.batch_effect.parameters():
-                p.requires_grad = False
-            for p in self.sex_effect.parameters():
-                p.requires_grad = False
+            if self.batch_effect is not None:
+                for p in self.batch_effect.parameters():
+                    p.requires_grad = False
+            if self.sex_effect is not None:
+                for p in self.sex_effect.parameters():
+                    p.requires_grad = False
             # unfreeze persistent genetic embedding, if applicable
             # Note: the behavior of U embedding is dictated
             # by the `set_pretrain_G_mode` function
@@ -442,10 +447,12 @@ class LIVI(pl.LightningModule):
             for p in self.adversary.parameters():
                 p.requires_grad = True
             # train covariate embeddings
-            for p in self.batch_effect.parameters():
-                p.requires_grad = True
-            for p in self.sex_effect.parameters():
-                p.requires_grad = True
+            if self.batch_effect is not None:
+                for p in self.batch_effect.parameters():
+                    p.requires_grad = True
+            if self.sex_effect is not None:
+                for p in self.sex_effect.parameters():
+                    p.requires_grad = True
             # freeze genetic embeddings
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
@@ -498,9 +505,12 @@ class LIVI(pl.LightningModule):
         params = [
             {"params": self.encoder.parameters()},
             {"params": self.decoder.parameters()},
-            {"params": self.batch_effect.parameters()},
-            {"params": self.sex_effect.parameters()},
         ]
+        if self.batch_effect is not None:
+            params.append({"params": self.batch_effect.parameters()})
+        if self.sex_effect is not None:
+            params.append({"params": self.sex_effect.parameters()})
+
         if self.n_gxc_factors != 0:
             params.append({"params": self.U_context.parameters()})
             params.append({"params": self.A})
