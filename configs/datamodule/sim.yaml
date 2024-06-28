@@ -1,0 +1,17 @@
+_target_: src.data_modules.livi_data.LIVIDataModule
+
+adata: ${paths.data_dir}/simulated/adata_fgxc_5.h5ad
+y_key: individual
+use_size_factor: True
+size_factor_key: size_factor
+donor_sex_key: null
+experimental_batch_key: null
+layer_key: null
+data_split: [1.0]
+batch_size: 1024
+num_workers: 5
+seed: 32
+shuffle: True
+pin_memory: True
+drop_last: False
+strict: False
