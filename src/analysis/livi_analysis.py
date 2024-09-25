@@ -43,6 +43,7 @@ from src.analysis.plotting import (
 )
 from src.data_modules.livi_data import LIVIDataModule
 from src.models.livi import LIVI
+from src.models.livi_experimental import LIVI_cis, LIVI_cis_gen
 
 
 def validate_and_read_passed_args(
@@ -72,7 +73,7 @@ def validate_and_read_passed_args(
         kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
     """
 
-    assert os.path.isdir(args.model_run_dir), "Model directory not found"
+    assert os.path.isdir(args.model_run_dir), "Model directory not found."
     assert os.path.isfile(args.adata), "AnnData file not found."
 
     if args.output_dir:
@@ -455,22 +456,22 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
         )
 
-    context_decoder = livi_results["CxG_decoder"].detach().numpy()
+    context_decoder = livi_results["GxC_decoder"].detach().numpy()
     context_decoder = pd.DataFrame(
         context_decoder,
         index=adata.var.index,
-        columns=[f"CxG_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
+        columns=[f"GxC_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
     )
     try:
         context_decoder.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_CxG_decoder.tsv"),
+            os.path.join(output_dir, f"{of_prefix}_GxC_decoder.tsv"),
             sep="\t",
             header=True,
             index=True,
         )
     except OSError:
         context_decoder.to_csv(
-            os.path.join(output_dir, "_CxG_decoder.tsv"),
+            os.path.join(output_dir, "_GxC_decoder.tsv"),
             sep="\t",
             header=True,
             index=True,

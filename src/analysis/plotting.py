@@ -34,6 +34,8 @@ sc.settings.set_figure_params(
 )
 plt.rcParams["axes.grid"] = False
 
+rng = np.random.default_rng()
+
 
 def visualise_cell_state_latent(
     z: pd.DataFrame,
@@ -586,9 +588,8 @@ def plot_celltype_factors(
     else:
         n_rows = int(len(unique_factors) // 2) + 2
 
-    d = d
     figure_size = (2 * d, n_rows * d)
-    fig, axs = plt.subplots(ncols=2, nrows=n_rows, figsize=(20, 40), constrained_layout=False)
+    fig, axs = plt.subplots(ncols=2, nrows=n_rows, figsize=figure_size, constrained_layout=True)
     axs = axs.flatten()
 
     for i, ax in enumerate(tqdm(axs)):
@@ -611,6 +612,7 @@ def plot_celltype_factors(
                 fontsize=legend_fontsize,
                 title_fontsize=legend_fontsize + 2,
                 ncol=2,
+                markerscale=4,
             )
             axs[0].set_title(
                 label="Cell type", fontdict={"fontsize": axis_title_fontsize}, loc="center"
@@ -620,7 +622,7 @@ def plot_celltype_factors(
                 sns.heatmap(df_celltype_zscored, cmap=heatmap_color_map, center=0.0, ax=axs[1])
             else:
                 sns.heatmap(df_celltype, cmap=heatmap_color_map, center=0.0, ax=axs[1])
-        elif 1 < i <= len(unique_factors) + 2:
+        elif 1 < i <= len(unique_factors) + 1:
             sns.scatterplot(
                 x="UMAP1",
                 y="UMAP2",
@@ -634,7 +636,12 @@ def plot_celltype_factors(
             )
             sm = cm.ScalarMappable(
                 cmap="vlag",
-                norm=colors.Normalize(
+                # norm=colors.Normalize(
+                #     vmin=cell_type_factor_df[unique_factors[i - 2]].min(),
+                #     vmax=cell_type_factor_df[unique_factors[i - 2]].max(),
+                # ),
+                norm=colors.TwoSlopeNorm(
+                    vcenter=0.0,
                     vmin=cell_type_factor_df[unique_factors[i - 2]].min(),
                     vmax=cell_type_factor_df[unique_factors[i - 2]].max(),
                 ),
@@ -656,7 +663,7 @@ def plot_celltype_factors(
         plt.savefig(
             f"{prefix}_celltype-factors_UMAP{ext}", bbox_inches="tight", dpi=400, transparent=True
         )
-    plt.close()
+    #   plt.close()
 
     if return_celltype_factors:
         return (celltype_factor_high, celltype_factor_low)
@@ -776,7 +783,7 @@ def plot_U_factor_similarity(
 
     Parameters
     ----------
-        U (pd.DataFrame): Dataframe containing CxG factors (individuals x factors).
+        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
         A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
         assign_to_celltypes (bool): Whether to assign U factors to cell-types by z-scoring the cell-state factor loadings across cells.
@@ -885,15 +892,60 @@ def plot_U_factor_similarity(
 def plot_ID_similarity(
     U: pd.DataFrame,
     associated_factors: list,
+    donor_metadata: Optional[pd.DataFrame] = None,
+    donor_covariate: Optional[str] = None,
+    covariate_colors: Optional[List[str]] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
 ):
+    """Cluster donors and draw a heatmap of donor similarity based on LIVI's U embedding.
+    Optionally color the donor IDs after a donor covariate of interest.
 
+        Parameters
+        ----------
+        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        associated_factors (list): List of factors with significant genetic associations (used to calculate the donor similarities).
+        donor_metadata (pd.DataFrame or None): Dataframe containing donor metadata. Default is None.
+        donor_covariate (str or None): Column name in donor metadata indicating the donor covariate to use to color the donor IDs. Default is None.
+        covariate_colors (list or None): If provided, each donor category will be colored with the corresponding color from the list (as indicated by the color order), otherwise colors will be chosen randomly. Default is None, i.e. use random colors.
+        savefig (str or None): If provided, the path to save the generated plots. Default is None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
+
+    Returns
+    -------
+        None
+    """
     if savefig:
         prefix, ext = os.path.splitext(savefig)
         ext = "." + format if format else ".png" if ext == "" else ext
     else:
         ext = "." + format if format else ".png"
+
+    if donor_covariate is not None:
+        assert (
+            donor_metadata is not None
+        ), "Donor covariate provided, but no donor metadata dataframe."
+        if covariate_colors is not None:
+            assert (
+                len(covariate_colors) == donor_metadata[donor_covariate].nunique()
+            ), "Number of colors provided doesn't match the number of covariate categories."
+        color_dict = dict(
+            zip(
+                donor_metadata[donor_covariate].unique(),
+                (
+                    covariate_colors
+                    if covariate_colors is not None
+                    else [
+                        "#" + "".join([rng.choice(list("0123456789ABCDEF")) for j in range(6)])
+                        for i in range(donor_metadata[donor_covariate].nunique())
+                    ]
+                ),
+            )
+        )
+        row_colors = donor_metadata[donor_covariate].map(color_dict)
+    else:
+        row_colors = None
 
     # Cluster individuals based on significant U factor values
     U = U.filter(associated_factors)
@@ -903,7 +955,7 @@ def plot_ID_similarity(
         col_cluster=False,
         row_cluster=True,
         metric="cosine",
-        cmap="RdBu",
+        # cmap="RdBu",
         center=1,
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
         rasterized=ext == ".svg",
@@ -922,16 +974,31 @@ def plot_ID_similarity(
     )  # 0: identical, 1: unrelated, 2: opposite
     iid_distances = pd.DataFrame(iid_distances, index=U.index, columns=U.index)
     plt.figure(figsize=(12, 10))
-    sns.heatmap(iid_distances, cmap="RdBu", center=1, rasterized=True)
+    sns.heatmap(
+        iid_distances, cmap="RdBu", center=1, rasterized=True, xticklabels=5, yticklabels=5
+    )
+    # Color donor ids according to the covariate
+    if donor_covariate is not None:
+        for label, color in color_dict.items():
+            plt.plot([], [], label=label, color=color, linewidth=5)
+        plt.legend(loc="center left", bbox_to_anchor=(-0.2, 1.2), title=donor_covariate)
+        # Set the tick labels color
+        for tick_label in plt.gca().get_yticklabels():
+            tick_label.set_color(row_colors[tick_label.get_text()])
+            tick_label.set_fontsize(3)
+        for tick_label in plt.gca().get_xticklabels():
+            tick_label.set_color(row_colors[tick_label.get_text()])
+            tick_label.set_fontsize(3)
     plt.title(
-        "Cosine distance between individuals based on significant CxG factors", fontsize=15, pad=20
+        "Cosine distance between individuals based on significant $U$ factors", fontsize=15, pad=20
     )
-    plt.savefig(
-        f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
-        bbox_inches="tight",
-        dpi=300,
-        transparent=True,
-    )
+    if savefig:
+        plt.savefig(
+            f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
+            bbox_inches="tight",
+            dpi=300,
+            transparent=True,
+        )
     plt.close()
 
 
@@ -1047,7 +1114,7 @@ def overlap_with_known_eQTLs(
     known_trans_eQTLs: pd.DataFrame,
     SNP_colname_trans: str,
     CxG_effects_LIVI: pd.DataFrame,
-    factor_assignment_matrix: pd.DataFrame,
+    factor_assignment_matrix: Optional[pd.DataFrame] = None,
     known_cis_eQTLs: Optional[pd.DataFrame] = None,
     SNP_colname_cis: Optional[str] = None,
     persistent_effects_LIVI: Optional[pd.DataFrame] = None,
@@ -1227,51 +1294,52 @@ def overlap_with_known_eQTLs(
             )
         )
 
-        plot_df = factor_assignment_matrix.filter(CxG_effects_LIVI.Factor.unique()).T
+        if factor_assignment_matrix is not None:
+            plot_df = factor_assignment_matrix.filter(CxG_effects_LIVI.Factor.unique()).T
 
-        plot_df = (
-            plot_df.reset_index()
-            .assign(
-                Group=plot_df.reset_index().apply(
-                    lambda x: (
-                        "only LIVI CxG"
-                        if x["index"] in LIVIonly_factors
-                        else (
-                            "LIVI CxG and $trans$-eQTL"
-                            if x["index"] in trans_factors
+            plot_df = (
+                plot_df.reset_index()
+                .assign(
+                    Group=plot_df.reset_index().apply(
+                        lambda x: (
+                            "only LIVI CxG"
+                            if x["index"] in LIVIonly_factors
                             else (
-                                "LIVI CxG and $cis$-eQTL"
-                                if x["index"] in cis_factors
-                                else "LIVI CxG and both $cis$ and $trans$ eQTL"
+                                "LIVI CxG and $trans$-eQTL"
+                                if x["index"] in trans_factors
+                                else (
+                                    "LIVI CxG and $cis$-eQTL"
+                                    if x["index"] in cis_factors
+                                    else "LIVI CxG and both $cis$ and $trans$ eQTL"
+                                )
                             )
-                        )
-                    ),
-                    axis=1,
+                        ),
+                        axis=1,
+                    )
                 )
+                .set_index("index")
             )
-            .set_index("index")
-        )
-        plot_df = plot_df.groupby(by="Group", observed=True).mean()
+            plot_df = plot_df.groupby(by="Group", observed=True).mean()
 
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(
-            plot_df,
-            annot=False,
-            cmap="inferno",
-            cbar_kws={"label": "mean $A$ across $U$ factors"},
-            rasterized=True,
-        )
-        plt.title("Cell-state factor prevalence among significant $U$ factors")
-        plt.ylabel("")
-        plt.xlabel("")
-        plt.tight_layout()
-        plt.savefig(
-            f"{prefix}_Cell-state-factor-prevalence-among-significant-U-factors{ext}",
-            dpi=500,
-            transparent=True,
-            bbox_inches="tight",
-        )
-        plt.close()
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(
+                plot_df,
+                annot=False,
+                cmap="inferno",
+                cbar_kws={"label": "mean $A$ across $U$ factors"},
+                rasterized=True,
+            )
+            plt.title("Cell-state factor prevalence among significant $U$ factors")
+            plt.ylabel("")
+            plt.xlabel("")
+            plt.tight_layout()
+            plt.savefig(
+                f"{prefix}_Cell-state-factor-prevalence-among-significant-U-factors{ext}",
+                dpi=500,
+                transparent=True,
+                bbox_inches="tight",
+            )
+            plt.close()
 
         if persistent_effects_LIVI is not None:
             # Overlap between SNPs
@@ -1365,42 +1433,43 @@ def overlap_with_known_eQTLs(
             )
         )
 
-        plot_df = factor_assignment_matrix.filter(CxG_effects_LIVI.Factor.unique()).T
-        plot_df = (
-            plot_df.reset_index()
-            .assign(
-                Group=plot_df.reset_index().apply(
-                    lambda x: (
-                        "only LIVI CxG"
-                        if x["index"] in LIVIonly_factors
-                        else "LIVI and $trans$-eQTL"
-                    ),
-                    axis=1,
+        if factor_assignment_matrix is not None:
+            plot_df = factor_assignment_matrix.filter(CxG_effects_LIVI.Factor.unique()).T
+            plot_df = (
+                plot_df.reset_index()
+                .assign(
+                    Group=plot_df.reset_index().apply(
+                        lambda x: (
+                            "only LIVI CxG"
+                            if x["index"] in LIVIonly_factors
+                            else "LIVI and $trans$-eQTL"
+                        ),
+                        axis=1,
+                    )
                 )
+                .set_index("index")
             )
-            .set_index("index")
-        )
-        plot_df = plot_df.groupby(by="Group", observed=True).mean()
+            plot_df = plot_df.groupby(by="Group", observed=True).mean()
 
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(
-            plot_df,
-            annot=False,
-            cmap="inferno",
-            cbar_kws={"label": "mean $A$ across $U$ factors"},
-            rasterized=True,
-        )
-        plt.title("Cell-state factor prevalence among significant $U$ factors")
-        plt.ylabel("")
-        plt.xlabel("")
-        plt.tight_layout()
-        plt.savefig(
-            f"{prefix}_Cell-state-factor-prevalence-among-significant-U-factors{ext}",
-            dpi=500,
-            transparent=True,
-            bbox_inches="tight",
-        )
-        plt.close()
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(
+                plot_df,
+                annot=False,
+                cmap="inferno",
+                cbar_kws={"label": "mean $A$ across $U$ factors"},
+                rasterized=True,
+            )
+            plt.title("Cell-state factor prevalence among significant $U$ factors")
+            plt.ylabel("")
+            plt.xlabel("")
+            plt.tight_layout()
+            plt.savefig(
+                f"{prefix}_Cell-state-factor-prevalence-among-significant-U-factors{ext}",
+                dpi=500,
+                transparent=True,
+                bbox_inches="tight",
+            )
+            plt.close()
 
         if persistent_effects_LIVI is not None:
             # Overlap between SNPs

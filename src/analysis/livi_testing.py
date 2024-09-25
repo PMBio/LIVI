@@ -31,6 +31,40 @@ from sklearn.preprocessing import StandardScaler, quantile_transform
 from src.analysis.plotting import QQplot
 
 
+# Kinship matrix normalisation taken from LIMIX: https://limix-tempdoc.readthedocs.io/en/latest/_modules/limix/qc/_covariance.html#normalise_covariance
+def normalise_covariance(K):
+    """Variance rescaling of covariance matrix 𝙺.
+
+    Let n be the number of rows (or columns) of 𝙺 and let
+    mᵢ be the average of the values in the i-th column.
+    Gower rescaling is defined as
+
+    .. math::
+
+        𝙺(n - 1)/(𝚝𝚛𝚊𝚌𝚎(𝙺) - ∑mᵢ).
+
+    Parameters
+    ----------
+    K : array_like
+        Covariance matrix to be normalised.
+
+    Returns
+    -------
+    Normalised covariance matrix
+    """
+
+    if isinstance(K, pd.DataFrame):
+        K = K.astype(float)
+        trace = K.values.trace()
+    else:
+        K = np.asarray(K, float)
+        trace = K.trace()
+
+    c = np.asarray((K.shape[0] - 1) / (trace - K.mean(axis=0).sum()), float)
+
+    return K * c
+
+
 def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 1) -> np.ndarray:
     """Compute p-values from likelihood ratios.
 
@@ -263,9 +297,10 @@ def run_LIVI_genetic_association_testing(
             if covariates is not None
             else kinship.to_numpy()
         )
-        QS = economic_qs(kinship_mat)
     else:
-        QS = economic_qs_linear(GT_matrix)
+        kinship_mat = np.dot(GT_matrix.to_numpy(), GT_matrix.T.to_numpy())
+        kinship_mat = normalise_covariance(kinship_mat)
+    QS = economic_qs(kinship_mat)
 
     if U_context is not None:
         if covariates is not None:
