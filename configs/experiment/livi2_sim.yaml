@@ -1,0 +1,54 @@
+# @package _global_
+
+# to execute this experiment run:
+# python src/train.py experiment=livi2_experimental_onek1k
+
+defaults:
+  - override /model: livi2_sim.yaml
+  - override /datamodule: sim.yaml
+  - override /callbacks: default_livi2.yaml
+  - override /trainer: default.yaml
+  - override /paths: default.yaml
+  - override /logger: tensorboard.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+trainer:
+  max_epochs: 1000
+  min_epochs: 320 # train genetic effects at least for 200 epochs
+  accelerator: gpu
+  devices: [0]
+  logger: True
+  enable_checkpointing: True
+  # fast_dev_run: 3
+  deterministic: True
+
+callbacks:
+  livi_checkpoint:
+    filename: "LIVI2_sim_{epoch:04d}_{hp_metric:.5f}"
+
+task_name: sim
+
+datamodule:
+  num_workers: 0
+
+hydra:
+  mode: "MULTIRUN"
+  sweeper:
+    params:
+      seed: 123,42,2911,400,9999
+      model.adversary_weight: 1e-5,10
+      datamodule.adata: >-
+        ${paths.data_dir}simulated/adata_frac_var_celltypes-0.1.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_celltypes-0.3.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_celltypes-0.5.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_celltypes-0.7.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_celltypes-0.9.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_genetics-0.03.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_genetics-0.04.h5ad,
+        ${paths.data_dir}simulated/adata_frac_var_genetics-0.05.h5ad
+  launcher:
+    n_jobs: 3
+
+seed: 50
