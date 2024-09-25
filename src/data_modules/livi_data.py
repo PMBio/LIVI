@@ -90,6 +90,8 @@ class LIVIDataset(Dataset):
         donor_sex_key: Optional[str] = None,
         experimental_batch_key: Optional[str] = None,
         layer_key: Optional[str] = None,
+        known_cis_eqtls: Optional[Union[str, pd.DataFrame]] = None,
+        eqtl_genotypes: Optional[Union[str, pd.DataFrame]] = None,
         strict: bool = False,
     ):
         # load anndata
@@ -97,6 +99,15 @@ class LIVIDataset(Dataset):
             self.adata = sc.read_h5ad(adata)
         else:
             self.adata = adata
+
+        if known_cis_eqtls is not None:
+            if isinstance(known_cis_eqtls, str):
+                self.known_cis_eqtls = pd.read_csv(known_cis_eqtls, sep="\t", index_col=0)
+            else:
+                self.known_cis_eqtls = known_cis_eqtls
+            self.known_cis_eqtls = self.known_cis_eqtls.filter(self.adata.var.index)
+        else:
+            self.known_cis_eqtls = None
 
         self.y_key = y_key
 
@@ -106,6 +117,28 @@ class LIVIDataset(Dataset):
         self.size_factor_key = size_factor_key
         self.layer_key = layer_key
         self.y, self.y_index = pd.factorize(self.adata.obs[self.y_key])
+        if eqtl_genotypes is not None:
+            assert (
+                self.known_cis_eqtls is not None
+            ), "eQTL genotypes provided, but not cis-eQTLs gene associations."
+            if isinstance(eqtl_genotypes, str):
+                self.GT = pd.read_csv(eqtl_genotypes, sep="\t", index_col=0)
+                self.GT = self.GT.loc[self.y_index]
+            else:
+                self.GT = eqtl_genotypes
+                self.GT = self.GT.loc[self.y_index]
+            if self.GT.shape[0] == 0:
+                raise ValueError(
+                    "Individual IDs in the cis-eQTL genotype matrix do not match individual IDs in adata.obs."
+                )
+            if self.GT.filter(self.known_cis_eqtls.index).shape[1] == 0:
+                raise ValueError(
+                    "SNP IDs in the cis-eQTL genotype matrix do not match SNP IDs in cis-eQTL associations."
+                )
+            # Consider only absence/presence of SNP, not dosage ?
+            self.GT = self.GT.replace(2, 1)
+        else:
+            self.GT = None
 
         self.donor_sex_key = donor_sex_key
         self.experimental_batch_key = experimental_batch_key
@@ -153,6 +186,13 @@ class LIVIDataset(Dataset):
             data["dsex"] = torch.tensor(self.dsex[idx], dtype=torch.long)
         if self.experimental_batch_key:
             data["eb"] = torch.tensor(self.eb[idx], dtype=torch.long)
+        if self.known_cis_eqtls is not None:
+            data["known_cis"] = torch.from_numpy(self.known_cis_eqtls.to_numpy()).to(torch.long)
+        if self.GT is not None:
+            data["GT_cells"] = torch.from_numpy(
+                self.GT.loc[self.y_index[self.y[idx]]].to_numpy()
+            ).to(torch.float)
+
         return data
 
     def __len__(self):
@@ -169,6 +209,8 @@ class LIVIDataModule(LightningDataModule):
         donor_sex_key: Optional[str] = None,
         experimental_batch_key: Optional[str] = None,
         layer_key: Optional[str] = None,
+        known_cis_eqtls: Optional[Union[str, pd.DataFrame]] = None,
+        eqtl_genotypes: Optional[Union[str, pd.DataFrame]] = None,
         strict: bool = False,
         data_split: List[float] = [0.8],
         batch_size: int = 128,
@@ -204,6 +246,8 @@ class LIVIDataModule(LightningDataModule):
         self.layer_key = layer_key
         self.donor_sex_key = donor_sex_key
         self.experimental_batch_key = experimental_batch_key
+        self.known_cis_eqtls = known_cis_eqtls
+        self.eqtl_genotypes = eqtl_genotypes
         self.strict = strict
 
         self.data_split = data_split
@@ -224,6 +268,8 @@ class LIVIDataModule(LightningDataModule):
             layer_key=self.layer_key,
             donor_sex_key=self.donor_sex_key,
             experimental_batch_key=self.experimental_batch_key,
+            known_cis_eqtls=self.known_cis_eqtls,
+            eqtl_genotypes=self.eqtl_genotypes,
             strict=self.strict,
         )
         lengths = self._get_splits(len(self.dataset))
