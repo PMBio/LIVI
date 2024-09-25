@@ -29,7 +29,9 @@ def init_mlp(mlp: nn.Sequential, generator: Optional[torch.Generator] = None) ->
     # He Uniform initialization for the MLP weights
     for layer in mlp:
         if isinstance(layer, nn.Linear):
-            nn.init.kaiming_uniform_(layer.weight, nonlinearity="relu", generator=generator)
+            nn.init.kaiming_uniform_(
+                layer.weight, a=0.0, mode="fan_in", nonlinearity="relu", generator=generator
+            )
             # Initialise bias same way as in pytorch v2.3: https://pytorch.org/docs/stable/_modules/torch/nn/modules/linear.html#Linear
             if layer.bias is not None:
                 fan_in, _ = nn.init._calculate_fan_in_and_fan_out(layer.weight)
