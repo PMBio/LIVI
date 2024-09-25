@@ -210,14 +210,21 @@ def setup_model_and_data(
         f"run_{os.path.basename(args.model_run_dir)}__LIVI-{args.model_version}_zdim{z_dim}_{zc}-context-factors_{za}-persistent-factors_[{enc_layers}]-encoder-hidden-layers_adversary-weight-{w_dis}_[{adv_layers}]-adversary-hidden-layers_l1-weight-{l1_weight}_{n_genes}-genes_{args.checkpoint}-checkpoint"
         if args.output_file_prefix == "descriptive"
         and args.model_version in ["livi2", "LIVI2", "2"]
-        else f"run_{os.path.basename(args.model_run_dir)}__LIVI-{args.model_version}_zdim{z_dim}_{za}-persistent-factors_[{enc_layers}]-encoder-hidden-layers_adversary-weight-{w_dis}_[{adv_layers}]-adversary-hidden-layers_{n_genes}-genes_{args.checkpoint}-checkpoint"
-        if args.output_file_prefix == "descriptive"
-        and args.model_version in ["adversarial", "covariates"]
-        else f"run_{os.path.basename(args.model_run_dir)}__LIVI-{args.model_version}_zdim{z_dim}_{za}-persistent-factors_[{enc_layers}]-encoder-hidden-layers_{n_genes}-genes_{args.checkpoint}-checkpoint"
-        if args.output_file_prefix == "descriptive" and args.model_version == "wo-adversary"
-        else f"run_{os.path.basename(args.model_run_dir)}"
-        if args.output_file_prefix is None
-        else args.output_file_prefix
+        else (
+            f"run_{os.path.basename(args.model_run_dir)}__LIVI-{args.model_version}_zdim{z_dim}_{za}-persistent-factors_[{enc_layers}]-encoder-hidden-layers_adversary-weight-{w_dis}_[{adv_layers}]-adversary-hidden-layers_{n_genes}-genes_{args.checkpoint}-checkpoint"
+            if args.output_file_prefix == "descriptive"
+            and args.model_version in ["adversarial", "covariates"]
+            else (
+                f"run_{os.path.basename(args.model_run_dir)}__LIVI-{args.model_version}_zdim{z_dim}_{za}-persistent-factors_[{enc_layers}]-encoder-hidden-layers_{n_genes}-genes_{args.checkpoint}-checkpoint"
+                if args.output_file_prefix == "descriptive"
+                and args.model_version == "wo-adversary"
+                else (
+                    f"run_{os.path.basename(args.model_run_dir)}"
+                    if args.output_file_prefix is None
+                    else args.output_file_prefix
+                )
+            )
+        )
     )
 
     LIVI_data.setup()
@@ -244,7 +251,7 @@ def get_livi_embeddings(
     -------
     Tuple[pd.DataFrame, Optional[pd.DataFrame]]:
         U_context_df (pd.DataFrame): DataFrame containing cell-state-specific genetic embeddings.
-        V_persistent_df (Optional[pd.DataFrame]): DataFrame containing persistent genetic 
+        V_persistent_df (Optional[pd.DataFrame]): DataFrame containing persistent genetic
             embeddings if applicable, otherwise None.
     """
 
@@ -267,18 +274,20 @@ def get_livi_embeddings(
     colnames_context = (
         [f"Individual_Interaction_Factor{f}" for f in variable_factors + 1]
         if args.variance_threshold
-        else [
-            f"Individual_Interaction_Factor{f}_{gf}"
-            for f in range(1, int(LIVI_model.z_dim) + 1)
-            for gf in range(1, LIVI_model.n_gxc_factors + 1)
-        ]
-        if args.model_version
-        in [
-            "livi2",
-            "LIVI2",
-            "2",
-        ]  # TO-DO: select variable factors also under the LIVI2 hierarchical model
-        else [f"Individual_Interaction_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)]
+        else (
+            [
+                f"Individual_Interaction_Factor{f}_{gf}"
+                for f in range(1, int(LIVI_model.z_dim) + 1)
+                for gf in range(1, LIVI_model.n_gxc_factors + 1)
+            ]
+            if args.model_version
+            in [
+                "livi2",
+                "LIVI2",
+                "2",
+            ]  # TO-DO: select variable factors also under the LIVI2 hierarchical model
+            else [f"Individual_Interaction_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)]
+        )
     )
     U_context_df = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
     U_context_df = (
