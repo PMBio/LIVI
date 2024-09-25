@@ -585,7 +585,7 @@ class LIVI_cis(pl.LightningModule):
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
             'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
             'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-            'CxG_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+            'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
             'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
             'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
             'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.

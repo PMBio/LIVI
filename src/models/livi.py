@@ -258,7 +258,7 @@ class LIVI(pl.LightningModule):
                 l1_loss_A = torch.zeros([1], device=self.device)
             else:
                 l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.CxG_decoder.parameters()]),
+                    torch.cat([p for p in self.decoder.GxC_decoder.parameters()]),
                     ord=1,
                     dim=(0, 1),
                 )
@@ -322,7 +322,7 @@ class LIVI(pl.LightningModule):
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
             'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
             'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-            'CxG_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+            'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific individual effects decoder, if applicable.
             'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
             'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
             'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
@@ -336,10 +336,10 @@ class LIVI(pl.LightningModule):
             batch_embedding = (self.batch_effect(exp_batch_ids),)
             if self.n_gxc_factors != 0:
                 U = self.U_context(y)
-                CxG_decoder = self.decoder.CxG_decoder[0].weight
+                GxC_decoder = self.decoder.GxC_decoder[0].weight
             else:
                 U = None
-                CxG_decoder = None
+                GxC_decoder = None
             if self.n_persistent_factors != 0:
                 V = self.V_persistent(y)
                 V_decoder = self.decoder.persistent_decoder[0].weight
@@ -352,7 +352,7 @@ class LIVI(pl.LightningModule):
             "cell-state_decoder": cell_state_decoder,
             "batch_embedding": batch_embedding,
             "U_embedding": U,
-            "CxG_decoder": CxG_decoder,
+            "GxC_decoder": GxC_decoder,
             "assignment_matrix": self.A,
             "V_embedding": V,
             "V_decoder": V_decoder,
@@ -372,7 +372,7 @@ class LIVI(pl.LightningModule):
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = False
-                self.decoder.CxG_decoder[0].weight.requires_grad = False
+                self.decoder.GxC_decoder[0].weight.requires_grad = False
                 self.A.requires_grad = False
             if self.n_persistent_factors != 0:
                 for p in self.V_persistent.parameters():
@@ -395,14 +395,14 @@ class LIVI(pl.LightningModule):
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = False
-                self.decoder.CxG_decoder[0].weight.requires_grad = False
+                self.decoder.GxC_decoder[0].weight.requires_grad = False
                 self.A.requires_grad = False
         else:
             # unfreeze parameters
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = True
-                self.decoder.CxG_decoder[0].weight.requires_grad = True
+                self.decoder.GxC_decoder[0].weight.requires_grad = True
                 self.A.requires_grad = True
 
     def freeze_vae(self, mode: bool):
@@ -450,7 +450,7 @@ class LIVI(pl.LightningModule):
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = False
-                self.decoder.CxG_decoder[0].weight.requires_grad = False
+                self.decoder.GxC_decoder[0].weight.requires_grad = False
                 self.A.requires_grad = False
             if self.n_persistent_factors != 0:
                 for p in self.V_persistent.parameters():

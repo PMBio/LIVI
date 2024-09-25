@@ -248,7 +248,7 @@ class LIVI_Decoder(nn.Module):
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
         if self._num_genetic_factors != 0:
-            self.CxG_decoder = create_mlp(
+            self.GxC_decoder = create_mlp(
                 input_size=self._num_genetic_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
@@ -258,7 +258,7 @@ class LIVI_Decoder(nn.Module):
             if self.G_seed is not None:  # Initialise weights with the given random seed
                 current_state = torch.get_rng_state()
                 torch.manual_seed(self.G_seed)
-                self.CxG_decoder[0].reset_parameters()
+                self.GxC_decoder[0].reset_parameters()
                 torch.set_rng_state(current_state)
 
         if self._num_persistent_factors != 0:
