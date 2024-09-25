@@ -74,7 +74,8 @@ class LIVI(pl.LightningModule):
         self.warmup_epochs_G = 0 if self.n_persistent_factors == 0 else warmup_epochs_G
         self.train_epochs_adversary = train_epochs_adversary if adversary_weight > 0 else 0
         self.pretrain_mode = True if warmup_epochs_vae > 0 else False
-        self.pretrain_G_mode = True if self.pretrain_mode or self.warmup_epochs_G > 0 else False
+        self.train_V_mode = False if self.pretrain_mode or self.n_persistent_factors == 0 else True
+        self.train_GxC_mode = False if self.pretrain_mode or self.n_gxc_factors == 0 else True
         # Enable checkpointing after VAE + Dis training is completed and 5 epochs after U,V,A training has started
         self.checkpointing_epoch = (
             warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary + 5
@@ -132,7 +133,8 @@ class LIVI(pl.LightningModule):
             n_gxc_factors=n_gxc_factors,
             n_persistent_factors=n_persistent_factors,
             pretrain_VAE=self.pretrain_mode,
-            pretrain_G=self.pretrain_G_mode,
+            train_GxC=self.train_GxC_mode,
+            train_V=self.train_V_mode,
             batch_norm=batch_norm_decoder,
             device=device,
             genetics_seed=self.hparams.genetics_seed,
@@ -146,7 +148,8 @@ class LIVI(pl.LightningModule):
         self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
 
         self.set_pretrain_mode(self.pretrain_mode)
-        self.set_pretrain_G_mode(self.pretrain_G_mode)
+        self.set_train_V_mode(self.train_V_mode)
+        self.set_train_GxC_mode(self.train_GxC_mode)
 
         self.automatic_optimization = False
 
@@ -253,7 +256,7 @@ class LIVI(pl.LightningModule):
             # train vae
             elbo, A = self.compute_elbo(z_dist, x, y, exp_batch_ids, donor_sex, size_factor)
             logs[f"{mode}/elbo"] = elbo.item()
-            if not self.frozen or self.n_gxc_factors == 0:
+            if not self.train_GxC_mode or self.n_gxc_factors == 0:
                 l1_loss_context = torch.zeros([1], device=self.device)
                 l1_loss_A = torch.zeros([1], device=self.device)
             else:
@@ -366,44 +369,46 @@ class LIVI(pl.LightningModule):
         self.pretrain_mode = mode
         self.decoder.pretrain_VAE = mode
         if mode:
-            # freeze parameters
+            # freeze the rest of the model parameters
             for p in self.adversary.parameters():
                 p.requires_grad = False
-            if self.n_gxc_factors != 0:
-                for p in self.U_context.parameters():
-                    p.requires_grad = False
-                self.decoder.GxC_decoder[0].weight.requires_grad = False
-                self.A.requires_grad = False
-            if self.n_persistent_factors != 0:
-                for p in self.V_persistent.parameters():
-                    p.requires_grad = False
-                self.decoder.persistent_decoder[0].weight.requires_grad = False
+            self.set_train_GxC_mode(False)
+            self.set_train_V_mode(False)
         else:
             # unfreeze adversary
             for p in self.adversary.parameters():
                 p.requires_grad = True
 
-    def set_pretrain_G_mode(self, mode: bool):
-        """Set persistent (global) genetic effects pretrain mode.
-
-        If True, the context-specific genetic effects are not learned.
-        """
-        self.pretrain_G_mode = mode
-        self.decoder.pretrain_G = mode
+    def set_train_V_mode(self, mode: bool):
+        self.train_V_mode = mode
+        self.decoder.train_V = mode
         if mode:
-            # freeze parameters
-            if self.n_gxc_factors != 0:
-                for p in self.U_context.parameters():
-                    p.requires_grad = False
-                self.decoder.GxC_decoder[0].weight.requires_grad = False
-                self.A.requires_grad = False
+            # Train V
+            if self.n_persistent_factors != 0:
+                for p in self.V_persistent.parameters():
+                    p.requires_grad = True
+                self.decoder.persistent_decoder[0].weight.requires_grad = True
         else:
-            # unfreeze parameters
+            if self.n_persistent_factors != 0:
+                for p in self.V_persistent.parameters():
+                    p.requires_grad = False
+                self.decoder.persistent_decoder[0].weight.requires_grad = False
+
+    def set_train_GxC_mode(self, mode: bool):
+        self.train_GxC_mode = mode
+        self.decoder.train_GxC = mode
+        if mode:
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = True
                 self.decoder.GxC_decoder[0].weight.requires_grad = True
                 self.A.requires_grad = True
+        else:
+            if self.n_gxc_factors != 0:
+                for p in self.U_context.parameters():
+                    p.requires_grad = False
+                self.decoder.GxC_decoder[0].weight.requires_grad = False
+                self.A.requires_grad = False
 
     def freeze_vae(self, mode: bool):
         """Freezes VAE, discriminator and covariate embeddings parameters, after the number of VAE
@@ -415,47 +420,33 @@ class LIVI(pl.LightningModule):
             for p in self.encoder.parameters():
                 p.requires_grad = False
             self.decoder.mean[0].weight.requires_grad = False
-            # Retrain total_count
-            # self.decoder.log_total_count.requires_grad = False
-            # freeze adversary
-            for p in self.adversary.parameters():
-                p.requires_grad = False
+            # # Retrain total_count
+            self.decoder.log_total_count.requires_grad = False
             # freeze covariate embeddings
             for p in self.batch_effect.parameters():
                 p.requires_grad = False
             for p in self.sex_effect.parameters():
                 p.requires_grad = False
-            # unfreeze persistent genetic embedding, if applicable
-            # Note: the behavior of U embedding is dictated
-            # by the `set_pretrain_G_mode` function
-            if self.n_persistent_factors != 0:
-                for p in self.V_persistent.parameters():
-                    p.requires_grad = True
-                self.decoder.persistent_decoder[0].weight.requires_grad = True
+            # freeze adversary
+            for p in self.adversary.parameters():
+                p.requires_grad = False
         else:
             # train VAE
             for p in self.encoder.parameters():
                 p.requires_grad = True
             self.decoder.mean[0].weight.requires_grad = True
             self.decoder.log_total_count.requires_grad = True
-            # train adversary
-            for p in self.adversary.parameters():
-                p.requires_grad = True
             # train covariate embeddings
             for p in self.batch_effect.parameters():
                 p.requires_grad = True
             for p in self.sex_effect.parameters():
                 p.requires_grad = True
+            # train adversary
+            for p in self.adversary.parameters():
+                p.requires_grad = True
             # freeze genetic embeddings
-            if self.n_gxc_factors != 0:
-                for p in self.U_context.parameters():
-                    p.requires_grad = False
-                self.decoder.GxC_decoder[0].weight.requires_grad = False
-                self.A.requires_grad = False
-            if self.n_persistent_factors != 0:
-                for p in self.V_persistent.parameters():
-                    p.requires_grad = False
-                self.decoder.persistent_decoder[0].weight.requires_grad = False
+            self.set_train_GxC_mode(False)
+            self.set_train_V_mode(False)
 
     def on_train_epoch_end(self):
         """After each epoch checks whether the number of warm-up epochs for the VAE, discriminator
@@ -467,13 +458,14 @@ class LIVI(pl.LightningModule):
         if self.current_epoch == self.hparams.warmup_epochs_vae + self.train_epochs_adversary:
             self.freeze_vae(True)
             print("VAE and Adversary training completed.")
+            self.set_train_V_mode(True)
 
         if (
             self.current_epoch
             == self.hparams.warmup_epochs_vae + self.train_epochs_adversary + self.warmup_epochs_G
         ):
-            print("Start learning CxG effects.")
-            self.set_pretrain_G_mode(False)
+            print("Pretraining completed. Start learning CxG effects.")
+            self.set_train_GxC_mode(True)
 
     def on_save_checkpoint(self, checkpoint: dict):
         # Save model's pretraining and frozen state
