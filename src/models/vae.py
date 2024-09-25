@@ -10,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from src.models.components.distributions import RobustNormal
-from src.models.components.mlp import create_mlp
+from src.models.components.mlp import create_mlp, init_mlp
 
 
 class Encoder(nn.Module):
@@ -211,7 +211,8 @@ class LIVI_Decoder(nn.Module):
         n_gxc_factors: int,
         n_persistent_factors: int,
         pretrain_VAE: bool = True,
-        pretrain_G: bool = False,
+        train_GxC: bool = False,
+        train_V: bool = False,
         batch_norm: bool = True,
         device: str = "cuda",
         genetics_seed: Optional[int] = None,
@@ -231,7 +232,8 @@ class LIVI_Decoder(nn.Module):
         self._num_genetic_factors = n_gxc_factors
         self._num_persistent_factors = n_persistent_factors
         self._pretrain_vae = pretrain_VAE
-        self._pretrain_G = pretrain_G
+        self._train_V = train_V
+        self._train_GxC = train_GxC
         self.batch_norm = batch_norm
         self.device = device
         self.G_seed = genetics_seed
@@ -281,16 +283,24 @@ class LIVI_Decoder(nn.Module):
         return self._pretrain_vae
 
     @pretrain_VAE.setter
-    def pretrain_VAE(self, value):
-        self._pretrain_vae = value
+    def pretrain_VAE(self, mode: bool):
+        self._pretrain_vae = mode
 
     @property
-    def pretrain_G(self):
-        return self._pretrain_G
+    def train_V(self):
+        return self._train_V
 
-    @pretrain_G.setter
-    def pretrain_G(self, value):
-        self._pretrain_G = value
+    @train_V.setter
+    def train_V(self, mode: bool):
+        self._train_V = mode
+
+    @property
+    def train_GxC(self):
+        return self._train_GxC
+
+    @train_GxC.setter
+    def train_GxC(self, mode: bool):
+        self._train_GxC = mode
 
     def forward(
         self,
@@ -310,12 +320,262 @@ class LIVI_Decoder(nn.Module):
         if (
             not self.pretrain_VAE
             and self._num_persistent_factors != 0
+            and self.train_V
+            and persistent_G is not None
+        ):
+            y_g = self.persistent_decoder(persistent_G)
+            decoder_out = decoder_out + y_g
+        if (
+            not self.pretrain_VAE
+            and self._num_gxc_factors != 0
+            and self.train_GxC
+            and GxC is not None
+        ):
+            y_gc = self.GxC_decoder(GxC)
+            decoder_out = decoder_out + y_gc
+        if self.batch_norm:
+            decoder_out = self.BN_decoder(decoder_out)
+        mean = F.softmax(decoder_out, dim=-1) * size_factor
+        probs = mean / (mean + total_count)
+
+        assert not torch.isnan(mean).any()
+        assert not torch.isnan(probs).any()
+        assert not torch.isnan(total_count).any()
+
+        return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
+
+
+class LIVIcis_Decoder(LIVI_Decoder):
+    """Decoder module with Negative Binomial likelihood and batch and sex effect correction.
+
+    This module encompasses separate (linear) decoders for cell-state and genetic factors.
+    """
+
+    def __init__(
+        self,
+        z_dim: int,
+        x_dim: int,
+        decoder_hidden_dims: List[int],
+        layer_norm: bool,
+        n_gxc_factors: int,
+        n_persistent_factors: int,
+        pretrain_VAE: bool = True,
+        train_V: bool = False,
+        train_GxC: bool = False,
+        batch_norm: bool = True,
+        device: str = "cuda",
+        genetics_seed: Optional[int] = None,
+    ):
+        super().__init__(
+            z_dim=z_dim,
+            x_dim=x_dim,
+            decoder_hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+            n_gxc_factors=n_gxc_factors,
+            n_persistent_factors=n_persistent_factors,
+            pretrain_VAE=pretrain_VAE,
+            train_GxC=train_GxC,
+            train_V=train_V,
+            batch_norm=batch_norm,
+            device=device,
+            genetics_seed=genetics_seed,
+        )
+
+    @property
+    def pretrain_VAE(self):
+        return self._pretrain_vae
+
+    @pretrain_VAE.setter
+    def pretrain_VAE(self, mode: bool):
+        self._pretrain_vae = mode
+
+    @property
+    def train_V(self):
+        return self._train_V
+
+    @train_V.setter
+    def train_V(self, mode: bool):
+        self._train_V = mode
+
+    @property
+    def train_GxC(self):
+        return self._train_GxC
+
+    @train_GxC.setter
+    def train_GxC(self, mode: bool):
+        self._train_GxC = mode
+
+    def forward(
+        self,
+        z: torch.Tensor,
+        size_factor: torch.Tensor,
+        GxC: Optional[torch.Tensor] = None,
+        persistent_G: Optional[torch.Tensor] = None,
+        batch_effect: Optional[torch.Tensor] = None,
+        donor_sex_effect: Optional[torch.Tensor] = None,
+        known_cis_effect: Optional[torch.Tensor] = None,
+    ) -> tdist.Distribution:
+        total_count = self.log_total_count.exp()
+        decoder_out = self.mean(z)
+        if batch_effect is not None:
+            decoder_out = decoder_out + batch_effect
+        if donor_sex_effect is not None:
+            decoder_out = decoder_out + donor_sex_effect
+        if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
+            decoder_out = decoder_out + known_cis_effect
+        if (
+            not self.pretrain_VAE
+            and self._num_persistent_factors != 0
+            and self.train_V
+            and persistent_G is not None
+        ):
+            y_g = self.persistent_decoder(persistent_G)
+            decoder_out = decoder_out + y_g
+        if (
+            not self.pretrain_VAE
+            and self._num_gxc_factors != 0
+            and self.train_GxC
+            and GxC is not None
+        ):
+            y_gc = self.GxC_decoder(GxC)
+            decoder_out = decoder_out + y_gc
+        if self.batch_norm:
+            decoder_out = self.BN_decoder(decoder_out)
+        mean = F.softmax(decoder_out, dim=-1) * size_factor
+        probs = mean / (mean + total_count)
+
+        assert not torch.isnan(mean).any()
+        assert not torch.isnan(probs).any()
+        assert not torch.isnan(total_count).any()
+
+        return tdist.Independent(tdist.NegativeBinomial(total_count=total_count, probs=probs), 1)
+
+
+class LIVIcis_Decoder_gen(nn.Module):
+    """Decoder module with Negative Binomial likelihood and batch and sex effect correction.
+
+    This module encompasses separate (linear) decoders for cell-state and genetic factors.
+    """
+
+    def __init__(
+        self,
+        z_dim: int,
+        x_dim: int,
+        decoder_hidden_dims: List[int],
+        layer_norm: bool,
+        n_gxc_factors: int,
+        n_persistent_factors: int,
+        pretrain_VAE: bool = True,
+        train_V: bool = False,
+        train_GxC: bool = False,
+        batch_norm: bool = True,
+        device: str = "cuda",
+        genetics_generator: Optional[torch.Generator] = None,
+    ):
+        super().__init__()
+
+        self._x_dim = x_dim
+        self._z_dim = z_dim
+        self._num_gxc_factors = n_gxc_factors
+        self._num_persistent_factors = n_persistent_factors
+        self._pretrain_vae = pretrain_VAE
+        self._train_V = train_V
+        self._train_GxC = train_GxC
+        self.batch_norm = batch_norm
+        self.device = device
+        self.genetics_generator = genetics_generator
+
+        self.mean = create_mlp(
+            input_size=self._z_dim,
+            output_size=self._x_dim,
+            hidden_dims=decoder_hidden_dims,
+            layer_norm=layer_norm,
+            device=self.device,
+        )
+        self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
+
+        if self._num_gxc_factors != 0:
+            self.GxC_decoder = create_mlp(
+                input_size=self._num_gxc_factors,
+                output_size=self._x_dim,
+                hidden_dims=[],
+                layer_norm=layer_norm,
+                device=self.device,
+            )
+            if self.genetics_generator is not None:  # Initialise weights with the given generator
+                init_mlp(self.GxC_decoder, generator=self.genetics_generator)
+
+        if self._num_persistent_factors != 0:
+            self.persistent_decoder = create_mlp(
+                input_size=self._num_persistent_factors,
+                output_size=self._x_dim,
+                hidden_dims=[],
+                layer_norm=layer_norm,
+                device=self.device,
+            )
+            # if self.genetics_generator is not None:  # Initialise weights with the given generator
+            #     init_mlp(self.persistent_decoder, generator=self.genetics_generator)
+
+        if self.batch_norm:
+            self.BN_decoder = nn.BatchNorm1d(self._x_dim, device=self.device)
+
+    @property
+    def pretrain_VAE(self):
+        return self._pretrain_vae
+
+    @pretrain_VAE.setter
+    def pretrain_VAE(self, mode: bool):
+        self._pretrain_vae = mode
+
+    @property
+    def train_V(self):
+        return self._train_V
+
+    @train_V.setter
+    def train_V(self, mode: bool):
+        self._train_V = mode
+
+    @property
+    def train_GxC(self):
+        return self._train_GxC
+
+    @train_GxC.setter
+    def train_GxC(self, mode: bool):
+        self._train_GxC = mode
+
+    def forward(
+        self,
+        z: torch.Tensor,
+        size_factor: torch.Tensor,
+        GxC: Optional[torch.Tensor] = None,
+        persistent_G: Optional[torch.Tensor] = None,
+        batch_effect: Optional[torch.Tensor] = None,
+        donor_sex_effect: Optional[torch.Tensor] = None,
+        known_cis_effect: Optional[torch.Tensor] = None,
+    ) -> tdist.Distribution:
+        total_count = self.log_total_count.exp()
+        decoder_out = self.mean(z)
+        if batch_effect is not None:
+            decoder_out = decoder_out + batch_effect
+        if donor_sex_effect is not None:
+            decoder_out = decoder_out + donor_sex_effect
+        if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
+            decoder_out = decoder_out + known_cis_effect
+        if (
+            not self.pretrain_VAE
+            and self._num_persistent_factors != 0
+            and self.train_V
             and persistent_G is not None
         ):
             y_add = self.persistent_decoder(persistent_G)
             decoder_out = decoder_out + y_add
-        if not self.pretrain_G and self._num_genetic_factors != 0 and GxC is not None:
-            y_gc = self.CxG_decoder(GxC)
+        if (
+            not self.pretrain_VAE
+            and self._num_gxc_factors != 0
+            and self.train_GxC
+            and GxC is not None
+        ):
+            y_gc = self.GxC_decoder(GxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
