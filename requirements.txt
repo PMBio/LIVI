@@ -37,3 +37,5 @@ plotnine==0.12.4
 plotnine-prism==0.3.0
 reportlab>=3.6.12
 cairosvg>=2.7.1
+plotly>=5.22.0
+kaleido>=0.2.1
