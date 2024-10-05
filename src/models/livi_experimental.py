@@ -251,14 +251,13 @@ class LIVI_cis(pl.LightningModule):
         y_dim: int,
         n_gxc_factors: int,
         n_persistent_factors: int,
-        exbatch_dim: int,
         n_cis_snps: int,
         encoder_hidden_dims: List[int],
         learning_rate: float,
         warmup_epochs_vae: int = 60,
         warmup_epochs_G: int = 0,
         train_epochs_adversary: int = 20,
-        donor_sex_dim: int = 2,
+        covariates_dims: Optional[List[int]] = None,
         l1_weight: float = 0.001,
         A_weight: float = 0.001,
         adversary_weight: float = 1.0,
@@ -366,12 +365,13 @@ class LIVI_cis(pl.LightningModule):
             self.SNP_gene_effect = nn.Parameter(torch.randn(n_cis_snps, x_dim, device=device))
             # self.SNP_gene_effect = nn.Parameter(torch.randn(z_dim, n_cis_snps, x_dim, device=device)) # Learn SNP-gene effect for each cell-state
 
-        # Sex and batch correction per gene
-        if donor_sex_dim is not None:
-            self.sex_effect = nn.Embedding(donor_sex_dim, x_dim, device=device)
+        # Covariate (e.g. experimental batch) correction per gene
+        if self.hparams.covariates_dims is not None:
+            self.covariate_effect = nn.Embedding(
+                sum(self.hparams.covariates_dims), x_dim, device=device
+            )
         else:
-            self.sex_effect = None
-        self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
+            self.covariate_effect = None
 
         self.automatic_optimization = False
 
@@ -391,13 +391,18 @@ class LIVI_cis(pl.LightningModule):
     def prepare_batch(self, batch):
         x = batch["x"]
         y = batch["y"]
-        dsex = None if self.hparams.donor_sex_dim is None else batch["dsex"]
-        eb = batch["eb"]
+        if self.hparams.covariates_dims is not None:
+            assert len(self.hparams.covariates_dims) == len(
+                batch["covariates"]
+            ), "Number of covariates different than the number of covariates in data module."
+            covariates = batch["covariates"]
+        else:
+            covariates = None
         size_factor = batch["size_factor"]
         known_cis_associations = None if self.hparams.n_cis_snps == 0 else batch["known_cis"]
         cell_gt = None if self.hparams.n_cis_snps == 0 else batch["GT_cells"]
 
-        return x, y, dsex, eb, size_factor, known_cis_associations, cell_gt
+        return x, y, covariates, size_factor, known_cis_associations, cell_gt
 
     def forward(self, x: torch.Tensor):
         """Encodes data into cell-state latent space."""
@@ -412,8 +417,7 @@ class LIVI_cis(pl.LightningModule):
         z_dist: torch.distributions.Distribution,
         x: torch.Tensor,
         y: torch.Tensor,
-        eb: torch.Tensor,
-        dsex: Optional[torch.Tensor] = None,
+        covariates: Optional[List[torch.Tensor]] = None,
         size_factor: Optional[torch.Tensor] = None,
         snp_gene_mask: Optional[torch.Tensor] = None,
         cell_snp_mask: Optional[torch.Tensor] = None,
@@ -425,8 +429,7 @@ class LIVI_cis(pl.LightningModule):
             z_dist: Variational distribution.
             x: Input data.
             y: Donor IDs.
-            dsex: Donor sex.
-            eb: Experimental batch IDs.
+            covariates: Cell/donor covariates (e.g. technical batch ID or sex).
             size_factor: Size factor to correct for gene count differences.
 
         Returns
@@ -443,6 +446,16 @@ class LIVI_cis(pl.LightningModule):
             z_interaction = (z @ A) * self.U_context(y)
         else:
             z_interaction = None
+
+        if covariates is not None:
+            covariate_effect = torch.zeros_like(x)
+            for covar in range(len(covariates)):
+                covar_indices = covariates[covar]
+                # increase the indices by the number of categories of the previous covariate(s)
+                embedding_indices = covar_indices + sum(self.hparams.covariates_dims[:covar])
+                covariate_effect += self.covariate_effect(embedding_indices)
+        else:
+            covariate_effect = None
 
         if (
             snp_gene_mask is not None
@@ -468,8 +481,7 @@ class LIVI_cis(pl.LightningModule):
                 GxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
                 size_factor=size_factor,
-                batch_effect=self.batch_effect(eb),
-                donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
+                covariate_effect=covariate_effect,
                 known_cis_effect=(
                     celltype_known_cis_effect
                     if snp_gene_mask is not None and self.hparams.n_cis_snps != 0
@@ -484,9 +496,7 @@ class LIVI_cis(pl.LightningModule):
 
     def step(self, batch, batch_idx, mode="train"):
         """Performs a single training or validation step."""
-        x, y, donor_sex, exp_batch_ids, size_factor, snp_gene_mask, cell_snp_mask = (
-            self.prepare_batch(batch)
-        )
+        x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask = self.prepare_batch(batch)
         optim_vae, optim_adversary = self.optimizers()
 
         train_adversary = batch_idx % self.adversary_steps == 0
@@ -512,7 +522,7 @@ class LIVI_cis(pl.LightningModule):
         else:
             # train vae
             elbo, A = self.compute_elbo(
-                z_dist, x, y, exp_batch_ids, donor_sex, size_factor, snp_gene_mask, cell_snp_mask
+                z_dist, x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask
             )
             logs[f"{mode}/elbo"] = elbo.item()
             if not self.train_GxC_mode or self.n_gxc_factors == 0:
@@ -569,21 +579,19 @@ class LIVI_cis(pl.LightningModule):
         """Performs a single validation step."""
         return self.step(batch, batch_idx, mode="val")
 
-    def predict(self, x, y, exp_batch_ids):
+    def predict(self, x, y):
         """Model inference. Get latent space and individual embeddings for the input data.
 
         Parameters
         ----------
             x (torch.Tensor): Input gene expression vector per cell.
             y (torch.Tensor): ID of the individual the cell is derived from.
-            exp_batch_ids (torch.Tensor): ID of the experimental the cell belongs to.
 
         Returns
         -------
         Inference results (Dict[str,torch.Tensor])
             'cell-state_latent' (torch.Tensor): Cell state latent space.
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
-            'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
             'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
             'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
             'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
@@ -596,7 +604,6 @@ class LIVI_cis(pl.LightningModule):
 
             z = self(x).rsample()
             cell_state_decoder = self.decoder.mean[0].weight
-            batch_embedding = (self.batch_effect(exp_batch_ids),)
             if self.n_gxc_factors != 0:
                 U = self.U_context(y)
                 GxC_decoder = self.decoder.GxC_decoder[0].weight
@@ -613,7 +620,6 @@ class LIVI_cis(pl.LightningModule):
         return {
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
-            "batch_embedding": batch_embedding,
             "U_embedding": U,
             "GxC_decoder": GxC_decoder,
             "assignment_matrix": self.A,
@@ -687,22 +693,20 @@ class LIVI_cis(pl.LightningModule):
             self.decoder.mean[0].weight.requires_grad = False
             # # Retrain total_count
             self.decoder.log_total_count.requires_grad = False
-            # freeze covariate embeddings
-            for p in self.batch_effect.parameters():
-                p.requires_grad = False
-            for p in self.sex_effect.parameters():
-                p.requires_grad = False
+            # freeze covariate embeddings, if applicable
+            if self.covariate_effect is not None:
+                for p in self.covariate_effect.parameters():
+                    p.requires_grad = False
         else:
             # train VAE
             for p in self.encoder.parameters():
                 p.requires_grad = True
             self.decoder.mean[0].weight.requires_grad = True
             self.decoder.log_total_count.requires_grad = True
-            # train covariate embeddings
-            for p in self.batch_effect.parameters():
-                p.requires_grad = True
-            for p in self.sex_effect.parameters():
-                p.requires_grad = True
+            # train covariate embeddings, if applicable
+            if self.covariate_effect is not None:
+                for p in self.covariate_effect.parameters():
+                    p.requires_grad = True
             # freeze genetic embeddings
             self.set_train_GxC_mode(False)
             if self.hparams.n_cis_snps != 0:
@@ -752,15 +756,6 @@ class LIVI_cis(pl.LightningModule):
             print("Start learning CxG effects.")
             self.set_train_GxC_mode(True)
 
-        # if (
-        #     self.current_epoch
-        #     == self.hparams.warmup_epochs_vae + self.train_epochs_adversary + self.warmup_epochs_G
-        # ):
-        #     self.set_pretrain_G_mode(False)
-        #     self.freeze_vae(True)
-        #     print("Pretraining completed.")
-        #     print("Start learning CxG effects.")
-
     def on_save_checkpoint(self, checkpoint: dict):
         # Save model's pretraining and frozen state
         attributes_to_save = {
@@ -784,9 +779,9 @@ class LIVI_cis(pl.LightningModule):
         params = [
             {"params": self.encoder.parameters()},
             {"params": self.decoder.parameters()},
-            {"params": self.batch_effect.parameters()},
-            {"params": self.sex_effect.parameters()},
         ]
+        if self.covariate_effect is not None:
+            params.append({"params": self.covariate_effect.parameters()})
         if self.n_gxc_factors != 0:
             params.append({"params": self.U_context.parameters()})
             params.append({"params": self.A})
@@ -817,14 +812,13 @@ class LIVI_cis_gen(LIVI_cis):
         y_dim: int,
         n_gxc_factors: int,
         n_persistent_factors: int,
-        exbatch_dim: int,
         n_cis_snps: int,
         encoder_hidden_dims: List[int],
         learning_rate: float,
         warmup_epochs_vae: int = 60,
         warmup_epochs_G: int = 0,
         train_epochs_adversary: int = 20,
-        donor_sex_dim: int = 2,
+        covariates_dims: Optional[List[int]] = None,
         l1_weight: float = 0.001,
         A_weight: float = 0.001,
         adversary_weight: float = 1.0,
@@ -842,14 +836,13 @@ class LIVI_cis_gen(LIVI_cis):
             y_dim=y_dim,
             n_gxc_factors=n_gxc_factors,
             n_persistent_factors=n_persistent_factors,
-            exbatch_dim=exbatch_dim,
             n_cis_snps=n_cis_snps,
             encoder_hidden_dims=encoder_hidden_dims,
             learning_rate=learning_rate,
             warmup_epochs_vae=warmup_epochs_vae,
             warmup_epochs_G=warmup_epochs_G,
             train_epochs_adversary=train_epochs_adversary,
-            donor_sex_dim=donor_sex_dim,
+            covariates_dims=covariates_dims,
             l1_weight=l1_weight,
             A_weight=A_weight,
             adversary_weight=adversary_weight,
@@ -932,6 +925,14 @@ class LIVI_cis_gen(LIVI_cis):
             # if self.hparams.genetics_seed is not None:
             #     nn.init.normal_(self.V_persistent.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
+        # Covariate (e.g. experimental batch) correction per gene
+        if self.hparams.covariates_dims is not None:
+            self.covariate_effect = nn.Embedding(
+                sum(self.hparams.covariates_dims), x_dim, device=device
+            )
+        else:
+            self.covariate_effect = None
+
         if n_cis_snps != 0:
             self.SNP_gene_effect = nn.Parameter(
                 torch.randn(n_cis_snps, x_dim, device=device, generator=self.G_gen)
@@ -939,12 +940,6 @@ class LIVI_cis_gen(LIVI_cis):
             # self.SNP_gene_effect = nn.Parameter(
             #     torch.randn(z_dim, n_cis_snps, x_dim, device=device, generator=self.G_gen)
             # )
-
-        if donor_sex_dim is not None:
-            self.sex_effect = nn.Embedding(donor_sex_dim, x_dim, device=device)
-        else:
-            self.sex_effect = None
-        self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
 
         self.automatic_optimization = False
 

@@ -408,16 +408,13 @@ class LIVIcis_Decoder(LIVI_Decoder):
         size_factor: torch.Tensor,
         GxC: Optional[torch.Tensor] = None,
         persistent_G: Optional[torch.Tensor] = None,
-        batch_effect: Optional[torch.Tensor] = None,
-        donor_sex_effect: Optional[torch.Tensor] = None,
+        covariate_effect: Optional[torch.Tensor] = None,
         known_cis_effect: Optional[torch.Tensor] = None,
     ) -> tdist.Distribution:
         total_count = self.log_total_count.exp()
         decoder_out = self.mean(z)
-        if batch_effect is not None:
-            decoder_out = decoder_out + batch_effect
-        if donor_sex_effect is not None:
-            decoder_out = decoder_out + donor_sex_effect
+        if covariate_effect is not None:
+            decoder_out = decoder_out + covariate_effect
         if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
             decoder_out = decoder_out + known_cis_effect
         if (
@@ -546,16 +543,13 @@ class LIVIcis_Decoder_gen(nn.Module):
         size_factor: torch.Tensor,
         GxC: Optional[torch.Tensor] = None,
         persistent_G: Optional[torch.Tensor] = None,
-        batch_effect: Optional[torch.Tensor] = None,
-        donor_sex_effect: Optional[torch.Tensor] = None,
+        covariate_effect: Optional[torch.Tensor] = None,
         known_cis_effect: Optional[torch.Tensor] = None,
     ) -> tdist.Distribution:
         total_count = self.log_total_count.exp()
         decoder_out = self.mean(z)
-        if batch_effect is not None:
-            decoder_out = decoder_out + batch_effect
-        if donor_sex_effect is not None:
-            decoder_out = decoder_out + donor_sex_effect
+        if covariate_effect is not None:
+            decoder_out = decoder_out + covariate_effect
         if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
             decoder_out = decoder_out + known_cis_effect
         if (
