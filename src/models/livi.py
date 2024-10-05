@@ -199,8 +199,7 @@ class LIVI(pl.LightningModule):
             z_dist: Variational distribution.
             x: Input data.
             y: Donor IDs.
-            dsex: Donor sex.
-            eb: Experimental batch IDs.
+            covariates: Cell/donor covariates (e.g. technical batch ID or sex).
             size_factor: Size factor to correct for gene count differences.
 
         Returns
