@@ -322,14 +322,13 @@ class LIVI(pl.LightningModule):
         """Performs a single validation step."""
         return self.step(batch, batch_idx, mode="val")
 
-    def predict(self, x, y, exp_batch_ids):
+    def predict(self, x, y):
         """Model inference. Get latent space and individual embeddings for the input data.
 
         Parameters
         ----------
             x (torch.Tensor): Input gene expression vector per cell.
             y (torch.Tensor): ID of the individual the cell is derived from.
-            exp_batch_ids (torch.Tensor): ID of the experimental the cell belongs to.
 
         Returns
         -------
