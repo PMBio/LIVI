@@ -1,7 +1,7 @@
 # @package _global_
 
 # to execute this experiment run:
-# python src/train.py experiment=livi2_experimental_onek1k
+# python src/train.py experiment=livi2_final_onek1k
 
 defaults:
   - override /model: livi2_final_onek1k.yaml
@@ -28,6 +28,7 @@ callbacks:
   livi_checkpoint:
     filename: "LIVI2_onek1k_HVG-HEX_{epoch:04d}_{hp_metric:.5f}"
 
-task_name: final_zdim15-Softmax_500-gxc_5-persistent_90-0-30-warmup_adversary-weight-100_l1-vector-1e-3_l1-vector-A-1e-3_lr-8e-4_HydraNew_A-Normal-init_retrain-total-count
+# task_name: final_zdim15-Softmax_500-gxc_5-persistent_90-0-30-warmup_adversary-weight-100_l1-vector-1e-3_l1-vector-A-1e-3_lr-8e-4_HydraNew_A-Normal-init_retrain-total-count
+task_name: LIVI_covariates_test
 
 seed: 50

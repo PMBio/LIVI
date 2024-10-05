@@ -24,9 +24,8 @@ class LIVIDataset(Dataset):
         y_key: str,
         use_size_factor: bool,
         size_factor_key: Optional[str] = None,
-        donor_sex_key: Optional[str] = None,
-        experimental_batch_key: Optional[str] = None,
         layer_key: Optional[str] = None,
+        covariates_keys: Optional[List[str]] = None,
         known_cis_eqtls: Optional[Union[str, pd.DataFrame]] = None,
         eqtl_genotypes: Optional[Union[str, pd.DataFrame]] = None,
         strict: bool = False,
@@ -53,7 +52,9 @@ class LIVIDataset(Dataset):
         self.use_size_factor = use_size_factor
         self.size_factor_key = size_factor_key
         self.layer_key = layer_key
-        self.y, self.y_index = pd.factorize(self.adata.obs[self.y_key])
+        self.y, self.y_index = pd.factorize(
+            self.adata.obs[self.y_key], sort=False, use_na_sentinel=False
+        )
         if eqtl_genotypes is not None:
             assert (
                 self.known_cis_eqtls is not None
@@ -77,14 +78,16 @@ class LIVIDataset(Dataset):
         else:
             self.GT = None
 
-        self.donor_sex_key = donor_sex_key
-        self.experimental_batch_key = experimental_batch_key
         self.strict = strict
 
-        if self.donor_sex_key:
-            self.dsex, self.sex_index = pd.factorize(self.adata.obs[self.donor_sex_key])
-        if self.experimental_batch_key:
-            self.eb, self.batch_index = pd.factorize(self.adata.obs[self.experimental_batch_key])
+        if covariates_keys is not None:
+            self.covariates = {}
+            for covar in covariates_keys:
+                self.covariates[covar], _ = pd.factorize(
+                    self.adata.obs[covar], sort=False, use_na_sentinel=False
+                )
+        else:
+            self.covariates = None
 
         if self.use_size_factor:
             if self.size_factor_key is None:
@@ -119,10 +122,12 @@ class LIVIDataset(Dataset):
             data["size_factor"] = torch.tensor(
                 self.size_factor[idx].reshape(-1, 1), dtype=torch.float
             )
-        if self.donor_sex_key:
-            data["dsex"] = torch.tensor(self.dsex[idx], dtype=torch.long)
-        if self.experimental_batch_key:
-            data["eb"] = torch.tensor(self.eb[idx], dtype=torch.long)
+
+        if self.covariates is not None:
+            covars = []
+            for indices in self.covariates.values():
+                covars.append(torch.tensor(indices[idx], dtype=torch.long))
+            data["covariates"] = covars
         if self.known_cis_eqtls is not None:
             data["known_cis"] = torch.from_numpy(self.known_cis_eqtls.to_numpy()).to(torch.long)
         if self.GT is not None:
@@ -143,9 +148,8 @@ class LIVIDataModule(LightningDataModule):
         y_key: str,
         use_size_factor: bool,
         size_factor_key: Optional[str] = None,
-        donor_sex_key: Optional[str] = None,
-        experimental_batch_key: Optional[str] = None,
         layer_key: Optional[str] = None,
+        covariates_keys: Optional[List[str]] = None,
         known_cis_eqtls: Optional[Union[str, pd.DataFrame]] = None,
         eqtl_genotypes: Optional[Union[str, pd.DataFrame]] = None,
         strict: bool = False,
@@ -181,8 +185,7 @@ class LIVIDataModule(LightningDataModule):
         self.use_size_factor = use_size_factor
         self.size_factor_key = size_factor_key
         self.layer_key = layer_key
-        self.donor_sex_key = donor_sex_key
-        self.experimental_batch_key = experimental_batch_key
+        self.covariates = covariates_keys
         self.known_cis_eqtls = known_cis_eqtls
         self.eqtl_genotypes = eqtl_genotypes
         self.strict = strict
@@ -203,8 +206,7 @@ class LIVIDataModule(LightningDataModule):
             use_size_factor=self.use_size_factor,
             size_factor_key=self.size_factor_key,
             layer_key=self.layer_key,
-            donor_sex_key=self.donor_sex_key,
-            experimental_batch_key=self.experimental_batch_key,
+            covariates_keys=self.covariates,
             known_cis_eqtls=self.known_cis_eqtls,
             eqtl_genotypes=self.eqtl_genotypes,
             strict=self.strict,
