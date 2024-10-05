@@ -536,24 +536,11 @@ class LIVI_cis(pl.LightningModule):
                 )
                 A_penalty = (A * (1 - A)).pow(2)  # forces entries of A to be towards 0 or 1
                 loss_A = self.hparams.A_weight * A_penalty.sum()
-            # if not self.train_V_mode or self.n_persistent_factors == 0:
-            #     l1_loss_persistent = torch.zeros([1], device=self.device)
-            # else:
-            #     l1_loss_persistent = self.hparams.l1_weight * torch.linalg.vector_norm(
-            #         torch.cat([p for p in self.decoder.persistent_decoder.parameters()]),
-            #         ord=1,
-            #         dim=(0, 1),
-            #     )
 
             logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
             logs[f"{mode}/penalty_A"] = loss_A.item()
-            # logs[f"{mode}/L1_penalty_persistent"] = l1_loss_persistent.item()
             loss = (
-                -elbo
-                - self.hparams.adversary_weight * adversarial_loss
-                + l1_loss_context
-                + loss_A
-                #   + l1_loss_persistent
+                -elbo - self.hparams.adversary_weight * adversarial_loss + l1_loss_context + loss_A
             )
             logs[f"{mode}/livi_loss"] = loss.item()
             logs["hp_metric"] = loss.item()
