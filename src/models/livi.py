@@ -27,8 +27,7 @@ class LIVI(pl.LightningModule):
         warmup_epochs_vae: int = 60,
         warmup_epochs_G: int = 0,
         train_epochs_adversary: int = 30,
-        exbatch_dim: Optional[int] = None,
-        donor_sex_dim: Optional[int] = None,
+        covariates_dims: Optional[List[int]] = None,
         l1_weight: float = 0.001,
         l1_weight_A: float = 0.001,
         adversary_weight: float = 10,
@@ -140,15 +139,13 @@ class LIVI(pl.LightningModule):
             genetics_seed=self.hparams.genetics_seed,
         )
 
-        # Sex and batch correction per gene
-        if donor_sex_dim is not None:
-            self.sex_effect = nn.Embedding(donor_sex_dim, x_dim, device=device)
+        # Covariate (e.g. experimental batch) correction per gene
+        if self.hparams.covariates_dims is not None:
+            self.covariate_effect = nn.Embedding(
+                sum(self.hparams.covariates_dims), x_dim, device=device
+            )
         else:
-            self.sex_effect = None
-        if exbatch_dim is not None:
-            self.batch_effect = nn.Embedding(exbatch_dim, x_dim, device=device)
-        else:
-            self.batch_effect = None
+            self.covariate_effect = None
 
         self.set_pretrain_mode(self.pretrain_mode)
         self.set_train_V_mode(self.train_V_mode)
@@ -168,10 +165,16 @@ class LIVI(pl.LightningModule):
     def prepare_batch(self, batch):
         x = batch["x"]
         y = batch["y"]
-        dsex = None if self.hparams.donor_sex_dim is None else batch["dsex"]
-        eb = None if self.hparams.exbatch_dim is None else batch["eb"]
+        if self.hparams.covariates_dims is not None:
+            assert len(self.hparams.covariates_dims) == len(
+                batch["covariates"]
+            ), "Number of covariates different than the number of covariates in data module."
+            covariates = batch["covariates"]
+        else:
+            covariates = None
         size_factor = batch["size_factor"]
-        return x, y, dsex, eb, size_factor
+
+        return x, y, covariates, size_factor
 
     def forward(self, x: torch.Tensor):
         """Encodes data into cell-state latent space."""
@@ -186,8 +189,7 @@ class LIVI(pl.LightningModule):
         z_dist: torch.distributions.Distribution,
         x: torch.Tensor,
         y: torch.Tensor,
-        eb: torch.Tensor,
-        dsex: Optional[torch.Tensor] = None,
+        covariates: Optional[List[torch.Tensor]] = None,
         size_factor: Optional[torch.Tensor] = None,
     ):
         """Computes evidence lower bound (ELBO).
@@ -215,14 +217,23 @@ class LIVI(pl.LightningModule):
         else:
             z_interaction = None
 
+        if covariates is not None:
+            covariate_effect = torch.zeros_like(x)
+            for covar in range(len(covariates)):
+                covar_indices = covariates[covar]
+                # increase the indices by the number of categories of the previous covariate(s)
+                embedding_indices = covar_indices + sum(self.hparams.covariates_dims[:covar])
+                covariate_effect += self.covariate_effect(embedding_indices)
+        else:
+            covariate_effect = None
+
         log_lik = (
             self.decoder(
                 z=z,
                 size_factor=size_factor,
                 GxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
-                batch_effect=self.batch_effect(eb) if eb is not None else None,
-                donor_sex_effect=self.sex_effect(dsex) if dsex is not None else None,
+                covariate_effect=covariate_effect,
             )
             .log_prob(x)
             .mean()
@@ -232,7 +243,7 @@ class LIVI(pl.LightningModule):
 
     def step(self, batch, batch_idx, mode="train"):
         """Performs a single training or validation step."""
-        x, y, donor_sex, exp_batch_ids, size_factor = self.prepare_batch(batch)
+        x, y, covariates, size_factor = self.prepare_batch(batch)
         optim_vae, optim_adversary = self.optimizers()
 
         train_adversary = batch_idx % self.adversary_steps == 0
@@ -257,7 +268,7 @@ class LIVI(pl.LightningModule):
             optim_adversary.step()
         else:
             # train vae
-            elbo, A = self.compute_elbo(z_dist, x, y, exp_batch_ids, donor_sex, size_factor)
+            elbo, A = self.compute_elbo(z_dist, x, y, covariates, size_factor)
             logs[f"{mode}/elbo"] = elbo.item()
             if not self.train_GxC_mode or self.n_gxc_factors == 0:
                 l1_loss_context = torch.zeros([1], device=self.device)
@@ -326,7 +337,6 @@ class LIVI(pl.LightningModule):
         Inference results (Dict[str,torch.Tensor])
             'cell-state_latent' (torch.Tensor): Cell state latent space.
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
-            'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
             'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
             'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific individual effects decoder, if applicable.
             'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
@@ -339,7 +349,7 @@ class LIVI(pl.LightningModule):
 
             z = self(x).rsample()
             cell_state_decoder = self.decoder.mean[0].weight
-            batch_embedding = (self.batch_effect(exp_batch_ids),)
+
             if self.n_gxc_factors != 0:
                 U = self.U_context(y)
                 GxC_decoder = self.decoder.GxC_decoder[0].weight
@@ -356,7 +366,6 @@ class LIVI(pl.LightningModule):
         return {
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
-            "batch_embedding": batch_embedding,
             "U_embedding": U,
             "GxC_decoder": GxC_decoder,
             "assignment_matrix": self.A,
@@ -426,11 +435,8 @@ class LIVI(pl.LightningModule):
             # # Retrain total_count
             self.decoder.log_total_count.requires_grad = False
             # freeze covariate embeddings if applicable
-            if self.batch_effect is not None:
-                for p in self.batch_effect.parameters():
-                    p.requires_grad = False
-            if self.sex_effect is not None:
-                for p in self.sex_effect.parameters():
+            if self.covariate_effect is not None:
+                for p in self.covariate_effect.parameters():
                     p.requires_grad = False
             # freeze adversary
             for p in self.adversary.parameters():
@@ -442,11 +448,8 @@ class LIVI(pl.LightningModule):
             self.decoder.mean[0].weight.requires_grad = True
             self.decoder.log_total_count.requires_grad = True
             # train covariate embeddings if applicable
-            if self.batch_effect is not None:
-                for p in self.batch_effect.parameters():
-                    p.requires_grad = True
-            if self.sex_effect is not None:
-                for p in self.sex_effect.parameters():
+            if self.covariate_effect is not None:
+                for p in self.covariate_effect.parameters():
                     p.requires_grad = True
             # train adversary
             for p in self.adversary.parameters():
@@ -498,11 +501,8 @@ class LIVI(pl.LightningModule):
             {"params": self.encoder.parameters()},
             {"params": self.decoder.parameters()},
         ]
-        if self.batch_effect is not None:
-            params.append({"params": self.batch_effect.parameters()})
-        if self.sex_effect is not None:
-            params.append({"params": self.sex_effect.parameters()})
-
+        if self.covariate_effect is not None:
+            params.append({"params": self.covariate_effect.parameters()})
         if self.n_gxc_factors != 0:
             params.append({"params": self.U_context.parameters()})
             params.append({"params": self.A})
