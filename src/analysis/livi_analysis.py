@@ -205,7 +205,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI.load_from_checkpoint(
+    LIVI_model = LIVI_cis.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -278,10 +278,8 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     )
     Y, _ = pd.factorize(adata.obs[args.individual_column])
     Y = torch.Tensor(Y).to(torch.long)
-    batches, _ = pd.factorize(adata.obs[args.batch_column])
-    batches = torch.Tensor(batches).to(torch.int)
 
-    livi_results = LIVI_model.predict(x=X, y=Y, exp_batch_ids=batches)
+    livi_results = LIVI_model.predict(x=X, y=Y)
 
     zbase = livi_results["cell-state_latent"].detach().numpy()
     zbase = pd.DataFrame(

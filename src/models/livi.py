@@ -215,6 +215,7 @@ class LIVI(pl.LightningModule):
             z_interaction = (z @ A) * self.U_context(y)
         else:
             z_interaction = None
+            A = None
 
         if covariates is not None:
             covariate_effect = torch.zeros_like(x)
