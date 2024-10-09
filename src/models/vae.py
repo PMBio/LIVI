@@ -63,6 +63,7 @@ class NormalDecoder(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
+        batch_norm: bool,
         device: str = "cuda",
     ):
         """Initialize module.
@@ -86,8 +87,13 @@ class NormalDecoder(nn.Module):
         )
         self.log_scale = nn.Parameter(torch.ones(1, device=self.device) * 0.1, requires_grad=True)
 
+        if self.batch_norm:
+            self.BN_decoder = nn.BatchNorm1d(x_dim, device=self.device)
+
     def forward(self, z: torch.Tensor):
         mean = self.mean(z)
+        if self.batch_norm:
+            mean = self.BN_decoder(mean)
         return tdist.Independent(RobustNormal(mean, self.log_scale.exp()), 1)
 
 
@@ -100,6 +106,7 @@ class NegativeBinomialDecoder(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
+        batch_norm: bool,
         device: str = "cuda",
     ):
         """Initialize module.
@@ -123,9 +130,15 @@ class NegativeBinomialDecoder(nn.Module):
         )
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
+        if self.batch_norm:
+            self.BN_decoder = nn.BatchNorm1d(x_dim, device=self.device)
+
     def forward(self, z: torch.Tensor, size_factor: torch.Tensor):
         total_count = self.log_total_count.exp()
-        mean = F.softmax(self.mean(z), dim=-1) * size_factor
+        mean = self.mean(z)
+        if self.batch_norm:
+            mean = self.BN_decoder(mean)
+        mean = F.softmax(mean, dim=-1) * size_factor
         probs = mean / (mean + total_count)
 
         assert not torch.isnan(mean).any()
@@ -144,7 +157,7 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
-        batch_norm: bool = False,
+        batch_norm: bool = True,
         device: str = "cuda",
     ):
         """Initialize module.
@@ -171,6 +184,9 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         )
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
+        if self.batch_norm:
+            self.BN_decoder = nn.BatchNorm1d(x_dim, device=self.device)
+
     def forward(
         self,
         z: torch.Tensor,
@@ -185,7 +201,7 @@ class NegativeBinomialDecoderBatchSex(nn.Module):
         if donor_sex_effect is not None:
             decoder_out = decoder_out + donor_sex_effect
         if self.batch_norm:
-            decoder_out = nn.BatchNorm1d(self.x_dim, device=self.device)(decoder_out)
+            decoder_out = self.BN_decoder(decoder_out)
         mean = F.softmax(decoder_out, dim=-1) * size_factor
         probs = mean / (mean + total_count)
 
@@ -597,7 +613,8 @@ class VAE(pl.LightningModule):
         encoder_hidden_dims: List[int],
         decoder_hidden_dims: List[int],
         learning_rate: float,
-        layer_norm: bool,
+        layer_norm: bool = True,
+        batch_norm: bool = True,
         likelihood: str = "normal",
         device: str = "cuda",
     ):
@@ -631,6 +648,7 @@ class VAE(pl.LightningModule):
             x_dim=x_dim,
             decoder_hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
+            batch_norm=batch_norm,
             device=device,
         )
 
