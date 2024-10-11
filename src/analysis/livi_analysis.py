@@ -205,7 +205,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI_cis.load_from_checkpoint(
+    LIVI_model = LIVI.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -416,67 +416,72 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             "Could not save cell-state decoder dataframe under provided filename (filename too long).\nSaved as '_cell-state_decoder.tsv' instead."
         )
 
-    U_context = livi_results["U_embedding"].detach().numpy()
-    if args.variance_threshold:
-        variable_factors = np.where(np.var(U_context, axis=0) >= args.variance_threshold)[0]
-        U_context = U_context[:, variable_factors].astype(np.float32)
+    if livi_results["U_embedding"] is not None:
+        U_context = livi_results["U_embedding"].detach().numpy()
+        if args.variance_threshold:
+            variable_factors = np.where(np.var(U_context, axis=0) >= args.variance_threshold)[0]
+            U_context = U_context[:, variable_factors].astype(np.float32)
+        else:
+            U_context = U_context.astype(np.float32)
+
+        colnames_context = (
+            [f"U_Factor{f}" for f in variable_factors + 1]
+            if args.variance_threshold
+            else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
+        )
+        U_context = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
+        U_context = (
+            U_context.merge(
+                adata.obs.filter([args.individual_column]), right_index=True, left_index=True
+            )
+            .drop_duplicates()
+            .set_index(args.individual_column)
+        )
+        try:
+            U_context.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+        except OSError:
+            U_context.to_csv(
+                os.path.join(output_dir, "_U_embedding.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+            warnings.warn(
+                "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
+            )
+
+        GxC_decoder = livi_results["GxC_decoder"].detach().numpy()
+        GxC_decoder = pd.DataFrame(
+            GxC_decoder,
+            index=adata.var.index,
+            columns=[f"GxC_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
+        )
+        try:
+            GxC_decoder.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_GxC_decoder.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+        except OSError:
+            GxC_decoder.to_csv(
+                os.path.join(output_dir, "_GxC_decoder.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+            warnings.warn(
+                "Could not save CxG decoder dataframe under provided filename (filename too long).\nSaved as '_CxG_decoder.tsv' instead."
+            )
+
     else:
-        U_context = U_context.astype(np.float32)
-
-    colnames_context = (
-        [f"U_Factor{f}" for f in variable_factors + 1]
-        if args.variance_threshold
-        else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
-    )
-    U_context = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
-    U_context = (
-        U_context.merge(
-            adata.obs.filter([args.individual_column]), right_index=True, left_index=True
-        )
-        .drop_duplicates()
-        .set_index(args.individual_column)
-    )
-    try:
-        U_context.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
-    except OSError:
-        U_context.to_csv(
-            os.path.join(output_dir, "_U_embedding.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
-        warnings.warn(
-            "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
-        )
-
-    context_decoder = livi_results["GxC_decoder"].detach().numpy()
-    context_decoder = pd.DataFrame(
-        context_decoder,
-        index=adata.var.index,
-        columns=[f"GxC_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
-    )
-    try:
-        context_decoder.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_GxC_decoder.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
-    except OSError:
-        context_decoder.to_csv(
-            os.path.join(output_dir, "_GxC_decoder.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
-        warnings.warn(
-            "Could not save CxG decoder dataframe under provided filename (filename too long).\nSaved as '_CxG_decoder.tsv' instead."
-        )
+        U_context = None
+        GxC_decoder = None
 
     if livi_results["V_embedding"] is not None:
         V_persistent = livi_results["V_embedding"].detach().numpy()
@@ -537,34 +542,37 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         V_persistent = None
         persistent_decoder = None
 
-    assignment_matrix = torch.sigmoid(livi_results["assignment_matrix"]).detach().numpy()
+    if livi_results["assignment_matrix"] is not None:
 
-    assignment_matrix = pd.DataFrame(
-        assignment_matrix, index=zbase.columns, columns=U_context.columns
-    )
-    try:
-        assignment_matrix.to_csv(
-            os.path.join(output_dir, f"{of_prefix}_factor_assignment_matrix.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
+        assignment_matrix = torch.sigmoid(livi_results["assignment_matrix"]).detach().numpy()
+        assignment_matrix = pd.DataFrame(
+            assignment_matrix, index=zbase.columns, columns=U_context.columns
         )
-    except OSError:
-        assignment_matrix.to_csv(
-            os.path.join(output_dir, "_factor_assignment_matrix.tsv"),
-            sep="\t",
-            header=True,
-            index=True,
-        )
-        warnings.warn(
-            "Could not save A matrix dataframe under provided filename (filename too long).\nSaved as '_factor_assignment_matrix.tsv' instead."
-        )
+        try:
+            assignment_matrix.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_factor_assignment_matrix.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+        except OSError:
+            assignment_matrix.to_csv(
+                os.path.join(output_dir, "_factor_assignment_matrix.tsv"),
+                sep="\t",
+                header=True,
+                index=True,
+            )
+            warnings.warn(
+                "Could not save A matrix dataframe under provided filename (filename too long).\nSaved as '_factor_assignment_matrix.tsv' instead."
+            )
+    else:
+        assignment_matrix = None
 
     return (
         zbase,
         cell_state_decoder,
         U_context,
-        context_decoder,
+        GxC_decoder,
         V_persistent,
         persistent_decoder,
         assignment_matrix,
@@ -592,7 +600,7 @@ def main(args):
         zbase,
         cell_state_decoder,
         U_context,
-        context_decoder,
+        GxC_decoder,
         V_persistent,
         persistent_decoder,
         A,
@@ -623,76 +631,77 @@ def main(args):
     associations_CxG = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
 
-    ## Exceptions for too-long filenames
-    try:
-        plot_U_factor_similarity(
-            U=U_context,
-            associated_factors=associations_CxG.Factor.unique(),
-            A=A,
-            assign_to_celltypes=True,
-            cell_state_factors=zbase,
-            cell_metadata=adata.obs,
-            celltype_column=args.celltype_column,
-            savefig=os.path.join(output_dir, of_prefix),
-        )
-    except OSError:
-        plot_U_factor_similarity(
-            U=U_context,
-            associated_factors=associations_CxG.Factor.unique(),
-            A=A,
-            assign_to_celltypes=True,
-            cell_state_factors=zbase,
-            cell_metadata=adata.obs,
-            celltype_column=args.celltype_column,
-            savefig=os.path.join(output_dir, ""),
-        )
-        warnings.warn(
-            "Could not save U factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
-        )
+    if U_context is not None and associations_CxG is not None and A is not None:
+        ## Exceptions for too-long filenames
+        try:
+            plot_U_factor_similarity(
+                U=U_context,
+                associated_factors=associations_CxG.Factor.unique(),
+                A=A,
+                assign_to_celltypes=True,
+                cell_state_factors=zbase,
+                cell_metadata=adata.obs,
+                celltype_column=args.celltype_column,
+                savefig=os.path.join(output_dir, of_prefix),
+            )
+        except OSError:
+            plot_U_factor_similarity(
+                U=U_context,
+                associated_factors=associations_CxG.Factor.unique(),
+                A=A,
+                assign_to_celltypes=True,
+                cell_state_factors=zbase,
+                cell_metadata=adata.obs,
+                celltype_column=args.celltype_column,
+                savefig=os.path.join(output_dir, ""),
+            )
+            warnings.warn(
+                "Could not save U factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+            )
 
-    try:
-        plot_ID_similarity(
-            U=U_context,
-            associated_factors=associations_CxG.Factor.unique(),
-            savefig=os.path.join(output_dir, of_prefix),
-        )
-    except OSError:
-        plot_ID_similarity(
-            U=U_context,
-            associated_factors=associations_CxG.Factor.unique(),
-            savefig=os.path.join(output_dir, ""),
-        )
-        warnings.warn(
-            "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
-        )
+        try:
+            plot_ID_similarity(
+                U=U_context,
+                associated_factors=associations_CxG.Factor.unique(),
+                savefig=os.path.join(output_dir, of_prefix),
+            )
+        except OSError:
+            plot_ID_similarity(
+                U=U_context,
+                associated_factors=associations_CxG.Factor.unique(),
+                savefig=os.path.join(output_dir, ""),
+            )
+            warnings.warn(
+                "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+            )
 
-    try:
-        overlap_with_known_eQTLs(
-            known_trans_eQTLs=known_trans_eQTLs,
-            SNP_colname_trans=SNP_colname_trans,
-            CxG_effects_LIVI=associations_CxG,
-            factor_assignment_matrix=A,
-            known_cis_eQTLs=known_cis_eQTLs,
-            SNP_colname_cis=SNP_colname_cis,
-            persistent_effects_LIVI=associations_V,
-            savefig=os.path.join(output_dir, of_prefix),
-            format=None,
-        )
-    except OSError as err:
-        overlap_with_known_eQTLs(
-            known_trans_eQTLs=known_trans_eQTLs,
-            SNP_colname_trans=SNP_colname_trans,
-            CxG_effects_LIVI=associations_CxG,
-            factor_assignment_matrix=A,
-            known_cis_eQTLs=known_cis_eQTLs,
-            SNP_colname_cis=SNP_colname_cis,
-            persistent_effects_LIVI=associations_V,
-            savefig=os.path.join(output_dir, ""),
-            format=None,
-        )
-        warnings.warn(
-            "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
-        )
+        try:
+            overlap_with_known_eQTLs(
+                known_trans_eQTLs=known_trans_eQTLs,
+                SNP_colname_trans=SNP_colname_trans,
+                CxG_effects_LIVI=associations_CxG,
+                factor_assignment_matrix=A,
+                known_cis_eQTLs=known_cis_eQTLs,
+                SNP_colname_cis=SNP_colname_cis,
+                persistent_effects_LIVI=associations_V,
+                savefig=os.path.join(output_dir, of_prefix),
+                format=None,
+            )
+        except OSError as err:
+            overlap_with_known_eQTLs(
+                known_trans_eQTLs=known_trans_eQTLs,
+                SNP_colname_trans=SNP_colname_trans,
+                CxG_effects_LIVI=associations_CxG,
+                factor_assignment_matrix=A,
+                known_cis_eQTLs=known_cis_eQTLs,
+                SNP_colname_cis=SNP_colname_cis,
+                persistent_effects_LIVI=associations_V,
+                savefig=os.path.join(output_dir, ""),
+                format=None,
+            )
+            warnings.warn(
+                "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+            )
 
 
 if __name__ == "__main__":
