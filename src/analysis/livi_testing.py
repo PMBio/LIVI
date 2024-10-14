@@ -500,10 +500,16 @@ def run_LIVI_genetic_association_testing(
         print("----- Done ----- \n")
 
     if return_associations:
-        if V_persistent is not None:
-            return results_sign_context, results_sign_persistent
+        if U_context is not None:
+            if V_persistent is not None:
+                return results_sign_context, results_sign_persistent
+            else:
+                return results_sign_context
         else:
-            return results_sign_context
+            if V_persistent is not None:
+                return None, results_sign_persistent
+            else:
+                return None, None
 
 
 def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.DataFrame:

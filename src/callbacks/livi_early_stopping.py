@@ -45,7 +45,7 @@ class LIVI_EarlyStopping(EarlyStopping):
             or trainer.current_epoch + 1 < trainer.min_epochs
         ):
             self.wait_count = 0
-            print("Checkpointing epoch not reached yet. LIVI early stopping disabled.")
+            print("Early stopping epoch not reached yet. LIVI early stopping disabled.")
             return
         else:
             self.wait_count = self.wait_count
@@ -62,7 +62,7 @@ class LIVI_EarlyStopping(EarlyStopping):
             or trainer.current_epoch + 1 < trainer.min_epochs
         ):
             self.wait_count = 0
-            print("Checkpointing epoch not reached yet. LIVI early stopping disabled.")
+            print("Early stopping epoch not reached yet. LIVI early stopping disabled.")
             return
         else:
             self.wait_count = self.wait_count

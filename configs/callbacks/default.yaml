@@ -12,7 +12,7 @@ model_checkpoint:
   monitor: "hp_metric"
   mode: "min"
   save_last: true
-  auto_insert_metric_name: False
+  auto_insert_metric_name: True
 
 model_summary:
   max_depth: -1

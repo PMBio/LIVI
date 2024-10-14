@@ -367,7 +367,7 @@ class LIVI(pl.LightningModule):
             "cell-state_decoder": cell_state_decoder,
             "U_embedding": U,
             "GxC_decoder": GxC_decoder,
-            "assignment_matrix": self.A,
+            "assignment_matrix": self.A if self.n_gxc_factors != 0 else None,
             "V_embedding": V,
             "V_decoder": V_decoder,
         }
