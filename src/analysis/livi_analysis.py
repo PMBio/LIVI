@@ -205,7 +205,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI.load_from_checkpoint(
+    LIVI_model = LIVI_cis_gen.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -216,15 +216,17 @@ def validate_and_read_passed_args(
             n_gxc = LIVI_model.n_gxc_factors
             n_persistent = LIVI_model.n_persistent_factors
             encoder_h = "_".join([str(d) for d in LIVI_model.hparams.encoder_hidden_dims])
-            layer_norm = LIVI_model.hparams.layer_norm
             batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
             lr = LIVI_model.hparams.learning_rate
-            adversary_weight = LIVI_model.hparams.adversary_weight
-            adversary_h = "_".join([str(d) for d in LIVI_model.hparams.adversary_hidden_dims])
-            adversary_lr = LIVI_model.hparams.adversary_learning_rate
-            adversary_steps = LIVI_model.hparams.adversary_steps
+            try:
+                adversary_weight = LIVI_model.hparams.adversary_weight
+                adversary_h = "_".join([str(d) for d in LIVI_model.hparams.adversary_hidden_dims])
+                adversary_lr = LIVI_model.hparams.adversary_learning_rate
+                adversary_steps = LIVI_model.hparams.adversary_steps
+            except AttributeError:
+                pass
             l1_weight = LIVI_model.hparams.l1_weight
-            l1_weight_A = LIVI_model.hparams.l1_weight_A
+            l1_weight_A = LIVI_model.hparams.A_weight
             warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
             warmup_epochs_G = LIVI_model.warmup_epochs_G
 
