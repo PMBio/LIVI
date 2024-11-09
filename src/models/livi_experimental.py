@@ -362,8 +362,10 @@ class LIVI_cis_with_adversary(pl.LightningModule):
             #     self.init_individual_embedding(self.V_persistent, self.hparams.genetics_seed)
 
         if n_cis_snps != 0:
-            self.SNP_gene_effect = nn.Parameter(torch.randn(n_cis_snps, x_dim, device=device))
-            # self.SNP_gene_effect = nn.Parameter(torch.randn(z_dim, n_cis_snps, x_dim, device=device)) # Learn SNP-gene effect for each cell-state
+            # self.SNP_gene_effect = nn.Parameter(torch.randn(n_cis_snps, x_dim, device=device))
+            self.SNP_gene_effect = nn.Parameter(
+                torch.randn(z_dim, n_cis_snps, x_dim, device=device)
+            )  # Learn SNP-gene effect for each cell-state
 
         # Covariate (e.g. experimental batch) correction per gene
         if self.hparams.covariates_dims is not None:
@@ -463,18 +465,24 @@ class LIVI_cis_with_adversary(pl.LightningModule):
             and cell_snp_mask is not None
             and self.hparams.n_cis_snps != 0
         ):
-            known_cis_effect = snp_gene_mask * self.SNP_gene_effect  # SNPs x genes
+            # known_cis_effect = snp_gene_mask * self.SNP_gene_effect  # SNPs x genes
+            # known_cis_effect = (
+            #     cell_snp_mask @ known_cis_effect
+            # )  # cells x genes: mean cis-SNP effect on each gene
+            # # Make the cis effect cell-state-specific by multiplying with the reconstructed cell-state GEX (=> genes essentially define the cell-state; if a gene is less relevant for the given cells (i.e. closer to 0), then the cis effect will become close to zero as well)
+            # y_c = F.softmax(self.decoder.mean(z), dim=-1)
+            # celltype_known_cis_effect = (
+            #     known_cis_effect * y_c
+            # )  # celltype_known_cis_effect = known_cis_effect
             known_cis_effect = (
-                cell_snp_mask @ known_cis_effect
-            )  # cells x genes: mean cis-SNP effect on each gene
-            # Make the cis effect cell-state-specific by multiplying with the reconstructed cell-state GEX (=> genes essentially define the cell-state; if a gene is less relevant for the given cells (i.e. closer to 0), then the cis effect will become close to zero as well)
-            y_c = F.softmax(self.decoder.mean(z), dim=-1)
-            celltype_known_cis_effect = (
-                known_cis_effect * y_c
-            )  # celltype_known_cis_effect = known_cis_effect
-            # known_cis_effect = snp_gene_mask.resize(1, self.hparams.n_cis_snps, self.x_dim) * self.SNP_gene_effect # z x SNPs x genes
-            # celltype_known_cis_effect = torch.einsum("ij,kjl->kil", cell_snp_mask, known_cis_effect) # z x cells x genes
-            # celltype_known_cis_effect = torch.einsum("ik,kil->il", z, celltype_known_cis_effect) # cells x genes
+                snp_gene_mask.resize(1, self.hparams.n_cis_snps, self.x_dim) * self.SNP_gene_effect
+            )  # z x SNPs x genes
+            celltype_known_cis_effect = torch.einsum(
+                "ij,kjl->kil", cell_snp_mask, known_cis_effect
+            )  # z x cells x genes
+            celltype_known_cis_effect = torch.einsum(
+                "ik,kil->il", z, celltype_known_cis_effect
+            )  # cells x genes
 
         log_lik = (
             self.decoder(
@@ -1185,6 +1193,7 @@ class LIVI_cis(pl.LightningModule):
         print(f"VAE frozen: {self.frozen}")
         print(f"Training V: {self.train_V_mode}")
         print(f"Training CxG: {self.train_GxC_mode}")
+        print(f"GxC decoder requires grad: {self.decoder.GxC_decoder[0].weight.requires_grad}")
         if self.current_epoch == self.hparams.warmup_epochs_vae:
             self.set_pretrain_mode(False)
             print("VAE pretraining completed.")
@@ -1339,8 +1348,6 @@ class LIVI_cis_gen(LIVI_cis):
 
         if n_persistent_factors != 0:
             self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
-            # if self.hparams.genetics_seed is not None:
-            #     nn.init.normal_(self.V_persistent.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
         # Covariate (e.g. experimental batch) correction per gene
         if self.hparams.covariates_dims is not None:
