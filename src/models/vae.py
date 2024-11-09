@@ -35,6 +35,8 @@ class Encoder(nn.Module):
         super().__init__()
 
         self.device = device
+        # self.vae_gen = torch.Generator(device=device)
+        # self.vae_gen.manual_seed(50)
 
         self.net = create_mlp(
             input_size=x_dim,
@@ -43,9 +45,12 @@ class Encoder(nn.Module):
             layer_norm=layer_norm,
             device=self.device,
         )
+        # init_mlp(self.net, generator=self.vae_gen)
         # map to mean and diagonal covariance of Gaussian
         self.mean = nn.Linear(encoder_hidden_dims[-1], z_dim, device=self.device)
+        # init_mlp(nn.Sequential(self.mean), generator=self.vae_gen)
         self.log_scale = nn.Linear(encoder_hidden_dims[-1], z_dim, device=self.device)
+        # init_mlp(nn.Sequential(self.log_scale), generator=self.vae_gen)
 
     def forward(self, x: torch.Tensor):
         x = self.net(x)
@@ -253,6 +258,8 @@ class LIVI_Decoder(nn.Module):
         self.batch_norm = batch_norm
         self.device = device
         self.G_seed = genetics_seed
+        # self.vae_gen = torch.Generator(device=device)
+        # self.vae_gen.manual_seed(50)
 
         self.mean = create_mlp(
             input_size=self._z_dim,
@@ -261,6 +268,8 @@ class LIVI_Decoder(nn.Module):
             layer_norm=layer_norm,
             device=self.device,
         )
+        # init_mlp(self.mean, generator=self.vae_gen)
+
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
         if self._num_gxc_factors != 0:
@@ -285,11 +294,7 @@ class LIVI_Decoder(nn.Module):
                 layer_norm=layer_norm,
                 device=self.device,
             )
-            if self.G_seed is not None:  # Initialise weights with the given random seed
-                current_state = torch.get_rng_state()
-                torch.manual_seed(self.G_seed)
-                self.persistent_decoder[0].reset_parameters()
-                torch.set_rng_state(current_state)
+            # init_mlp(self.persistent_decoder, generator=self.vae_gen)
 
         if self.batch_norm:
             self.BN_decoder = nn.BatchNorm1d(self._x_dim, device=self.device)
@@ -494,6 +499,8 @@ class LIVIcis_Decoder_gen(nn.Module):
         self.batch_norm = batch_norm
         self.device = device
         self.genetics_generator = genetics_generator
+        # self.vae_gen = torch.Generator(device=device)
+        # self.vae_gen.manual_seed(50)
 
         self.mean = create_mlp(
             input_size=self._z_dim,
@@ -502,6 +509,7 @@ class LIVIcis_Decoder_gen(nn.Module):
             layer_norm=layer_norm,
             device=self.device,
         )
+        # init_mlp(self.mean, generator=self.vae_gen)
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
         if self._num_gxc_factors != 0:
@@ -523,6 +531,7 @@ class LIVIcis_Decoder_gen(nn.Module):
                 layer_norm=layer_norm,
                 device=self.device,
             )
+            # init_mlp(self.persistent_decoder, generator=self.vae_gen)
             # if self.genetics_generator is not None:  # Initialise weights with the given generator
             #     init_mlp(self.persistent_decoder, generator=self.genetics_generator)
 
