@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - datamodule: sim.yaml
+  - model: livi_example.yaml
+  - callbacks: default.yaml
+  - logger: tensorboard.yaml
+  - trainer: default.yaml
+  - paths: default.yaml
+  - extras: default.yaml
+  - hydra: default.yaml
+  - experiment: null
+  - hparams_search: null
+  - optional local: default.yaml
+  - debug: null
+task_name: train
+tags:
+  - dev
+train: true
+test: false
+ckpt_path: /data/danai/Data/hydra_logs/LIVI2/trainable_A/runs/2024-11-09_21-48_LIVIcis-cell-state_zdim15-Softmax_500-gxc_5-persistent_40-0-warm-up_no-adversary__VAE-warmup/checkpoints/last.ckpt
+seed: 12345
