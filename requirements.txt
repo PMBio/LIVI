@@ -24,6 +24,7 @@ rich            # beautiful text formatting in terminal
 pytest          # tests
 #  sh            # for running bash commaneds in some tests (linux/macos only)
 
+# --------- LIVI specific --------- #
 scanpy[leiden]>=1.9.1
 statsmodels>=0.13.1
 jupyterlab
@@ -37,3 +38,5 @@ plotnine==0.12.4
 plotnine-prism==0.3.0
 reportlab>=3.6.12
 cairosvg>=2.7.1
+numpy==1.26.4 # for scanpy
+snakemake==7.32.4
