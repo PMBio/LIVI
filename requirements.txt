@@ -29,6 +29,7 @@ scanpy[leiden]>=1.9.1
 statsmodels>=0.13.1
 jupyterlab
 glimix_core
+pandas>=2.2
 pandas_plink>=2.2.9
 multipy @ git+https://github.com/puolival/multipy
 matplotlib-venn==0.11.10
