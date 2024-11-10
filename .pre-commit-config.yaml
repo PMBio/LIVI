@@ -7,7 +7,9 @@ repos:
     hooks:
       # list of supported hooks: https://pre-commit.com/hooks.html
       - id: trailing-whitespace
+        exclude: \.smk$
       - id: end-of-file-fixer
+        exclude: \.smk$
       - id: check-docstring-first
       - id: check-yaml
       - id: debug-statements
@@ -64,6 +66,7 @@ repos:
     hooks:
       - id: bandit
         args: ["-s", "B101"]
+        exclude: '(update_ckpt-train-yaml\.py|update_model-yaml\.py|update_task-name\.py)$'
 
   # yaml formatting
   - repo: https://github.com/pre-commit/mirrors-prettier
