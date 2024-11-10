@@ -41,5 +41,6 @@ reportlab>=3.6.12
 cairosvg>=2.7.1
 numpy==1.26.4 # for scanpy
 snakemake==7.32.4
+pulp <= 2.7.0
 plotly>=5.22.0
 kaleido>=0.2.1
