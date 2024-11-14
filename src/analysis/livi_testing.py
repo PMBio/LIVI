@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import torch
 from glimix_core.lmm import LMM
 from multipy.fdr import qvalue
 from numpy_sugar.linalg import economic_qs, economic_qs_linear
@@ -27,6 +28,7 @@ from pandas_plink import read_plink
 from scipy.stats import chi2, norm
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, quantile_transform
+from tensorqtl import pgen, trans
 
 from src.analysis.plotting import QQplot
 
@@ -87,6 +89,87 @@ def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 
     pv = chi2(df=dof).sf(lrs)
 
     return np.clip(pv, super_tiny, 1 - tiny)
+
+
+# Combine tensorQTL trans results in single dataframe
+def flatten_df(df: pd.DataFrame, source_name: str) -> pd.DataFrame:
+    """Flattens a multi-index DataFrame by stacking it and resetting the index.
+
+    Args:
+        df (DataFrame): The input DataFrame with a multi-index to be flattened.
+        source_name (str): The name for the column to replace the stacked level's name.
+
+    Returns:
+        DataFrame: A flattened DataFrame with columns ["variant_id", "phenotype_id", source_name].
+    """
+    df_flattened = df.stack(future_stack=True).reset_index()
+    df_flattened.columns = ["variant_id", "phenotype_id", source_name]
+
+    return df_flattened
+
+
+def run_tensorQTL(
+    phenotype_df: pd.DataFrame,
+    genotype_df: pd.DataFrame,
+    variant_info: pd.DataFrame,
+    covariates_df: Optional[pd.DataFrame] = None,
+) -> pd.DataFrame:
+    """Runs TensorQTL's trans-association mapping on phenotype (here LIVI individual embeddings)
+    and genotype data, returning a DataFrame with p-values, effect sizes, and allele information
+    for each tested variant-factor pair.
+
+    Args:
+        phenotype_df (DataFrame): DataFrame containing LIVI individual embeddings with gene IDs as columns.
+        genotype_df (DataFrame): DataFrame containing genotype data with variant IDs as columns.
+        variant_info (DataFrame): DataFrame containing variant information, including reference and alternate alleles.
+        covariates_df (Optional[DataFrame]): DataFrame of individual level covariates to include in the linear model (default is None).
+
+    Returns:
+        DataFrame: A DataFrame containing the merged trans-association results with columns:
+                  - SNP_id (variant_id)
+                  - Factor (phenotype_id)
+                  - p_value
+                  - effect_size
+                  - effect_size_se
+                  - ref_allele (from variant_info)
+                  - alt_allele (from variant_info)
+    """
+    results_trans = trans.map_trans(
+        genotype_df=genotype_df,
+        phenotype_df=phenotype_df,
+        covariates_df=covariates_df,
+        batch_size=10000,
+        return_sparse=False,  # report all test results
+        maf_threshold=0.0,  # no filtering
+    )
+
+    # When `return_sparse=False`, TensorQTL returns a list of 4 dfs with indices the variants and columns the gene IDs.
+    # The 1st df contains the pvalues, the 2nd df the effect sizes, the 3rd df the effect_size_se and the 4th Series the MAF
+    dfs = [flatten_df(df, label) for (df, label) in zip(results_trans[:-1], ["pval", "b", "b_se"])]
+    results_trans = dfs[0]
+    for df in dfs[1:]:
+        results_trans = pd.merge(results_trans, df, on=["variant_id", "phenotype_id"])
+
+    # Add REF/ALT allele info
+    if variant_info is not None:
+        results_trans = results_trans.merge(
+            variant_info.filter(["variant_id", "ref_allele", "alt_allele"]),
+            on="variant_id",
+            how="left",
+        )
+
+    results_trans.rename(
+        columns={
+            "phenotype_id": "Factor",
+            "variant_id": "SNP_id",
+            "pval": "p_value",
+            "b": "effect_size",
+            "b_se": "effect_size_se",
+        },
+        inplace=True,
+    )
+
+    return results_trans
 
 
 def LMM_test_feature(
@@ -169,94 +252,47 @@ def LMM_test_feature(
     return feature_results
 
 
-def set_up_covariates(args: argparse.Namespace, metadata: pd.DataFrame) -> pd.DataFrame:
+def set_up_covariates(args: argparse.Namespace, U_context: pd.DataFrame) -> pd.DataFrame:
     """Set up sample covariates based on command-line arguments and metadata.
 
     Parameters
     ----------
     args (argparse.Namespace): Parsed command-line arguments.
-    metadata (pd.DataFrame): DataFrame containing sample metadata.
+    U_context (pd.DataFrame): GxC LIVI factors.
 
     Returns
     -------
-    pd.DataFrame: DataFrame containing sample covariates to be included
-        as fixed effects in the LMM.
+    pd.DataFrame: DataFrame containing sample (donor) covariates to be included
+        as fixed effects in the L(M)M.
     """
 
-    covariates = pd.DataFrame(index=metadata[args.individual_column].unique())
-    if args.other_covars is not None:
-        scaled_covars = StandardScaler().fit_transform(
-            metadata.filter(args.other_covars).to_numpy()
-        )
-        scaled_covars = pd.DataFrame(
-            scaled_covars,
-            index=metadata.index,
-            columns=[f"{cov}_scaled" for cov in args.other_covars],
-        )
-        scaled_covars = scaled_covars.merge(
-            metadata.filter([args.individual_column]), left_index=True, right_index=True
-        )
-        covariates = covariates.merge(
-            scaled_covars.drop_duplicates().set_index(args.individual_column),
-            right_index=True,
-            left_index=True,
-        )
-    if args.batch_column is not None:
-        metadata[args.batch_column] = metadata[args.batch_column].astype(np.int32)
-        covariates = covariates.merge(
-            metadata.filter([args.individual_column, args.batch_column])
-            .drop_duplicates()
-            .set_index(args.individual_column),
-            right_index=True,
-            left_index=True,
-        )
-    if args.sex_column is not None:
-        metadata[args.sex_column] = pd.Categorical(metadata[args.sex_column])
-        metadata[args.sex_column] = metadata[args.sex_column].cat.rename_categories(
-            {
-                metadata[args.sex_column].cat.categories[0]: 1,
-                metadata[args.sex_column].cat.categories[1]: 0,
-            },
-        )
-        covariates = covariates.merge(
-            metadata.filter([args.individual_column, args.sex_column])
-            .drop_duplicates()
-            .set_index(args.individual_column),
-            right_index=True,
-            left_index=True,
-        )
-    if args.age_column is not None:
-        if "age_scaled" not in metadata.columns:
-            age_scaled = StandardScaler().fit_transform(
-                metadata[args.age_column].to_numpy().reshape(-1, 1)
-            )
-            age_scaled = pd.DataFrame(age_scaled, index=metadata.index, columns=["age_scaled"])
-            metadata = metadata.merge(age_scaled, left_index=True, right_index=True)
-        covariates = covariates.merge(
-            metadata.filter([args.individual_column, "age_scaled"])
-            .drop_duplicates()
-            .set_index(args.individual_column),
-            right_index=True,
-            left_index=True,
-        )
+    covariates = pd.DataFrame(index=U_context.index)
+
+    # File with individual level covariates such as aggregated GEX PCs
+    covars = pd.read_csv(
+        args.covariates, sep="," if ".csv" in args.covariates else "\t", index_col=0
+    )
+    covariates = covariates.merge(covars, how="left", left_index=True, right_index=True)
 
     return covariates
 
 
 def run_LIVI_genetic_association_testing(
-    U_context,
-    V_persistent,
-    GT_matrix,
-    output_dir,
-    output_file_prefix,
-    Kinship=None,
-    bim=None,
-    covariates=None,
-    quantile_norm=True,
-    variance_threshold=None,
-    variable_factors=None,
-    qval_threshold=None,
-    return_associations=False,
+    U_context: pd.DataFrame,
+    V_persistent: pd.DataFrame,
+    GT_matrix: pd.DataFrame,
+    output_dir: str,
+    output_file_prefix: str,
+    method: str = "limix",
+    quantile_norm: bool = True,
+    return_associations: bool = False,
+    Kinship: Optional[pd.DataFrame] = None,
+    genotype_pcs: Optional[pd.DataFrame] = None,
+    variant_info: Optional[pd.DataFrame] = None,
+    covariates: Optional[pd.DataFrame] = None,
+    variance_threshold: Optional[float] = None,
+    variable_factors: Optional[List[int]] = None,
+    qval_threshold: Optional[float] = None,
 ) -> Optional[Tuple[pd.DataFrame, Optional[pd.DataFrame]]]:
     """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings and
     save the results to file. Optionally select also significant associations based on
@@ -270,7 +306,8 @@ def run_LIVI_genetic_association_testing(
     output_dir (str): Output directory to save the testing results.
     output_file_prefix(str): Output file prefix.
     Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
-    bim (Optional[pd.DataFrame]): SNP information contained in the .bim file,
+    genotype_pcs (Optional[pd.DataFrame]): Precomputed genotype principal components.
+    variant_info (Optional[pd.DataFrame]): SNP information contained in the .bim file,
         if PLINK genotype matrix is used.
     covariates_df (Optional[pd.DataFrame]): DataFrame containing sample covariates
         to be included as fixed effects in the LMM.
@@ -287,30 +324,29 @@ def run_LIVI_genetic_association_testing(
     if return_associations and qval_threshold is None:
         qval_threshold = 0.05
 
-    if covariates is not None:
-        GT_matrix = GT_matrix.loc[covariates.index]
+    GT_matrix = GT_matrix.loc[U_context.index]
 
-    if Kinship is not None:
-        kinship = Kinship
-        kinship_mat = (
-            kinship.loc[covariates.index, covariates.index].to_numpy()
-            if covariates is not None
-            else kinship.to_numpy()
-        )
+    if method in ["limix", "LIMIX", "LMM"]:
+        # add intercept
+        covariates["intercept"] = 1.0
+
+        if Kinship is not None:
+            kinship = Kinship
+            kinship_mat = (
+                kinship.loc[covariates.index, covariates.index].to_numpy()
+                if covariates is not None
+                else kinship.to_numpy()
+            )
+        else:
+            kinship_mat = np.dot(GT_matrix.to_numpy(), GT_matrix.T.to_numpy())
+            kinship_mat = normalise_covariance(kinship_mat)
+        QS = economic_qs(kinship_mat)
+    elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        covariates = covariates.merge(genotype_pcs, how="left", right_index=True, left_index=True)
     else:
-        kinship_mat = np.dot(GT_matrix.to_numpy(), GT_matrix.T.to_numpy())
-        kinship_mat = normalise_covariance(kinship_mat)
-    QS = economic_qs(kinship_mat)
+        raise ValueError(f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}.")
 
     if U_context is not None:
-        if covariates is not None:
-            U_context = U_context.loc[covariates.index]
-        print("\n ----- Running genetic association testing for U_context ----- \n")
-
-        results = pd.DataFrame(
-            columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
-        )
-
         if variable_factors is not None:
             U_context = pd.DataFrame(
                 U_context.to_numpy()[:, variable_factors],
@@ -329,33 +365,51 @@ def run_LIVI_genetic_association_testing(
         else:
             U_context = U_context
 
-        for f in U_context.columns:
-            print(f"Testing: {f}")
-            results_factor = LMM_test_feature(
-                feature_id=f,
+        print("\n ----- Running genetic association testing for U_context ----- \n")
+
+        if method in ["limix", "LIMIX", "LMM"]:
+            results = pd.DataFrame(
+                columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
+            )
+            for f in U_context.columns:
+                print(f"Testing: {f}")
+                results_factor = LMM_test_feature(
+                    feature_id=f,
+                    phenotype_df=U_context.T,
+                    covariates_df=covariates,
+                    G_scaled=GT_matrix,
+                    QS=QS,
+                    quantile_norm=quantile_norm,
+                )
+                results_factor.rename(
+                    columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
+                )
+
+                if results.empty:
+                    results = results_factor
+                else:
+                    results = pd.concat([results, results_factor], axis=0)
+
+            if variant_info is not None:
+                results = results.merge(
+                    variant_info.filter(["snp", "a1"]).rename(
+                        columns={"snp": "SNP_id", "a1": "assessed_allele"}
+                    ),
+                    on="SNP_id",
+                    how="left",
+                )
+        elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+            results = run_tensorQTL(
                 phenotype_df=U_context.T,
+                genotype_df=GT_matrix.T,
+                variant_info=variant_info,
                 covariates_df=covariates,
-                G_scaled=GT_matrix,
-                QS=QS,
-                quantile_norm=quantile_norm,
             )
-            results_factor.rename(
-                columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
+        else:
+            raise ValueError(
+                f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}."
             )
 
-            if results.empty:
-                results = results_factor
-            else:
-                results = pd.concat([results, results_factor], axis=0)
-
-        if bim is not None:
-            results = results.merge(
-                bim.filter(["snp", "a1"]).rename(
-                    columns={"snp": "SNP_id", "a1": "assessed_allele"}
-                ),
-                on="SNP_id",
-                how="left",
-            )
         try:
             filename = (
                 f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
@@ -417,41 +471,51 @@ def run_LIVI_genetic_association_testing(
         print("----- Done ----- \n")
 
     if V_persistent is not None:
-        if covariates is not None:
-            V_persistent = V_persistent.loc[covariates.index]
         print("\n\n ----- Running genetic association testing for V_persistent ----- \n")
 
-        results = pd.DataFrame(
-            columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
-        )
+        if method in ["limix", "LIMIX", "LMM"]:
+            results = pd.DataFrame(
+                columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
+            )
+            for f in V_persistent.columns:
+                print(f"Testing: {f}")
+                results_factor = LMM_test_feature(
+                    feature_id=f,
+                    phenotype_df=V_persistent.T,
+                    covariates_df=covariates,
+                    G_scaled=GT_matrix,
+                    QS=QS,
+                    quantile_norm=quantile_norm,
+                )
+                results_factor.rename(
+                    columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
+                )
 
-        for f in V_persistent.columns:
-            print(f"Testing: {f}")
-            results_factor = LMM_test_feature(
-                feature_id=f,
+                if results.empty:
+                    results = results_factor
+                else:
+                    results = pd.concat([results, results_factor], axis=0)
+
+            if variant_info is not None:
+                results = results.merge(
+                    variant_info.filter(["snp", "a1"]).rename(
+                        columns={"snp": "SNP_id", "a1": "assessed_allele"}
+                    ),
+                    on="SNP_id",
+                    how="left",
+                )
+        elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+            results = run_tensorQTL(
                 phenotype_df=V_persistent.T,
+                genotype_df=GT_matrix.T,
+                variant_info=variant_info,
                 covariates_df=covariates,
-                G_scaled=GT_matrix,
-                QS=QS,
-                quantile_norm=quantile_norm,
             )
-            results_factor.rename(
-                columns={"feature_id": "Factor", "variable": "SNP_id"}, inplace=True
+        else:
+            raise ValueError(
+                f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}."
             )
 
-            if results.empty:
-                results = results_factor
-            else:
-                results = pd.concat([results, results_factor], axis=0)
-
-        if bim is not None:
-            results = results.merge(
-                bim.filter(["snp", "a1"]).rename(
-                    columns={"snp": "SNP_id", "a1": "assessed_allele"}
-                ),
-                on="SNP_id",
-                how="left",
-            )
         try:
             filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
@@ -556,15 +620,27 @@ def validate_and_read_passed_args(
         output_dir (str): Output directory to save the testing results.
         of_prefix (str): Output file prefix.
         metadata (pd.DataFrame): DataFrame containing cell metadata.
-        GT_matrix_standardised (pd.DataFrame): Standardized genotype matrix.
-        bim (pd.DataFrame): SNP information contained in the .bim file, if PLINK genotype matrix is used, otherwise None.
+        GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
+        variant_info (pd.DataFrame): SNP information contained in the .bim or .pvar file, if PLINK genotype matrix is used, otherwise None.
         kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
         U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
         V_persistent (pd.DataFrame): LIVI persistent genetic embedding if applicable, otherwise None.
     """
 
-    assert os.path.isdir(args.model_output_dir), "Model directory not found"
-    assert os.path.isfile(args.cell_metadata_file), "Cell metadata file not found"
+    assert os.path.isdir(args.model_output_dir), "Model directory not found."
+    assert os.path.isfile(args.cell_metadata_file), "Cell metadata file not found."
+    assert os.path.isfile(args.covariates), "Covariates file not found."
+    # assert args.method in ["limix", "LIMIX", "LMM", "tensorQTL", "TensorQTL", "tensorqtl"], f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}."
+    if args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        assert (
+            args.genotype_pcs is not None
+        ), "Genotype PCs are required when testing using TensorQTL."
+        if not torch.cuda.is_available():
+            warnings.warn(
+                "Testing method is TensorQTL, but no GPU is available. This will slow down performance."
+            )
+    if args.method in ["limix", "LIMIX", "LMM"]:
+        assert args.kinship is not None, "Kinship matrix required with testing using LIMIX-QTL."
 
     if args.output_dir:
         output_dir = args.output_dir
@@ -594,46 +670,6 @@ def validate_and_read_passed_args(
     assert (
         args.individual_column in metadata.columns
     ), f"`individual_column`: '{args.individual_column}' not in cell metadata columns."
-    if args.batch_column:
-        assert (
-            args.batch_column in metadata.columns
-        ), f"`batch_column`: '{args.batch_column}' not in cell metadata columns."
-    if args.sex_column:
-        assert (
-            args.sex_column in metadata.columns
-        ), f"`sex_column`: '{args.sex_column}' not in cell metadata columns."
-    if args.age_column:
-        assert (
-            args.age_column in metadata.columns
-        ), f"`age_column`: '{args.age_column}' not in cell metadata columns."
-
-    if args.plink:
-        bim, fam, bed = read_plink(args.genotype_matrix, verbose=False)
-        GT_matrix = pd.DataFrame(bed.compute(), index=bim.snp, columns=fam.iid)
-    else:
-        assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
-        _, ext = os.path.splitext(args.genotype_matrix)
-        if ext not in [".tsv", ".csv"]:
-            raise TypeError(
-                f"Genotype matrix must be either .tsv or .csv. File format provided: {ext}. To use a PLINK matrix please use the --plink flag"
-            )
-        GT_matrix = pd.read_csv(
-            args.genotype_matrix, index_col=0, sep="\t" if ext == ".tsv" else ","
-        )
-        bim = None
-
-    GT_matrix = GT_matrix.filter(metadata[args.individual_column].unique())
-    if GT_matrix.shape[1] == 0:
-        raise ValueError(
-            "Individual IDs in cell metadata do not match individual IDs in the genotype matrix."
-        )
-
-    GT_matrix_standardised = pd.DataFrame(
-        StandardScaler().fit_transform(GT_matrix.T.values),
-        index=GT_matrix.columns,
-        columns=GT_matrix.index,
-    )
-    del GT_matrix
 
     if args.kinship is not None:
         assert os.path.isfile(args.kinship), "Kinship matrix file not found."
@@ -650,25 +686,67 @@ def validate_and_read_passed_args(
             raise ValueError(
                 "Individual IDs in cell metadata do not match individual IDs in the kinship matrix."
             )
-        # gt_pcs = None
     else:
         kinship = None
-        # if args.genotype_pcs is not None:
-        #     assert os.path.isfile(args.genotype_pcs), "Genotype PCs file not found."
-        #     _, ext = os.path.splitext(args.genotype_pcs)
-        #     if ext not in [".tsv", ".csv"]:
-        #         raise TypeError(
-        #             f"Genotype PCs file must be either .tsv or .csv. File format provided: {ext}."
-        #         )
-        #     gt_pcs = pd.read_csv(args.genotype_pcs, index_col=0, sep="\t" if ext == ".tsv" else ",")
-        #     gt_pcs = gt_pcs.loc[metadata[args.individual_column].unique()]
-        #     if gt_pcs.shape[0] == 0:
-        #         raise ValueError(
-        #             "Individual IDs in cell metadata do not match individual IDs in the genotype PCs."
-        #         )
-        # else:
-        #     pca = PCA(n_components=20).fit_transform(GT_matrix_standardised.values)
-        #     gt_pcs = pd.DataFrame(pca, index = GT_matrix_standardised.index, columns = ["PC"+str(i) for i in range(1,21)])
+
+    if args.genotype_pcs is not None:
+        assert os.path.isfile(args.genotype_pcs), "Genotype PCs file not found."
+        _, ext = os.path.splitext(args.genotype_pcs)
+        if ext not in [".tsv", ".csv"]:
+            raise TypeError(
+                f"Genotype PCs file must be either .tsv or .csv. File format provided: {ext}."
+            )
+        n_gt_pcs = args.n_gt_pcs if args.n_gt_pcs else 10
+        # load GT PCs; restrict to individuals in sample_df
+        GT_PCs = pd.read_csv(
+            args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
+        )  # donors x PCs
+        GT_PCs = GT_PCs.loc[GT_PCs.index.isin(metadata[args.individual_column].unique())]
+        if GT_PCs.shape[0] == 0:
+            raise ValueError(
+                "Individual IDs in cell metadata do not match individual IDs in the genotype PCs."
+            )
+        # select leading components
+        GT_PCs = GT_PCs.filter([f"PC{i}" for i in range(1, n_gt_pcs + 1)])
+    else:
+        GT_PCs = None
+
+    if args.plink and args.method in ["limix", "LIMIX", "LMM"]:
+        variant_info, fam, bed = read_plink(args.genotype_matrix, verbose=False)
+        GT_matrix = pd.DataFrame(
+            bed.compute(), index=variant_info.snp, columns=fam.iid
+        )  # SNPs x donors
+    elif args.plink and args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        pgr = pgen.PgenReader(args.genotype_matrix)
+        GT_matrix = pgr.load_genotypes()  # SNPs x donors
+        variant_info = pgr.variant_df
+        variant_info = variant_info.reset_index(names="variant_id")
+    else:
+        assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
+        _, ext = os.path.splitext(args.genotype_matrix)
+        if ext not in [".tsv", ".csv"]:
+            raise TypeError(
+                f"Genotype matrix must be either .tsv or .csv. File format provided: {ext}. To use a PLINK matrix please use the --plink flag"
+            )
+        GT_matrix = pd.read_csv(
+            args.genotype_matrix, index_col=0, sep="\t" if ext == ".tsv" else ","
+        )
+        variant_info = None
+
+    GT_matrix = GT_matrix.filter(metadata[args.individual_column].unique())
+    if GT_matrix.shape[1] == 0:
+        raise ValueError(
+            "Individual IDs in cell metadata do not match individual IDs in the genotype matrix."
+        )
+
+    # GT_matrix_standardised = pd.DataFrame(
+    #     StandardScaler().fit_transform(GT_matrix.T.values), # donors x SNPs
+    #     index=GT_matrix.columns,
+    #     columns=GT_matrix.index,
+    # )
+    # del GT_matrix
+
+    GT_matrix = GT_matrix.T  # donors x SNPs
 
     files = [
         f
@@ -685,7 +763,7 @@ def validate_and_read_passed_args(
         U_context = pd.read_csv(
             os.path.join(args.model_output_dir, U_context), index_col=0, sep="\t"
         )
-        if U_context.loc[U_context.index.isin(GT_matrix_standardised.index)].shape[0] == 0:
+        if U_context.loc[U_context.index.isin(GT_matrix.index)].shape[0] == 0:
             raise ValueError(
                 "Individual IDs in U context do not match individual IDs in the genotype matrix."
             )
@@ -702,7 +780,7 @@ def validate_and_read_passed_args(
         V_persistent = pd.read_csv(
             os.path.join(args.model_output_dir, V_persistent), index_col=0, sep="\t"
         )
-        if V_persistent.loc[V_persistent.index.isin(GT_matrix_standardised.index)].shape[0] == 0:
+        if V_persistent.loc[V_persistent.index.isin(GT_matrix.index)].shape[0] == 0:
             raise ValueError(
                 "Individual IDs in V_persistent do not match individual IDs in the genotype matrix."
             )
@@ -713,9 +791,10 @@ def validate_and_read_passed_args(
         output_dir,
         of_prefix,
         metadata,
-        GT_matrix_standardised,
-        bim,
+        GT_matrix,
+        variant_info,
         kinship,
+        GT_PCs,
         U_context,
         V_persistent,
     )
@@ -750,10 +829,24 @@ if __name__ == "__main__":
         help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
     )
     parser.add_argument(
+        "--covariates",
+        default=None,
+        type=str,
+        required=True,
+        help="Absolute path of the .tsv file containing gene expression PCs aggregated at the donor level.",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="tensorQTL",
+        choices=["tensorQTL", "LIMIX"],
+        help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
+    )
+    parser.add_argument(
         "--plink",
         action="store_true",
         default=False,
-        help="If PLINK genotype files (bim, bed, fam) are provided instead of a GT matrix in .tsv format.",
+        help="If PLINK genotype files (bim, bed, fam if `method` is LIMIX, or pgen, pvar, psam if `method` is tensorQTL) are provided instead of a GT matrix in .tsv format.",
     )
     parser.add_argument(
         "--kinship",
@@ -761,13 +854,19 @@ if __name__ == "__main__":
         type=str,
         help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
     )
-    # parser.add_argument(
-    #     "--genotype_pcs",
-    #     "-GT_pcs",
-    #     default=None,
-    #     type=str,
-    #     help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing.",
-    # )
+    parser.add_argument(
+        "--genotype_pcs",
+        "-GT_pcs",
+        default=None,
+        type=str,
+        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing.",
+    )
+    parser.add_argument(
+        "--n_gt_pcs",
+        default=None,
+        type=int,
+        help="Number of genotype principal components to use as covariates during SNP association testing. If omitted 10 PCs are used by default.",
+    )
     parser.add_argument(
         "--quantile_normalise",
         action="store_true",
@@ -785,31 +884,6 @@ if __name__ == "__main__":
         default=None,
         type=float,
         help="Test only those factors whose variance across cells is above this threshold. Ignored if `variable_factors` are provided.",
-    )
-    parser.add_argument(
-        "--batch_column",
-        default=None,
-        type=str,
-        help="Column name in cell metadata (adata.obs) indicating the batch the sample (cell) comes from.",
-    )
-    parser.add_argument(
-        "--age_column",
-        default=None,
-        type=str,
-        help="Column name in cell metadata (adata.obs) indicating the age of the individual.",
-    )
-    parser.add_argument(
-        "--sex_column",
-        default=None,
-        type=str,
-        help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
-    )
-    parser.add_argument(
-        "--other_covars",
-        nargs="*",
-        default=None,
-        type=str,
-        help="Column names in cell metadata (adata.obs) of other individual covariates to use in the null LMM.",
     )
     parser.add_argument(
         "--multiple_testing_threshold",
@@ -839,20 +913,23 @@ if __name__ == "__main__":
         od,
         of_prefix,
         metadata,
-        GT_matrix_standardised,
-        bim,
+        GT_matrix,
+        variant_info,
         kinship,
+        gt_pcs,
         U,
         V,
     ) = validate_and_read_passed_args(args)
-    covariates = set_up_covariates(args, metadata)
+    covariates = set_up_covariates(args, U)
 
     run_LIVI_genetic_association_testing(
         U_context=U,
         V_persistent=V,
-        GT_matrix=GT_matrix_standardised,
-        bim=bim,
+        GT_matrix=GT_matrix,
+        variant_info=variant_info,
         Kinship=kinship,
+        genotype_pcs=gt_pcs,
+        method=args.method,
         output_dir=od,
         output_file_prefix=of_prefix,
         covariates=covariates,

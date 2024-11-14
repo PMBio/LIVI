@@ -44,3 +44,4 @@ snakemake==7.32.4
 pulp <= 2.7.0
 plotly>=5.22.0
 kaleido>=0.2.1
+tensorqtl==1.0.10
