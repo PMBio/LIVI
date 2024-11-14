@@ -29,6 +29,7 @@ from anndata import AnnData
 from pandas_plink import read_plink
 from scipy.stats import kruskal, ks_2samp, mannwhitneyu, pearsonr, zscore
 from sklearn.preprocessing import StandardScaler
+from tensorqtl import pgen, trans
 
 from src.analysis.livi_testing import (
     run_LIVI_genetic_association_testing,
@@ -43,7 +44,7 @@ from src.analysis.plotting import (
 )
 from src.data_modules.livi_data import LIVIDataModule
 from src.models.livi import LIVI
-from src.models.livi_experimental import LIVI_cis, LIVI_cis_gen
+from src.models.livi_experimental import LIVI_cis, LIVI_cis_gen, LIVI_cis_gen_GT_PCs
 
 
 def validate_and_read_passed_args(
@@ -68,13 +69,25 @@ def validate_and_read_passed_args(
         output_dir (str): Output directory to save the testing results.
         of_prefix (str): Output file prefix.
         adata (AnnData): AnnData object containing gene counts and cell metadata.
-        GT_matrix_standardised (pd.DataFrame): Standardized genotype matrix.
-        bim (pd.DataFrame): SNP information contained in the .bim file, if PLINK genotype matrix is used, otherwise None.
+        GT_matrix(pd.DataFrame): Genotype matrix (donors x SNPs).
+        variant_info (pd.DataFrame): SNP information contained in the .bim or .pvar file, if PLINK genotype matrix is used, otherwise None.
         kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
     """
 
     assert os.path.isdir(args.model_run_dir), "Model directory not found."
     assert os.path.isfile(args.adata), "AnnData file not found."
+    assert os.path.isfile(args.covariates), "Covariates file not found."
+
+    if args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        assert (
+            args.genotype_pcs is not None
+        ), "Genotype PCs are required when testing using TensorQTL."
+        if not torch.cuda.is_available():
+            warnings.warn(
+                "Testing method is TensorQTL, but no GPU is available. This will slow down performance."
+            )
+    if args.method in ["limix", "LIMIX", "LMM"]:
+        assert args.kinship is not None, "Kinship matrix required with testing using LIMIX-QTL."
 
     if args.output_dir:
         output_dir = args.output_dir
@@ -94,24 +107,22 @@ def validate_and_read_passed_args(
         assert (
             args.batch_column in adata.obs.columns
         ), f"`batch_column`: '{args.batch_column}' not in adata.obs columns."
-    if args.sex_column:
-        assert (
-            args.sex_column in adata.obs.columns
-        ), f"`sex_column`: '{args.sex_column}' not in adata.obs columns."
-    if args.age_column:
-        assert (
-            args.age_column in adata.obs.columns
-        ), f"`age_column`: '{args.age_column}' not in adata.obs columns."
     if args.celltype_column:
         assert (
             args.celltype_column in adata.obs.columns
         ), f"`celltype_column`: '{args.celltype_column}' not in adata.obs columns."
 
-    if args.plink:
-        bim, fam, bed = read_plink(args.genotype_matrix, verbose=False)
-        GT_matrix = pd.DataFrame(bed.compute(), index=bim.snp, columns=fam.iid)
+    if args.plink and args.method in ["limix", "LIMIX", "LMM"]:
+        variant_info, fam, bed = read_plink(args.genotype_matrix, verbose=False)
+        GT_matrix = pd.DataFrame(
+            bed.compute(), index=variant_info.snp, columns=fam.iid
+        )  # SNPs x donors
+    elif args.plink and args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        pgr = pgen.PgenReader(args.genotype_matrix)
+        GT_matrix = pgr.load_genotypes()  # SNPs x donors
+        variant_info = pgr.variant_df
     else:
-        assert os.path.isfile(args.genotype_matrix), "Genotype matrix not found"
+        assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
         _, ext = os.path.splitext(args.genotype_matrix)
         if ext not in [".tsv", ".csv"]:
             raise TypeError(
@@ -120,7 +131,7 @@ def validate_and_read_passed_args(
         GT_matrix = pd.read_csv(
             args.genotype_matrix, index_col=0, sep="\t" if ext == ".tsv" else ","
         )
-        bim = None
+        variant_info = None
 
     GT_matrix = GT_matrix.filter(adata.obs[args.individual_column].unique())
     if GT_matrix.shape[1] == 0:
@@ -128,14 +139,15 @@ def validate_and_read_passed_args(
             "Individual IDs in adata.obs do not match individual IDs in the genotype matrix."
         )
 
-    GT_matrix_standardised = pd.DataFrame(
-        StandardScaler().fit_transform(GT_matrix.T.values),
-        index=GT_matrix.columns,
-        columns=GT_matrix.index,
-    )
-    del GT_matrix
+    # GT_matrix_standardised = pd.DataFrame(
+    #     StandardScaler().fit_transform(GT_matrix.T.values),  # donors x SNPs
+    #     index=GT_matrix.columns,
+    #     columns=GT_matrix.index,
+    # )
+    # del GT_matrix
+    GT_matrix = GT_matrix.T  # donors x SNPs
 
-    if args.kinship:
+    if args.kinship is not None:
         assert os.path.isfile(args.kinship), "Kinship matrix file not found."
         _, ext = os.path.splitext(args.kinship)
         if ext not in [".tsv", ".csv"]:
@@ -148,10 +160,32 @@ def validate_and_read_passed_args(
         ]
         if kinship.shape[0] == 0:
             raise ValueError(
-                "Individual IDs in adata.obs do not match individual IDs in the kinship matrix."
+                "Individual IDs in cell metadata do not match individual IDs in the kinship matrix."
             )
     else:
         kinship = None
+
+    if args.genotype_pcs is not None:
+        assert os.path.isfile(args.genotype_pcs), "Genotype PCs file not found."
+        _, ext = os.path.splitext(args.genotype_pcs)
+        if ext not in [".tsv", ".csv"]:
+            raise TypeError(
+                f"Genotype PCs file must be either .tsv or .csv. File format provided: {ext}."
+            )
+        n_gt_pcs = args.n_gt_pcs if args.n_gt_pcs else 10
+        # load GT PCs; restrict to individuals in sample_df
+        GT_PCs = pd.read_csv(
+            args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
+        )  # donors x PCs
+        GT_PCs = GT_PCs.loc[GT_PCs.index.isin(adata.obs[args.individual_column].unique())]
+        if GT_PCs.shape[0] == 0:
+            raise ValueError(
+                "Individual IDs in cell metadata do not match individual IDs in the genotype PCs."
+            )
+        # select leading components
+        GT_PCs = GT_PCs.filter([f"PC{i}" for i in range(1, n_gt_pcs + 1)])
+    else:
+        GT_PCs = None
 
     SNP_colname_trans = None
     if args.known_trans_eQTLs:
@@ -162,12 +196,7 @@ def validate_and_read_passed_args(
             c for c in known_trans_eQTLs.columns if "SNP" in c or "snp" in c or "variant" in c
         ]
         for c in SNP_colnames:
-            if (
-                known_trans_eQTLs.loc[
-                    known_trans_eQTLs[c].isin(GT_matrix_standardised.columns)
-                ].shape[0]
-                != 0
-            ):
+            if known_trans_eQTLs.loc[known_trans_eQTLs[c].isin(GT_matrix.columns)].shape[0] != 0:
                 SNP_colname_trans = c
         if SNP_colname_trans is None and c == SNP_colnames[-1]:
             raise ValueError(
@@ -184,12 +213,7 @@ def validate_and_read_passed_args(
             c for c in known_cis_eQTLs.columns if "SNP" in c or "snp" in c or "variant" in c
         ]
         for c in SNP_colnames:
-            if (
-                known_cis_eQTLs.loc[known_cis_eQTLs[c].isin(GT_matrix_standardised.columns)].shape[
-                    0
-                ]
-                != 0
-            ):
+            if known_cis_eQTLs.loc[known_cis_eQTLs[c].isin(GT_matrix.columns)].shape[0] != 0:
                 SNP_colname_cis = c
         if SNP_colname_cis is None and c == SNP_colnames[-1]:
             raise ValueError(
@@ -205,7 +229,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI_cis_gen.load_from_checkpoint(
+    LIVI_model = LIVI_cis_gen_GT_PCs.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -234,16 +258,17 @@ def validate_and_read_passed_args(
         else:
             of_prefix = args.output_file_prefix
     else:
-        of_prefix = os.path.basename(args.output_dir)
+        of_prefix = os.path.basename(output_dir)
 
     return (
         output_dir,
         of_prefix,
         LIVI_model,
         adata,
-        GT_matrix_standardised,
-        bim,
+        GT_matrix,
+        variant_info,
         kinship,
+        GT_PCs,
         known_trans_eQTLs,
         SNP_colname_trans,
         known_cis_eQTLs,
@@ -587,9 +612,10 @@ def main(args):
         of_prefix,
         LIVI_model,
         adata,
-        GT_matrix_standardised,
-        bim,
+        GT_matrix,
+        variant_info,
         kinship,
+        GT_PCs,
         known_trans_eQTLs,
         SNP_colname_trans,
         known_cis_eQTLs,
@@ -610,14 +636,16 @@ def main(args):
 
     print("\n-------- Running genetic association testing --------\n")
 
-    covariates = set_up_covariates(args, adata.obs)
+    covariates = set_up_covariates(args, U_context)
 
     associations = run_LIVI_genetic_association_testing(
         U_context=U_context,
         V_persistent=V_persistent,
-        GT_matrix=GT_matrix_standardised,
-        bim=bim,
+        GT_matrix=GT_matrix,
+        variant_info=variant_info,
         Kinship=kinship,
+        genotype_pcs=GT_PCs,
+        method=args.method,
         output_dir=output_dir,
         output_file_prefix=of_prefix,
         covariates=covariates,
@@ -750,16 +778,42 @@ if __name__ == "__main__":
         help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
     )
     parser.add_argument(
+        "--covariates",
+        default=None,
+        type=str,
+        help="Absolute path of the .tsv file containing gene expression PCs aggregated at the donor level.",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default="tensorQTL",
+        choices=["tensorQTL", "LIMIX"],
+        help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
+    )
+    parser.add_argument(
         "--plink",
         action="store_true",
         default=False,
-        help="If PLINK genotype files (bim, bed, fam) are provided instead of a GT matrix in .tsv format.",
+        help="If PLINK genotype files (bed, bim, fam if `method` is LIMIX, or pgen, pvar, psam if `method` is tensorQTL) are provided instead of a GT matrix in .tsv format.",
     )
     parser.add_argument(
         "--kinship",
         "-K",
         type=str,
         help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
+    )
+    parser.add_argument(
+        "--genotype_pcs",
+        "-GT_pcs",
+        default=None,
+        type=str,
+        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing.",
+    )
+    parser.add_argument(
+        "--n_gt_pcs",
+        default=None,
+        type=int,
+        help="Number of genotype principal components to use as covariates during SNP association testing. If omitted 10 PCs are used by default.",
     )
     parser.add_argument(
         "--quantile_normalise",
@@ -790,25 +844,6 @@ if __name__ == "__main__":
         default=None,
         type=str,
         help="Column name in cell metadata (adata.obs) indicating the experimental batch the sample (cell) comes from.",
-    )
-    parser.add_argument(
-        "--sex_column",
-        default=None,
-        type=str,
-        help="Column name in cell metadata (adata.obs) indicating the sex of the individual.",
-    )
-    parser.add_argument(
-        "--age_column",
-        default=None,
-        type=str,
-        help="Column name in cell metadata (adata.obs) indicating the age of the individual.",
-    )
-    parser.add_argument(
-        "--other_covars",
-        nargs="*",
-        default=None,
-        type=str,
-        help="Column names in cell metadata (adata.obs) of other individual covariates to use in the null LMM.",
     )
     parser.add_argument(
         "--multiple_testing_threshold",
