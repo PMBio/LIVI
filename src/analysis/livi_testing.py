@@ -366,6 +366,7 @@ def run_LIVI_genetic_association_testing(
         print("\n ----- Running genetic association testing for U_context ----- \n")
 
         if method in ["limix", "LIMIX", "LMM"]:
+            method_prefix = "LMM"
             results = pd.DataFrame(
                 columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
             )
@@ -397,6 +398,7 @@ def run_LIVI_genetic_association_testing(
                     how="left",
                 )
         elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+            method_prefix = "TensorQTL"
             results = run_tensorQTL(
                 phenotype_df=U_context.T,
                 genotype_df=GT_matrix.T,
@@ -410,54 +412,56 @@ def run_LIVI_genetic_association_testing(
 
         try:
             filename = (
-                f"{output_file_prefix}_LMM_results_Ucontext_variable-factors.tsv"
+                f"{output_file_prefix}_{method_prefix}_results_Ucontext_variable-factors.tsv"
                 if variable_factors or variance_threshold
-                else f"{output_file_prefix}_LMM_results_Ucontext.tsv"
+                else f"{output_file_prefix}_{method_prefix}_results_Ucontext.tsv"
             )
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         except OSError:
             filename = (
-                "_LMM_results_Ucontext_variable-factors.tsv"
+                f"_{method_prefix}_results_Ucontext_variable-factors.tsv"
                 if variable_factors or variance_threshold
-                else "_LMM_results_Ucontext.tsv"
+                else f"_{method_prefix}_results_Ucontext.tsv"
             )
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
             warnings.warn(
                 f"Could not save testing results for U under provided filename (filename too long).\nSaved as '{filename}' instead."
             )
         try:
+            qqplot_filename = (
+                f"{output_file_prefix}_QQplot_{method_prefix}_context-specific-effects.png"
+            )
             QQplot(
                 results.p_value,
-                savefig=os.path.join(
-                    output_dir, f"{output_file_prefix}_QQplot_context-specific-effects.png"
-                ),
+                savefig=os.path.join(output_dir, qqplot_filename),
             )
             plt.close()
         except OSError:
+            qqplot_filename = f"_QQplot_{method_prefix}_context-specific-effects.png"
             QQplot(
                 results.p_value,
-                savefig=os.path.join(output_dir, "_QQplot_context-specific-effects.png"),
+                savefig=os.path.join(output_dir, qqplot_filename),
             )
             plt.close()
             warnings.warn(
-                "Could not save QQplot for U under provided filename (filename too long).\nSaved as '_QQplot_context-specific-effects.png' instead."
+                "Could not save QQplot for U under provided filename (filename too long).\nSaved as '_QQplot_<method>_context-specific-effects.png' instead."
             )
         if qval_threshold is not None:
             results_sign_context = FDR_correction(results, cut_off=qval_threshold)
             try:
                 filename_sign = (
-                    f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                    f"{output_file_prefix}_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+                    else f"{output_file_prefix}_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
                 filename_sign = (
-                    f"_LMM_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                    f"_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"_LMM_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+                    else f"_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
@@ -515,26 +519,26 @@ def run_LIVI_genetic_association_testing(
             )
 
         try:
-            filename = f"{output_file_prefix}_LMM_results_Vpersistent.tsv"
+            filename = f"{output_file_prefix}_{method_prefix}_results_Vpersistent.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         except OSError:
-            filename = "_LMM_results_Vpersistent.tsv"
+            filename = f"_{method_prefix}_results_Vpersistent.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
             warnings.warn(
                 f"Could not save testing results for V under provided filename (filename too long).\nSaved as '{filename}' instead."
             )
         try:
+            qqplot_filename = f"{output_file_prefix}_QQplot_{method_prefix}_persistent-effects.png"
             QQplot(
                 results.p_value,
-                savefig=os.path.join(
-                    output_dir, f"{output_file_prefix}_QQplot_persistent-effects.png"
-                ),
+                savefig=os.path.join(output_dir, qqplot_filename),
             )
             plt.close()
         except OSError:
+            qqplot_filename = f"_QQplot_{method_prefix}_persistent-effects.png"
             QQplot(
                 results.p_value,
-                savefig=os.path.join(output_dir, "_QQplot_persistent-effects.png"),
+                savefig=os.path.join(output_dir, qqplot_filename),
             )
             plt.close()
             warnings.warn(
@@ -544,14 +548,12 @@ def run_LIVI_genetic_association_testing(
         if qval_threshold is not None:
             results_sign_persistent = FDR_correction(results, cut_off=qval_threshold)
             try:
-                filename_sign = (
-                    f"{output_file_prefix}_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
-                )
+                filename_sign = f"{output_file_prefix}_{method_prefix}_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
-                filename_sign = f"_LMM_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+                filename_sign = f"_{method_prefix}_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
