@@ -176,7 +176,7 @@ def LMM_test_feature(
     feature_id: Union[int, str],
     phenotype_df: pd.DataFrame,
     covariates_df: pd.DataFrame,
-    G_scaled: pd.DataFrame,
+    G: pd.DataFrame,
     QS: Tuple[Tuple[np.ndarray, np.ndarray], np.ndarray],
     quantile_norm: bool,
 ) -> pd.DataFrame:
@@ -189,7 +189,7 @@ def LMM_test_feature(
     phenotype_df (pd.DataFrame): DataFrame containing the values of all phenotype features.
     covariates_df (pd.DataFrame): DataFrame containing sample covariates to be included
         as fixed effects in the LMM.
-    G_scaled (pd.DataFrame): DataFrame containing the standardised genetic data.
+    G (pd.DataFrame): DataFrame containing the genetic data.
     QS (tuple): Economic eigendecomposition in the form of ((Q0, Q1), S0) of a kinship
         matrix K (used as covariance of the random genetic effect).
     quantile_norm (bool): Flag indicating whether quantile normalization should be
@@ -213,9 +213,7 @@ def LMM_test_feature(
         # covariates_matrix = np.append(np.ones((feature_phenotype.shape[0], 1)), covariates_matrix, axis=1)
 
     # Subset Genetics matrix
-    G_matrix = G_scaled.loc[
-        G_scaled.index.isin(feature_phenotype.index)
-    ].values  # individuals x G_variable
+    G_matrix = G.loc[G.index.isin(feature_phenotype.index)].values  # individuals x G_variable
 
     if quantile_norm:
         phenotype = quantile_transform(
@@ -241,8 +239,8 @@ def LMM_test_feature(
 
     feature_results = pd.DataFrame(
         {
-            "feature_id": [feature_id] * G_scaled.shape[1],
-            "variable": G_scaled.columns,
+            "feature_id": [feature_id] * G.shape[1],
+            "variable": G.columns,
             "effect_size": effsizes,
             "effect_size_se": effsizes_se,
             "p_value": pvalues,
@@ -302,7 +300,7 @@ def run_LIVI_genetic_association_testing(
     ----------
     U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
     V_persistent (pd.DataFrame): LIVI persistent genetic embedding.
-    GT_matrix (pd.DataFrame): Standardised genetic variable matrix.
+    GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
     output_dir (str): Output directory to save the testing results.
     output_file_prefix(str): Output file prefix.
     Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
@@ -623,6 +621,7 @@ def validate_and_read_passed_args(
         GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
         variant_info (pd.DataFrame): SNP information contained in the .bim or .pvar file, if PLINK genotype matrix is used, otherwise None.
         kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
+        GT_PCs (pd.DataFrame): Dataframe containing genotype principal components if provided, otherwise None.
         U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
         V_persistent (pd.DataFrame): LIVI persistent genetic embedding if applicable, otherwise None.
     """
@@ -852,18 +851,18 @@ if __name__ == "__main__":
         "--kinship",
         "-K",
         type=str,
-        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
+        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing. Required when testing_method == 'LIMIX'",
     )
     parser.add_argument(
         "--genotype_pcs",
         "-GT_pcs",
         default=None,
         type=str,
-        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing.",
+        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing. Required when testing_method == 'tensorQTL'",
     )
     parser.add_argument(
         "--n_gt_pcs",
-        default=None,
+        default=10,
         type=int,
         help="Number of genotype principal components to use as covariates during SNP association testing. If omitted 10 PCs are used by default.",
     )
