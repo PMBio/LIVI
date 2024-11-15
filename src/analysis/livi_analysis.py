@@ -69,9 +69,14 @@ def validate_and_read_passed_args(
         output_dir (str): Output directory to save the testing results.
         of_prefix (str): Output file prefix.
         adata (AnnData): AnnData object containing gene counts and cell metadata.
-        GT_matrix(pd.DataFrame): Genotype matrix (donors x SNPs).
+        GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
         variant_info (pd.DataFrame): SNP information contained in the .bim or .pvar file, if PLINK genotype matrix is used, otherwise None.
         kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
+        GT_PCs (pd.DataFrame): Dataframe containing genotype principal components if provided, otherwise None.
+        known_trans_eQTLs (pd.DataFrame): Dataframe containing known trans-eQTLs.
+        SNP_colname_trans (str): SNP column in `known_trans_eQTLs`.
+        known_cis_eQTLs (pd.DataFrame): Dataframe containing known trans-eQTLs.
+        SNP_colname_cis (str):  SNP column in `known_cis_eQTLs`.
     """
 
     assert os.path.isdir(args.model_run_dir), "Model directory not found."
