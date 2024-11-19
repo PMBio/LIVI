@@ -376,7 +376,7 @@ def run_LIVI_genetic_association_testing(
                     feature_id=f,
                     phenotype_df=U_context.T,
                     covariates_df=covariates,
-                    G_scaled=GT_matrix,
+                    G=GT_matrix,
                     QS=QS,
                     quantile_norm=quantile_norm,
                 )
@@ -485,7 +485,7 @@ def run_LIVI_genetic_association_testing(
                     feature_id=f,
                     phenotype_df=V_persistent.T,
                     covariates_df=covariates,
-                    G_scaled=GT_matrix,
+                    G=GT_matrix,
                     QS=QS,
                     quantile_norm=quantile_norm,
                 )
