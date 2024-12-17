@@ -1,0 +1,9 @@
+_target_: src.models.vae.VAE
+
+x_dim: 14212
+z_dim: 900
+encoder_hidden_dims: [5000, 2000, 500, 100]
+decoder_hidden_dims: [] # [2000, 5000]
+learning_rate: 1e-3
+layer_norm: true
+likelihood: nb_covars

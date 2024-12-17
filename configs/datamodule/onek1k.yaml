@@ -1,6 +1,6 @@
 _target_: src.data_modules.livi_data.LIVIDataModule
 
-adata: ${paths.data_dir}/OneK1K/LogNorm_counts_across_celltypes_DCRM_protein-coding_Azimuth_only-immune-cells_HVG-HEX_reduced.h5ad
+adata: ${paths.data_dir}/OneK1K/LogNorm_counts_across_celltypes_DCRM_protein-coding_Azimuth_only-immune-cells_HVG-HEX-10K.h5ad
 y_key: individual
 use_size_factor: True
 size_factor_key: null

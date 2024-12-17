@@ -38,10 +38,17 @@ class LIVIDataset(Dataset):
 
         if known_cis_eqtls is not None:
             if isinstance(known_cis_eqtls, str):
-                self.known_cis_eqtls = pd.read_csv(known_cis_eqtls, sep="\t", index_col=0)
+                known_cis_eqtls = pd.read_csv(known_cis_eqtls, sep="\t", index_col=0)
             else:
-                self.known_cis_eqtls = known_cis_eqtls
-            self.known_cis_eqtls = self.known_cis_eqtls.filter(self.adata.var.index)
+                known_cis_eqtls = known_cis_eqtls
+            tmp_cis_eqtls = pd.DataFrame(index=known_cis_eqtls.index, columns=self.adata.var.index)
+            # Account for cases when not all genes have a known eQTL
+            for c in self.adata.var.index:
+                if c in known_cis_eqtls.columns:
+                    tmp_cis_eqtls[c] = known_cis_eqtls[c]
+                else:
+                    tmp_cis_eqtls[c] = 0
+            self.known_cis_eqtls = tmp_cis_eqtls
         else:
             self.known_cis_eqtls = None
 

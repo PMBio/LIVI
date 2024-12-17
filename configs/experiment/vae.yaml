@@ -1,0 +1,26 @@
+# @package _global_
+
+# to execute this experiment run:
+# python train.py experiment=vae
+
+defaults:
+  - override /model: vae.yaml
+  - override /datamodule: onek1k.yaml
+  - override /callbacks: default.yaml
+  - override /trainer: default.yaml
+  - override /paths: pc007_trainable-A.yaml
+  - override /logger: tensorboard.yaml
+
+# all parameters below will be merged with parameters from default configurations set above
+# this allows you to overwrite only specified parameters
+
+trainer:
+  max_epochs: 61
+  min_epochs: 60
+  accelerator: gpu
+  devices: [0]
+  logger: True
+  enable_checkpointing: True
+  deterministic: True
+
+task_name: vae_z900_linear_linear-decoder

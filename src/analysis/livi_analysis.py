@@ -44,7 +44,12 @@ from src.analysis.plotting import (
 )
 from src.data_modules.livi_data import LIVIDataModule
 from src.models.livi import LIVI
-from src.models.livi_experimental import LIVI_cis, LIVI_cis_gen, LIVI_cis_gen_GT_PCs
+from src.models.livi_experimental import (
+    LIVI_cis,
+    LIVI_cis_gen,
+    LIVI_cis_gen_adversary_U,
+    LIVI_cis_gen_GT_PCs,
+)
 
 
 def validate_and_read_passed_args(
@@ -234,7 +239,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI_cis_gen_GT_PCs.load_from_checkpoint(
+    LIVI_model = LIVI_cis_gen.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -714,7 +719,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                CxG_effects_LIVI=associations_CxG,
+                GxC_effects_LIVI=associations_CxG,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -726,7 +731,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                CxG_effects_LIVI=associations_CxG,
+                GxC_effects_LIVI=associations_CxG,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
