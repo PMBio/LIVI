@@ -125,6 +125,7 @@ class NegativeBinomialDecoder(nn.Module):
         super().__init__()
 
         self.device = device
+        self.batch_norm = batch_norm
 
         self.mean = create_mlp(
             input_size=z_dim,
