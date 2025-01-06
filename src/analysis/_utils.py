@@ -165,7 +165,7 @@ def select_important_genes_for_factor_IQR(
     return gene_names[important_genes_factor].tolist()
 
 
-def calculate_CxG_effect(
+def calculate_GxC_effect(
     LIVI_associations: pd.DataFrame,
     SNP_id: str,
     cell_state_latent: pd.DataFrame,
@@ -182,7 +182,7 @@ def calculate_CxG_effect(
 
     Returns
     -------
-        CxG_effect (pd.DataFrame): Dataframe containing the effect of the given SNP on each associated cell-state factor.
+        GxC_effect (pd.DataFrame): Dataframe containing the effect of the given SNP on each associated cell-state factor.
     """
 
     snp_associations = LIVI_associations.loc[LIVI_associations.SNP_id == SNP_id]
@@ -196,13 +196,53 @@ def calculate_CxG_effect(
 
     A = A.filter(snp_associations.Factor)
 
-    CxG_effect = (
+    GxC_effect = (
         cell_state_latent.to_numpy() @ A.to_numpy() * factor_beta.to_numpy()  # G_effect.to_numpy()
     )
-    CxG_effect = pd.DataFrame(
-        CxG_effect,
+    GxC_effect = pd.DataFrame(
+        GxC_effect,
         index=cell_state_latent.index,
-        columns=["CxG_" + f[1] for f in snp_associations.Factor.str.split("_")],
+        columns=["GxC_" + f[1] for f in snp_associations.Factor.str.split("_")],
     )
 
-    return CxG_effect
+    return GxC_effect
+
+
+def calculate_GxC_gene_effect(
+    LIVI_associations: pd.DataFrame,
+    SNP_id: str,
+    cell_state_latent: pd.DataFrame,
+    A: pd.DataFrame,
+    GxC_decoder: pd.DataFrame,
+):
+    """Compute effect of a given SNP on cell-states.
+
+    Parameters
+    ----------
+        LIVI_associations (pd.DataFrame): Dataframe containing LIVI CxG effects.
+        SNP_id (str): ID of the SNP, whose effect should be calculated.
+        cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
+        A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
+
+    Returns
+    -------
+        GxC_effect_gene (pd.DataFrame): Dataframe containing the effect of the given SNP on each gene.
+    """
+
+    snp_associations = LIVI_associations.loc[LIVI_associations.SNP_id == SNP_id]
+    factor_beta = snp_associations.filter(["Factor", "effect_size"]).set_index("Factor").T
+
+    A = A.filter(snp_associations.Factor)
+    GxC_decoder = GxC_decoder.filter(
+        snp_associations.Factor.str.replace("U", "GxC")
+    ).T  # U x genes
+
+    GxC_effect = cell_state_latent.to_numpy() @ A.to_numpy() * factor_beta.to_numpy()  # cells x U
+    GxC_effect_gene = GxC_effect @ GxC_decoder.to_numpy()  # cells x genes
+    GxC_effect_gene = pd.DataFrame(
+        GxC_effect_gene,
+        index=cell_state_latent.index,
+        columns=GxC_decoder.columns,
+    )
+
+    return GxC_effect_gene
