@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import warnings
+from datetime import datetime
 from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -648,6 +649,7 @@ def main(args):
 
     covariates = set_up_covariates(args, U_context)
 
+    start = datetime.now()
     associations = run_LIVI_genetic_association_testing(
         U_context=U_context,
         V_persistent=V_persistent,
@@ -656,17 +658,26 @@ def main(args):
         Kinship=kinship,
         genotype_pcs=GT_PCs,
         method=args.method,
+        fdr_method=args.fdr_method,
         output_dir=output_dir,
         output_file_prefix=of_prefix,
         covariates=covariates,
         quantile_norm=args.quantile_normalise,
         variance_threshold=args.variance_threshold,
         variable_factors=args.variable_factors,
-        qval_threshold=(
-            args.multiple_testing_threshold if args.multiple_testing_threshold else None
-        ),
+        fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
         return_associations=True,
     )
+
+    end = datetime.now()
+    duration = (end - start).seconds
+    duration_minutes = duration / 60
+    duration_hours = duration_minutes / 60
+
+    with open(os.path.join(output_dir, "association_testing_execution_time.txt"), "w") as outfile:
+        outfile.write(
+            f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
+        )
 
     associations_CxG = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
@@ -856,10 +867,17 @@ if __name__ == "__main__":
         help="Column name in cell metadata (adata.obs) indicating the experimental batch the sample (cell) comes from.",
     )
     parser.add_argument(
-        "--multiple_testing_threshold",
+        "--fdr_threshold",
         "-fdr",
         type=float,
-        help="Storey q-value threshold for multiple testing correction.",
+        help="False discovery rate (FDR) threshold for multiple testing correction.",
+    )
+    parser.add_argument(
+        "--fdr_method",
+        default="Benjamini-Hochberg",
+        type=str,
+        choices=["Storey", "qvalue", "Benjamini-Hochberg", "BH", "Benjamini-Yekutieli", "BY"],
+        help="False discovery rate (FDR) controlling method for multiple testing correction.",
     )
     parser.add_argument(
         "--known_trans_eQTLs",
