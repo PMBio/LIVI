@@ -1070,7 +1070,12 @@ def plot_celltype_factors(
         return (celltype_factor_high, celltype_factor_low)
 
 
-def QQplot(pvalues: Union[list, np.ndarray], savefig: Optional[str] = None) -> None:
+def QQplot(
+    pvalues: Union[list, np.ndarray],
+    linecolor: Optional[str] = None,
+    truncate: float = 0.001,
+    savefig: Optional[str] = None,
+) -> None:
     """Generate a QQ plot to assess the deviation of observed p-values from expected uniform
     distribution.
 
@@ -1083,14 +1088,39 @@ def QQplot(pvalues: Union[list, np.ndarray], savefig: Optional[str] = None) -> N
     -------
         None
     """
-    (osm, osr), _ = probplot(pvalues, dist="uniform")
+    (osm, osr), _ = probplot(pvalues, dist="uniform")  # expected, observed
     b, a = np.polyfit(osm, osr, deg=1)
+    if truncate > 0:
+        cutoff = int(len(osr) * truncate)
+        # Remove very small p-values
+        osm = osm[cutoff:]
+        osr = osr[cutoff:]
+
+    color = linecolor if linecolor is not None else "navy"
+    plt.figure(figsize=(6, 6))
     ax = plt.gca()
     df = pd.DataFrame({"osm": -np.log10(osm), "osr": -np.log10(osr)})
-    sns.scatterplot(x="osm", y="osr", data=df, ax=ax, edgecolor=None)
-    x = np.linspace(0, ax.get_xlim()[1])
-    ax.plot(x, a + b * x, c="lightgrey", linestyle=":", scaley=True)
+    sns.scatterplot(x="osm", y="osr", data=df, ax=ax, edgecolor=None, color=color)
+    x = np.linspace(0, ax.get_xlim()[1] + 1)
+    # Draw diagonal line
+    ax.plot(x, a + b * x, c="lightgrey", linestyle="--", scaley=True)
+    if truncate > 0:
+        # Add a horizontal line to indicate truncation
+        last_point_osm = -np.log10(osm[0])
+        last_point_osr = -np.log10(osr[0])
+        ax.hlines(
+            y=last_point_osr,
+            xmin=last_point_osm,
+            xmax=ax.get_xlim()[1] - 0.3,
+            linestyles=":",
+            linewidth=4,
+            color=color,
+            label="Data not shown",
+        )
+    ax.legend(loc="upper left", fontsize=14, frameon=False)
     ax.set(xlabel=r"Expected $-\log_{10} P$", ylabel=r"Observed $-\log_{10} P$")
+    ax.xaxis.label.set_size(16)
+    ax.yaxis.label.set_size(16)
 
     if savefig is not None:
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
@@ -1911,6 +1941,7 @@ def visualize_GxC_effect(
     GxC_associations: Optional[pd.DataFrame] = None,
     assignment_matrix: Optional[pd.DataFrame] = None,
     gene: Optional[str] = None,
+    hgnc_column: Optional[str] = None,
     GxC_decoder: Optional[pd.DataFrame] = None,
     UMAP_cell_state: Optional[Union[str, pd.DataFrame]] = None,
     savefig: Optional[str] = None,
@@ -2000,6 +2031,8 @@ def visualize_GxC_effect(
                 )
 
     if gene is not None:
+        if hgnc_column is not None:
+            hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
         if GxC_decoder is None:
             GxC_decoder = [
                 re.match("(.*GxC_decoder.tsv)", f)
@@ -2030,6 +2063,7 @@ def visualize_GxC_effect(
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
         )
+        hgnc_name = None
 
     if UMAP_cell_state is not None:
         if isinstance(UMAP_cell_state, pd.DataFrame):
@@ -2123,7 +2157,11 @@ def visualize_GxC_effect(
                 pass
 
             ax.set_title(
-                label=f"{SNP} - {GxC_effect.columns[i - 1]}",
+                label=(
+                    f"{SNP} - {hgnc_name[GxC_effect.columns[i - 1]]}"
+                    if hgnc_name is not None
+                    else f"{SNP} - {GxC_effect.columns[i - 1]}"
+                ),
                 fontdict={"fontsize": axis_title_fontsize},
                 loc="center",
             )
