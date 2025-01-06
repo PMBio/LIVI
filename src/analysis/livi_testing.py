@@ -15,11 +15,13 @@ import argparse
 import os
 import re
 import warnings
+from datetime import datetime
 from typing import List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 import torch
 from glimix_core.lmm import LMM
 from multipy.fdr import qvalue
@@ -28,6 +30,7 @@ from pandas_plink import read_plink
 from scipy.stats import chi2, norm
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler, quantile_transform
+from statsmodels.stats import multitest
 from tensorqtl import pgen, trans
 
 from src.analysis.plotting import QQplot
@@ -283,6 +286,7 @@ def run_LIVI_genetic_association_testing(
     output_file_prefix: str,
     method: str = "limix",
     quantile_norm: bool = True,
+    fdr_method: str = "BH",
     return_associations: bool = False,
     Kinship: Optional[pd.DataFrame] = None,
     genotype_pcs: Optional[pd.DataFrame] = None,
@@ -290,7 +294,7 @@ def run_LIVI_genetic_association_testing(
     covariates: Optional[pd.DataFrame] = None,
     variance_threshold: Optional[float] = None,
     variable_factors: Optional[List[int]] = None,
-    qval_threshold: Optional[float] = None,
+    fdr_threshold: Optional[float] = None,
 ) -> Optional[Tuple[pd.DataFrame, Optional[pd.DataFrame]]]:
     """Test genetic variables (e.g. SNPs or PRS) for effects on LIVI's individual embeddings and
     save the results to file. Optionally select also significant associations based on
@@ -303,6 +307,9 @@ def run_LIVI_genetic_association_testing(
     GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
     output_dir (str): Output directory to save the testing results.
     output_file_prefix(str): Output file prefix.
+    method (str): Whether to use LIMIX or TensorQTL for association testing. LIMIX can account for
+        repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.
+    fdr_method (str): False discovery rate (FDR) controlling method for multiple testing correction.
     Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
     genotype_pcs (Optional[pd.DataFrame]): Precomputed genotype principal components.
     variant_info (Optional[pd.DataFrame]): SNP information contained in the .bim file,
@@ -311,16 +318,17 @@ def run_LIVI_genetic_association_testing(
         to be included as fixed effects in the LMM.
     quantile_norm (bool): Flag indicating whether quantile normalization should be
         applied to the phenotype.
-    qval_threshold (Optional[float]): Storey q-value threshold to call an association significant.
+    fdr_threshold (Optional[float]): False discovery rate (FDR) threshold to call an association significant.
 
     Returns
     -------
     results_sign_context (pd.DataFrame): Significant SNP associations with the cell-state-specific genetic embedding.
-    results_sign_persistent (pd.DataFrame): Significant SNP associations with the persistent genetic embedding, if there is one.
+    results_sign_persistent (pd.DataFrame): Significant SNP associations with the persistent genetic embedding,
+        if there is one.
     """
 
-    if return_associations and qval_threshold is None:
-        qval_threshold = 0.05
+    if return_associations and fdr_threshold is None:
+        fdr_threshold = 0.05
 
     GT_matrix = GT_matrix.loc[U_context.index]
 
@@ -429,7 +437,7 @@ def run_LIVI_genetic_association_testing(
             )
         try:
             qqplot_filename = (
-                f"{output_file_prefix}_QQplot_{method_prefix}_context-specific-effects.png"
+                f"{output_file_prefix}_{method_prefix}_QQplot_context-specific-effects.png"
             )
             QQplot(
                 results.p_value,
@@ -437,7 +445,7 @@ def run_LIVI_genetic_association_testing(
             )
             plt.close()
         except OSError:
-            qqplot_filename = f"_QQplot_{method_prefix}_context-specific-effects.png"
+            qqplot_filename = f"_{method_prefix}_QQplot_context-specific-effects.png"
             QQplot(
                 results.p_value,
                 savefig=os.path.join(output_dir, qqplot_filename),
@@ -446,22 +454,43 @@ def run_LIVI_genetic_association_testing(
             warnings.warn(
                 "Could not save QQplot for U under provided filename (filename too long).\nSaved as '_QQplot_<method>_context-specific-effects.png' instead."
             )
-        if qval_threshold is not None:
-            results_sign_context = FDR_correction(results, cut_off=qval_threshold)
+        try:
+            histplot_filename = f"{output_file_prefix}_{method_prefix}_Pvalue-Histogram_context-specific-effects.png"
+            sns.histplot(results.p_value, bins=500, color="royalblue")
+            plt.savefig(
+                os.path.join(output_dir, histplot_filename),
+                transparent=True,
+                bbox_inches="tight",
+                dpi=200,
+            )
+        except OSError:
+            histplot_filename = f"_{method_prefix}_Pvalue-Histogram_context-specific-effects.png"
+            sns.histplot(results.p_value, bins=500, color="royalblue")
+            plt.savefig(
+                os.path.join(output_dir, histplot_filename),
+                transparent=True,
+                bbox_inches="tight",
+                dpi=200,
+            )
+
+        if fdr_threshold is not None:
+            results_sign_context = FDR_correction(
+                results, cut_off=fdr_threshold, method=fdr_method
+            )
             try:
                 filename_sign = (
-                    f"{output_file_prefix}_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                    f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"{output_file_prefix}_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+                    else f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
                 filename_sign = (
-                    f"_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext_variable-factors.tsv"
+                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"_{method_prefix}_results_StoreyQ{qval_threshold}_Ucontext.tsv"
+                    else f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
@@ -544,16 +573,42 @@ def run_LIVI_genetic_association_testing(
             warnings.warn(
                 "Could not save QQplot for V under provided filename (filename too long).\nSaved as '_QQplot_persistent-effects.png' instead."
             )
+        try:
+            histplot_filename = (
+                f"{output_file_prefix}_{method_prefix}_Pvalue-Histogram_persistent-effects.png"
+            )
+            sns.histplot(results.p_value, bins=500, color="royalblue")
+            plt.savefig(
+                os.path.join(output_dir, histplot_filename),
+                transparent=True,
+                bbox_inches="tight",
+                dpi=200,
+            )
+            plt.close()
+        except OSError:
+            histplot_filename = f"_{method_prefix}_Pvalue-Histogram_persistent-effects.png"
+            sns.histplot(results.p_value, bins=500, color="royalblue")
+            plt.savefig(
+                os.path.join(output_dir, histplot_filename),
+                transparent=True,
+                bbox_inches="tight",
+                dpi=200,
+            )
+            plt.close()
 
-        if qval_threshold is not None:
-            results_sign_persistent = FDR_correction(results, cut_off=qval_threshold)
+        if fdr_threshold is not None:
+            results_sign_persistent = FDR_correction(
+                results, cut_off=fdr_threshold, method=fdr_method
+            )
             try:
-                filename_sign = f"{output_file_prefix}_{method_prefix}_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+                filename_sign = f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Vpersistent.tsv"
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
-                filename_sign = f"_{method_prefix}_results_StoreyQ{qval_threshold}_Vpersistent.tsv"
+                filename_sign = (
+                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Vpersistent.tsv"
+                )
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
@@ -576,14 +631,18 @@ def run_LIVI_genetic_association_testing(
                 return None, None
 
 
-def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.DataFrame:
+def FDR_correction(
+    testing_results: pd.DataFrame, cut_off: float = 0.05, method: str = "Storey"
+) -> pd.DataFrame:
     """Perform False Discovery Rate (FDR) correction on testing results.
 
     Parameters
     ----------
     testing_results (pd.DataFrame): DataFrame containing testing results.
-    cut_off (float, optional): Storey q-value threshold for significance.
+    cut_off (float, optional): False discovery rate (FDR) threshold for significance.
         Default is 0.05.
+    method (str, optional): Method used for adjustment of pvalues. Supported are FDR controlling methods,
+        specifically Benjamini-Hochberg, Benjamini-Yekutieli and Storey's Q-value method.
 
     Returns
     -------
@@ -591,11 +650,34 @@ def FDR_correction(testing_results: pd.DataFrame, cut_off: float = 0.05) -> pd.D
     """
 
     ## Multiple testing correction across everything
-    testing_results = testing_results.assign(
-        Storey_qvals=qvalue(testing_results["p_value"].to_numpy(), threshold=cut_off)[1]
-    )
+    if method in ["Storey", "storey", "qvalue", "q_value"]:
+        testing_results = testing_results.assign(
+            corrected_pvalue=qvalue(testing_results["p_value"].to_numpy(), threshold=cut_off)[1]
+        )
+    elif method in ["Benjamini-Hochberg", "benjamini_hochberg", "BH", "bh", "fdr_bh"]:
+        testing_results = testing_results.assign(
+            corrected_pvalue=multitest.multipletests(
+                testing_results["p_value"].values,
+                method="fdr_bh",
+                is_sorted=False,
+                returnsorted=False,
+            )[1]
+        )
+    elif method in ["Benjamini-Yekutieli", "benjamini_yekutieli", "BY", "by", "fdr_by"]:
+        testing_results = testing_results.assign(
+            corrected_pvalue=multitest.multipletests(
+                testing_results["p_value"].values,
+                method="fdr_by",
+                is_sorted=False,
+                returnsorted=False,
+            )[1]
+        )
+    else:
+        raise ValueError(
+            f"Unsupported method {method}. Valid options are 'Storey', 'Benjamini-Hochberg' and 'Benjamini-Yekutieli'."
+        )
 
-    testing_results_sign = testing_results.loc[testing_results.Storey_qvals < cut_off]
+    testing_results_sign = testing_results.loc[testing_results.corrected_pvalue < cut_off]
     print(f"number of fQTLs: {testing_results_sign.shape[0]}")
     print(f"number of unique fSNPs: {testing_results_sign.SNP_id.nunique()}")
     print(f"number of unique factors: {testing_results_sign.Factor.nunique()}")
@@ -887,11 +969,18 @@ if __name__ == "__main__":
         help="Test only those factors whose variance across cells is above this threshold. Ignored if `variable_factors` are provided.",
     )
     parser.add_argument(
-        "--multiple_testing_threshold",
+        "--fdr_threshold",
         "-fdr",
         default=None,
         type=float,
-        help="Storey q-value threshold for multiple testing correction.",
+        help="False discovery rate (FDR) threshold for multiple testing correction.",
+    )
+    parser.add_argument(
+        "--fdr_method",
+        default=None,
+        type=str,
+        choices=["Storey", "qvalue", "Benjamini-Hochberg", "BH", "Benjamini-Yekutieli", "BY"],
+        help="False discovery rate (FDR) controlling method for multiple testing correction.",
     )
     parser.add_argument(
         "--output_dir",
@@ -923,6 +1012,8 @@ if __name__ == "__main__":
     ) = validate_and_read_passed_args(args)
     covariates = set_up_covariates(args, U)
 
+    start = datetime.now()
+
     run_LIVI_genetic_association_testing(
         U_context=U,
         V_persistent=V,
@@ -931,13 +1022,23 @@ if __name__ == "__main__":
         Kinship=kinship,
         genotype_pcs=gt_pcs,
         method=args.method,
+        fdr_method=args.fdr_method,
         output_dir=od,
         output_file_prefix=of_prefix,
         covariates=covariates,
         quantile_norm=args.quantile_normalise,
         variance_threshold=args.variance_threshold,
         variable_factors=args.variable_factors,
-        qval_threshold=(
-            args.multiple_testing_threshold if args.multiple_testing_threshold else None
-        ),
+        fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
     )
+
+    end = datetime.now()
+
+    duration = (end - start).seconds
+    duration_minutes = duration / 60
+    duration_hours = duration_minutes / 60
+
+    with open(os.path.join(od, "association_testing_execution_time.txt"), "w") as outfile:
+        outfile.write(
+            f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
+        )
