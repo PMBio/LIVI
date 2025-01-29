@@ -26,7 +26,7 @@ git clone https://github.com/PMBio/LIVI
 cd LIVI
 
 # [OPTIONAL] create conda environment
-conda create -n LIVIenv python=3.9
+conda create -n LIVIenv python=3.11
 conda activate LIVIenv
 
 # install pytorch according to instructions
