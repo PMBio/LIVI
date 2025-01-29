@@ -56,7 +56,7 @@ def add_livi_umaps_to_cell_metadata(
         livi_results (dict): Dict with LIVI inference results.
         latent_space (list): Which LIVI latent space to reduce (can also be more than one).
             Must be included in livi_results.keys().
-        adata (pd.DataFrame): DataFrame containing cell metadata to which the results are added.
+        cell_metadata (pd.DataFrame): DataFrame containing cell metadata to which the results are added.
         metric (str): The distance metric to use to compute the UMAP embedding (default is Euclidean distance).
         factors (list of integers or numpy 1D-array): Factors indices to use to compute the UMAP embedding.
             Defaults to None, i.e. use all the factors.
@@ -163,6 +163,53 @@ def select_important_genes_for_factor_IQR(
         plt.vlines(x=lower_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
 
     return gene_names[important_genes_factor].tolist()
+
+
+def assign_U_to_celltype(
+    cell_state_latent: pd.DataFrame,
+    A: pd.DataFrame,
+    cell_metadata: pd.DataFrame,
+    celltype_column: str,
+    assignment_threshold: float = 0.8,
+):
+    """Assigns U factors to known celltypes. Only U factors assigned to at least one cell-state
+    based on `assignment_threshold` are assigned to a celltype.
+
+    Parameters
+    ----------
+        cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
+        A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
+        cell_metadata (pd.DataFrame): DataFrame containing cell information, such as celltype, donor ID etc.
+            Cell IDs must be the index, and they must be the same as in `cell_state_latent`.
+        celltype_column (str): Column in `cell_metadata` containing celltype information.
+
+    Returns
+    -------
+    U_celltype (Dict): Dictionary with U factors as keys and assigned celltype as values (or None if the U
+        factor was not assigned to any specific cell-state).
+    """
+
+    U_not_assigned = A.columns[
+        A[A > assignment_threshold].isna().sum(axis=0) == cell_metadata[celltype_column].nunique()
+    ]
+    celltypes_factors = cell_state_latent.merge(
+        cell_metadata[celltype_column], right_index=True, left_index=True, how="left"
+    )
+    # Average of each factor across cells belonging to the same celltype
+    celltypes_factors = celltypes_factors.groupby(
+        by=celltype_column, observed=True
+    ).mean()  # celltypes x C factors
+
+    celltypes_U = pd.DataFrame(
+        celltypes_factors.to_numpy() @ A.to_numpy(),
+        index=celltypes_factors.index,
+        columns=A.columns,
+    )  # celltypes x U factors
+    U_celltype = celltypes_U.idxmax(axis=0).to_dict()
+    for u in U_not_assigned:
+        U_celltype[u] = None
+
+    return U_celltype
 
 
 def calculate_GxC_effect(
