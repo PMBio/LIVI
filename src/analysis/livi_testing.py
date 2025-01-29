@@ -463,6 +463,7 @@ def run_LIVI_genetic_association_testing(
                 bbox_inches="tight",
                 dpi=200,
             )
+            plt.close()
         except OSError:
             histplot_filename = f"_{method_prefix}_Pvalue-Histogram_context-specific-effects.png"
             sns.histplot(results.p_value, bins=500, color="royalblue")
@@ -472,7 +473,7 @@ def run_LIVI_genetic_association_testing(
                 bbox_inches="tight",
                 dpi=200,
             )
-
+            plt.close()
         if fdr_threshold is not None:
             results_sign_context = FDR_correction(
                 results, cut_off=fdr_threshold, method=fdr_method
