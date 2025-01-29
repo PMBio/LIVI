@@ -27,10 +27,12 @@ from matplotlib import cm, colors
 from matplotlib_venn import venn3, venn3_circles
 from multipy.fdr import qvalue
 from pandas_plink import read_plink
-from scipy.stats import mannwhitneyu, pearsonr, zscore
+from scipy.stats import mannwhitneyu, pearsonr, spearmanr, zscore
 from sklearn.preprocessing import StandardScaler
 from statsmodels.stats import multitest
 from tensorqtl import pgen, trans
+
+from src.analysis._utils import assign_U_to_celltype, calculate_GxC_effect
 
 # import src.analysis.livi_testing as testing
 from src.analysis.livi_testing import (
@@ -43,7 +45,7 @@ np.random.seed(32)
 
 
 def correlate_factors_across_runs(
-    factors_across_different_runs: List[pd.DataFrame], corr_threshold: float
+    factors_across_different_runs: List[pd.DataFrame],
 ) -> Dict[str, np.ndarray]:
     """Compute pairwise correlations of U factors across different runs of LIVI model.
 
@@ -58,8 +60,6 @@ def correlate_factors_across_runs(
         factors_across_different_runs (List[pd.DataFrame]): A list of pandas DataFrames,
             each containing factor matrices for a model run. Factors are expected to
             have columns that match a regex pattern "F|factor".
-        corr_threshold (float): A threshold value for correlations (not used directly
-            in this function but can be used externally for filtering results).
 
     Returns
     -------
@@ -116,7 +116,7 @@ def aggregate_correlated_factors_across_runs(
     """
 
     if factor_correlations is None:
-        factor_corrs = correlate_factors_across_runs(factors_across_different_runs, corr_threshold)
+        factor_corrs = correlate_factors_across_runs(factors_across_different_runs)
     else:
         factor_corrs = factor_correlations
 
@@ -434,9 +434,11 @@ def main(args):
                     f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
                 ]
             U_associations = [
-                re.match("(.*PRS_LMM_results_StoreyQ.*_Ucontext.tsv)", f)
+                re.match(
+                    f"(.*PRS_LMM_results_{args.fdr_method}*_Ucontext.tsv)", f
+                )  # assumes same fdr method was used for individual run associations
                 for f in files_i
-                if re.match("(.*PRS_LMM_results_StoreyQ.*_Ucontext.tsv)", f) is not None
+                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_Ucontext.tsv)", f) is not None
             ]
         else:
             path2file = os.path.join(args.results_dir, model_replicates[i])
@@ -444,9 +446,9 @@ def main(args):
                 f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
             ]
             U_associations = [
-                re.match("(.*LMM_results_StoreyQ.*_Ucontext.tsv)", f)
+                re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f)
                 for f in files_i
-                if re.match("(.*LMM_results_StoreyQ.*_Ucontext.tsv)", f) is not None
+                if re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f) is not None
             ]
         if len(U_associations) > 0:
             if len(U_associations) > 1:
@@ -457,7 +459,6 @@ def main(args):
             seed_associations = pd.read_csv(
                 os.path.join(path2file, U_associations), index_col=False, sep="\t"
             )
-            print(seed_associations.shape)
             seed_associations = seed_associations.assign(
                 random_seed=[gseed[i]] * seed_associations.shape[0]
             )
@@ -491,6 +492,12 @@ def main(args):
         bbox_inches="tight",
         transparent=True,
     )
+    plt.savefig(
+        os.path.join(output_dir, "N-unique-fSNPs_vs_N-runs.svg"),
+        dpi=300,
+        bbox_inches="tight",
+        transparent=True,
+    )
     plt.close()
 
     seed_snps_dict = (
@@ -504,6 +511,8 @@ def main(args):
         values = set(seed_snps_dict[gs])
         # Keep only elements that are also in the new set of values
         intersect_snps &= values
+
+    print(f"Number of common fSNPs across all runs: {len(intersect_snps)}")
 
     # # Overlap between intersect SNPs and eQTLGen
     # plt.close()
@@ -551,12 +560,40 @@ def main(args):
     )
     plt.close()
 
+    intersect_snps_one = intersect_snps.copy()
+    for gs in gseed:
+        livi_associations = associations_all_seeds.loc[associations_all_seeds.random_seed == gs]
+        median_N_GxC_snp = (
+            livi_associations.loc[livi_associations.SNP_id.isin(intersect_snps)]
+            .groupby("SNP_id", observed=True)
+            .apply(lambda x: x.Factor.nunique(), include_groups=False)
+            .median()
+        )
+        # For simplicity consider only SNPs that are associated with 1 U factor
+        snps_one = (
+            livi_associations.groupby(by="SNP_id", observed=True).apply(
+                lambda x: x.Factor.nunique(), include_groups=False
+            )
+            == 1
+        )
+        snps_one = snps_one.loc[snps_one].index
+        intersect_snps_one &= set(snps_one)
+
+    print(
+        f"Number of common fSNPs across all runs associated only with one U factor: {len(intersect_snps_one)}"
+    )  # used to judge concordance at the single-cell level
+
     print(
         "------------  Assessing celltype assignment concordance between different random seeds  ------------"
     )
 
     seeds_U_ct = {}
+    seeds_GxC_effects = []
     for i in range(len(model_replicates)):
+        livi_associations = associations_all_seeds.loc[
+            associations_all_seeds.random_seed == gseed[i]
+        ]
+
         zbase = pd.read_csv(
             os.path.join(
                 args.results_dir,
@@ -575,30 +612,31 @@ def main(args):
             index_col=0,
             sep="\t",
         )
-        df_celltype = zbase.copy()
-        df_celltype["Cell type"] = adata.obs[args.celltype_column].values
-        # Average of each factor across cells belonging to the same celltype
-        df_celltype = (
-            df_celltype.groupby(by="Cell type", observed=True)
-            .mean()
-            .reset_index()
-            .set_index("Cell type")
+
+        U_ct_dict = assign_U_to_celltype(
+            cell_state_latent=zbase,
+            A=seed_A,
+            cell_metadata=adata.obs,
+            celltype_column=args.celltype_column,
+            assignment_threshold=0.8,
         )
-        # zscore factor values across celltypes
-        df_celltype = pd.DataFrame(
-            zscore(df_celltype.to_numpy(), axis=0),
-            index=df_celltype.index,
-            columns=df_celltype.columns,
-        )
-        # Assign each factor to the celltype with the highest value
-        temp_dict = df_celltype.idxmax(axis=0).to_dict()
-        seed_A = seed_A.rename(index=temp_dict).T
-        # Select cell-state factors (celltypes) that have assignment values > 0.8
-        seeds_U_ct[gseed[i]] = (
-            seed_A.apply(lambda x: x > 0.8, axis=1)
-            .apply(lambda x: x.index[x].tolist(), axis=1)
-            .to_dict()
-        )
+
+        seeds_U_ct[gseed[i]] = U_ct_dict
+
+        livi_associations = livi_associations.loc[
+            livi_associations.SNP_id.isin(intersect_snps_one)
+        ]
+        GxC_effects_all_snps = []
+        for snp in intersect_snps_one:
+            GxC_effect_snp = calculate_GxC_effect(
+                LIVI_associations=livi_associations,
+                SNP_id=snp,
+                cell_state_latent=zbase,
+                A=seed_A,
+            )
+            GxC_effects_all_snps.append(GxC_effect_snp)
+        GxC_effects_all_snps = pd.concat(GxC_effects_all_snps, axis=1, ignore_index=False)
+        seeds_GxC_effects.append(GxC_effects_all_snps)
 
     seeds_U_ct_df = pd.DataFrame.from_dict(seeds_U_ct, orient="index")
 
@@ -607,6 +645,8 @@ def main(args):
             lambda x: seeds_U_ct_df.loc[x.random_seed, x.Factor], axis=1
         )
     )
+    ## N_celltypes should be either 1 or None, after changing the U to celltype assignment approach
+    associations_all_seeds = associations_all_seeds.loc[associations_all_seeds.Celltypes.notna()]
     associations_all_seeds = associations_all_seeds.assign(
         N_celltypes=associations_all_seeds.apply(lambda x: len(set(x.Celltypes)), axis=1)
     )
@@ -654,6 +694,12 @@ def main(args):
     if args.prs:
         filename = filename.replace(".png", "_PRS.png")
     plt.savefig(os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=True)
+    plt.savefig(
+        os.path.join(output_dir, filename.replace("png", "svg")),
+        dpi=400,
+        bbox_inches="tight",
+        transparent=True,
+    )
     plt.close()
 
     # Sample SNPs to plot
@@ -798,6 +844,94 @@ def main(args):
         bbox_inches="tight",
         transparent=True,
     )
+    plt.savefig(
+        os.path.join(output_dir, filename.replace("Sankey", "histogram").replace("png", "svg")),
+        dpi=400,
+        bbox_inches="tight",
+        transparent=True,
+    )
+    plt.close()
+
+    print(
+        "------------  Assessing concordance between different random seeds at the single-cell level ------------"
+    )
+
+    corrs_across_runs_pearson = []
+    corrs_across_runs_pearson_pvals = []
+    for i, j in combinations(range(len(seeds_GxC_effects)), 2):
+        corrs = pearsonr(
+            x=seeds_GxC_effects[i].abs(),
+            y=seeds_GxC_effects[j].abs(),
+            axis=0,
+            alternative="greater",
+        )
+        corrs_across_runs_pearson.append(corrs.statistic)
+        corrs_across_runs_pearson_pvals.append(corrs.pvalue)
+
+    corrs_across_runs_pearson = np.vstack(corrs_across_runs_pearson)
+    corrs_across_runs_pearson_pvals = np.vstack(corrs_across_runs_pearson_pvals)
+    mean_corrs_across_runs_pearson = np.mean(corrs_across_runs_pearson, axis=0)
+    mean_pval_across_runs_pearson = np.mean(corrs_across_runs_pearson_pvals, axis=0)
+
+    ## Histogram
+    sns.histplot(mean_corrs_across_runs_pearson, bins="fd", color="navy")
+    plt.xlabel("Pearson's $ρ$", fontsize=15)
+    plt.ylabel("Counts", fontsize=15)
+    plt.title(
+        f"Pearson's $ρ$ between {variable} effect on cells across {len(gseed)} different random model initialisations"
+    )
+    filename = (
+        f"{args.model_prefix}_Histogram_{variable}-effect-concordance-different-seeds-single-cell-level_Pearson.png"
+        if args.model_prefix is not None
+        else f"Histogram_{variable}-effect-concordance-different-seeds-single-cell-level_Pearson.png"
+    )
+    if args.prs:
+        filename = filename.replace(".png", "_PRS.png")
+    plt.savefig(
+        os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
+    )
+    plt.savefig(
+        os.path.join(output_dir, filename.replace("png", "svg")),
+        dpi=400,
+        bbox_inches="tight",
+        transparent=True,
+    )
+    plt.close()
+
+    ## Barplot
+    sorted_indices = np.argsort(mean_corrs_across_runs_pearson)[::-1]
+    correlations_sorted = mean_corrs_across_runs_pearson[sorted_indices]
+    pvalues_sorted = mean_pval_across_runs_pearson[sorted_indices]
+    snp_names_sorted = np.array(list(intersect_snps_one))[sorted_indices]
+    pval_colors = ["cornflowerblue" if p < 0.05 else "grey" for p in pvalues_sorted]
+
+    plt.figure(figsize=(10, 6))
+    plt.bar(range(len(correlations_sorted)), correlations_sorted, color=pval_colors)
+    # Labels and title
+    plt.axhline(y=0, color="black", linewidth=1)
+    plt.xticks(range(len(correlations_sorted)), snp_names_sorted, rotation=90)
+    plt.xlabel(variable)
+    plt.ylabel("Pearson's $ρ$", fontsize=15)
+    plt.legend(
+        handles=[
+            plt.Line2D([0], [0], color="cornflowerblue", lw=4, label="Significant (p<0.05)"),
+            plt.Line2D([0], [0], color="grey", lw=4, label="Not Significant"),
+        ],
+        loc="upper right",
+    )
+    plt.title(
+        f"Pearson's $ρ$ between {variable} effect on cells across {len(gseed)} different random model initialisations"
+    )
+    filename = filename.replace("Histogram", "Barplot")
+    plt.savefig(
+        os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
+    )
+    plt.savefig(
+        os.path.join(output_dir, filename.replace("png", "svg")),
+        dpi=400,
+        bbox_inches="tight",
+        transparent=True,
+    )
     plt.close()
 
     if args.test_aggregated_factors:
@@ -832,9 +966,7 @@ def main(args):
             seed_GxC_dec = seed_GxC_dec.assign(random_seed=[gseed[i]] * seed_GxC_dec.shape[0])
             seeds_GxC_decoder.append(seed_GxC_dec)
 
-        factor_correlations = correlate_factors_across_runs(
-            seeds_GxC_decoder, args.factor_correlation_theshold
-        )
+        factor_correlations = correlate_factors_across_runs(seeds_GxC_decoder)
         robust_factors = aggregate_correlated_factors_across_runs(
             seeds_U, args.factor_correlation_theshold, factor_correlations=factor_correlations
         )
@@ -866,9 +998,8 @@ def main(args):
             quantile_norm=args.quantile_normalise,
             variance_threshold=None,
             variable_factors=None,
-            qval_threshold=(
-                args.multiple_testing_threshold if args.multiple_testing_threshold else None
-            ),
+            fdr_method=args.fdr_method,
+            fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
             return_associations=True,
         )
 
@@ -877,7 +1008,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                CxG_effects_LIVI=associations,
+                GxC_effects_LIVI=associations,
                 factor_assignment_matrix=None,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -997,10 +1128,17 @@ if __name__ == "__main__":
         help="Column name in cell metadata (adata.obs) indicating the experimental batch the sample (cell) comes from.",
     )
     parser.add_argument(
-        "--multiple_testing_threshold",
+        "--fdr_threshold",
         "-fdr",
         type=float,
-        help="Storey q-value threshold for multiple testing correction.",
+        help="False discovery rate (FDR) threshold for multiple testing correction.",
+    )
+    parser.add_argument(
+        "--fdr_method",
+        default="Benjamini-Hochberg",
+        type=str,
+        choices=["Storey", "qvalue", "Benjamini-Hochberg", "BH", "Benjamini-Yekutieli", "BY"],
+        help="False discovery rate (FDR) controlling method for multiple testing correction.",
     )
     parser.add_argument(
         "--known_trans_eQTLs",
