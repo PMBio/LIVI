@@ -826,6 +826,7 @@ def cell_state_factors_heatmap(
     factors: Optional[Union[List[int], np.ndarray]] = None,
     z_score: Optional[int] = None,
     color_map: Optional[str] = None,
+    label_fontsize: Optional[int] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
     return_df: bool = False,
@@ -872,7 +873,7 @@ def cell_state_factors_heatmap(
 
     if color_map is None:
         color_map = "vlag" if z_score is not None else None
-    if color_map == "vlag":
+    if color_map in ["vlag", "RdBu_r"]:
         sns.clustermap(
             df_celltype,
             row_cluster=row_cluster,
@@ -882,6 +883,7 @@ def cell_state_factors_heatmap(
             cmap=color_map,
             center=0.0,
             figsize=(10, 10),
+            annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
             rasterized=ext == ".svg",
         )
     else:
@@ -893,13 +895,14 @@ def cell_state_factors_heatmap(
             z_score=z_score,
             cmap=color_map,
             figsize=(10, 10),
+            annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
             rasterized=ext == ".svg",
         )
     if savefig:
         plt.savefig(
             f"{prefix}_Heatmap_cell-state-Factors_Celltype{ext}",
             bbox_inches="tight",
-            dpi=200,
+            dpi=400,
             transparent=True,
         )
 
