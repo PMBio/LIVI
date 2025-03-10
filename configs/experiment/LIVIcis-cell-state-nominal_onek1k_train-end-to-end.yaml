@@ -1,0 +1,23 @@
+# @package _global_
+
+defaults:
+  - override /model: LIVIcis_nominal_wo_adv_onek1k_10K-HVG-HEX.yaml
+  - override /datamodule: onek1k_10K-HVG-HEX_LIVIcis_nominal.yaml
+  - override /callbacks: default_livi2.yaml
+  - override /trainer: default.yaml
+  - override /paths: pc007_trainable-A.yaml
+  - override /logger: tensorboard.yaml
+callbacks:
+  livi_checkpoint:
+    filename: LIVI2_onek1k_HVG-HEX_{epoch:04d}_{hp_metric:.5f}
+trainer:
+  accelerator: gpu
+  deterministic: true
+  devices:
+    - 0
+  enable_checkpointing: true
+  logger: true
+  max_epochs: 600
+  min_epochs: 140
+task_name: LIVIcis-cell-state-NOMINAL_zdim15-Softmax_700-gxc_5-persistent_60-0-warm-up_no-adversary_Gseed200_hvg-hex-10K_larger-encoder
+seed: 50

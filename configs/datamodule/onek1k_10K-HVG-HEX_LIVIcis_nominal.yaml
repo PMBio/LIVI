@@ -1,0 +1,18 @@
+_target_: src.data_modules.livi_data.LIVIDataModule
+
+adata: ${paths.data_dir}/OneK1K/LogNorm_counts_across_celltypes_DCRM_protein-coding_Azimuth_only-immune-cells_HVG-HEX-10K.h5ad
+y_key: individual
+use_size_factor: True
+size_factor_key: null
+layer_key: counts
+covariates_keys: [pool, sex]
+known_cis_eqtls: ${paths.data_dir}/OneK1K/Known_NOMINAL_cis_associations_for_LIVI_HVG-HEX-10K.tsv
+eqtl_genotypes: ${paths.data_dir}/OneK1K/Known_NOMINAL_cis_associations_for_LIVI_HVG-HEX-10K_Genotypes.tsv
+data_split: [1.0]
+batch_size: 1024
+num_workers: 2
+seed: 32
+shuffle: True
+pin_memory: True
+drop_last: True
+strict: False
