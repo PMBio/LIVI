@@ -23,4 +23,4 @@ trainer:
   enable_checkpointing: True
   deterministic: True
 
-task_name: vae_z900_linear_linear-decoder
+task_name: vae_z15_nonlinear-decoder_large
