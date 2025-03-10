@@ -1129,7 +1129,7 @@ def QQplot(
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
 
 
-def plot_U_factor_similarity(
+def plot_U_factor_similarity(  ### REVIEW - UPDATE
     U: pd.DataFrame,
     associated_factors: list,
     A: pd.DataFrame,
@@ -1251,7 +1251,7 @@ def plot_U_factor_similarity(
     plt.close()
 
 
-def plot_ID_similarity(
+def plot_ID_similarity(  ### REVIEW - UPDATE
     U: pd.DataFrame,
     associated_factors: list,
     donor_metadata: Optional[pd.DataFrame] = None,
@@ -1960,11 +1960,7 @@ def visualize_GxC_effect(
                 raise FileNotFoundError(
                     "No factor assignment matrix found in `model_results_dir`. Make sure the filename ends in 'factor_assignment_matrix.tsv'."
                 )
-
-    if gene is not None:
-        if hgnc_column is not None:
-            hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
-        if GxC_decoder is None:
+        if GxC_decoder is None and gene is not None:
             GxC_decoder = [
                 re.match("(.*GxC_decoder.tsv)", f)
                 for f in files
@@ -1979,6 +1975,10 @@ def visualize_GxC_effect(
                 raise FileNotFoundError(
                     "No GxC decoder found in `model_results_dir`. Make sure the filename ends in 'GxC_decoder.tsv'."
                 )
+    if gene is not None:
+        assert (
+            GxC_decoder is not None
+        ), "To visualize effect on individual genes either `GxC_decoder` cannot be `None`."
         GxC_effect = calculate_GxC_gene_effect(
             LIVI_associations=GxC_associations,
             SNP_id=SNP,
@@ -1987,6 +1987,12 @@ def visualize_GxC_effect(
             GxC_decoder=GxC_decoder,
         )
         GxC_effect = GxC_effect.filter(gene)
+        if hgnc_column is not None:
+            hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
+            # GxC_effect = GxC_effect.rename(columns=hgnc_name)
+        else:
+            hgnc_name = None
+
     else:
         GxC_effect = calculate_GxC_effect(
             LIVI_associations=GxC_associations,
