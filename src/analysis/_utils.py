@@ -177,7 +177,7 @@ def assign_U_to_celltype(
 
     Parameters
     ----------
-        cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
+        cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space (cells x factors).
         A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
         cell_metadata (pd.DataFrame): DataFrame containing cell information, such as celltype, donor ID etc.
             Cell IDs must be the index, and they must be the same as in `cell_state_latent`.
@@ -190,7 +190,7 @@ def assign_U_to_celltype(
     """
 
     U_not_assigned = A.columns[
-        A[A > assignment_threshold].isna().sum(axis=0) == cell_metadata[celltype_column].nunique()
+        A[A >= assignment_threshold].isna().sum(axis=0) == cell_state_latent.shape[1]
     ]
     celltypes_factors = cell_state_latent.merge(
         cell_metadata[celltype_column], right_index=True, left_index=True, how="left"

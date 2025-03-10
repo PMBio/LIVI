@@ -826,6 +826,7 @@ def cell_state_factors_heatmap(
     factors: Optional[Union[List[int], np.ndarray]] = None,
     z_score: Optional[int] = None,
     color_map: Optional[str] = None,
+    label_fontsize: Optional[int] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
     return_df: bool = False,
@@ -872,7 +873,7 @@ def cell_state_factors_heatmap(
 
     if color_map is None:
         color_map = "vlag" if z_score is not None else None
-    if color_map == "vlag":
+    if color_map in ["vlag", "RdBu_r"]:
         sns.clustermap(
             df_celltype,
             row_cluster=row_cluster,
@@ -882,6 +883,7 @@ def cell_state_factors_heatmap(
             cmap=color_map,
             center=0.0,
             figsize=(10, 10),
+            annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
             rasterized=ext == ".svg",
         )
     else:
@@ -893,13 +895,14 @@ def cell_state_factors_heatmap(
             z_score=z_score,
             cmap=color_map,
             figsize=(10, 10),
+            annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
             rasterized=ext == ".svg",
         )
     if savefig:
         plt.savefig(
             f"{prefix}_Heatmap_cell-state-Factors_Celltype{ext}",
             bbox_inches="tight",
-            dpi=200,
+            dpi=400,
             transparent=True,
         )
 
@@ -1126,79 +1129,7 @@ def QQplot(
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
 
 
-def plot_A_sparsity(
-    A: pd.DataFrame,
-    associated_factors: list,
-    plot_title: str,
-    savefig: Optional[str] = None,
-    format: Optional[str] = None,
-) -> None:
-    """Plot the sparsity of LIVI's design matrix, A and clusters formed between CxG factors based
-    on their assignments to cell-state factors.
-
-    Parameters
-    ----------
-        A (pd.DataFrame): LIVI's design matrix, A.
-        associated_factors (list): List of CxG factors associated with genetic variables.
-        plot_title (str): Title for the plot.
-        savefig (str or None): If provided, the absolute path to save the generated plots. Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
-            extension of savefig, if savefig is not None.
-
-    Returns
-    -------
-        None
-    """
-
-    if savefig:
-        prefix, ext = os.path.splitext(savefig)
-        ext = "." + format if format else ".png" if ext == "" else ext
-    else:
-        ext = "." + format if format else ".png"
-
-    fig, axs = plt.subplots(ncols=2, figsize=(12, 5))
-    sns.histplot(
-        A.apply(lambda x: x.sum(), axis=0),
-        kde=True,
-        color="cornflowerblue",
-        ax=axs[0],
-        rasterized=ext == ".svg",
-    )
-    axs[0].set_title(
-        "\n".join(wrap("Number of assigned cell-state factors for each GxC factor", 60)),
-        fontsize=13,
-    )
-    axs[0].tick_params(axis="both", labelsize=12)
-
-    sns.histplot(
-        A.filter(associated_factors).apply(lambda x: x.sum(), axis=0),
-        kde=True,
-        color="navy",
-        bins=20,
-        ax=axs[1],
-        rasterized=ext == ".svg",
-    )
-    axs[1].set_title(
-        "\n".join(
-            wrap("Number of assigned cell-state factors for each SIGNIFICANT GxC factor", 60)
-        ),
-        fontsize=13,
-    )
-    axs[1].tick_params(axis="both", labelsize=12)
-
-    fig.suptitle(plot_title)
-    fig.tight_layout()
-    if savefig:
-        plt.savefig(
-            f"{prefix}_A-design-matrix_sparsity{ext}",
-            dpi=200,
-            transparent=True,
-            bbox_inches="tight",
-        )
-    plt.close()
-
-
-def plot_U_factor_similarity(
+def plot_U_factor_similarity(  ### REVIEW - UPDATE
     U: pd.DataFrame,
     associated_factors: list,
     A: pd.DataFrame,
@@ -1320,7 +1251,7 @@ def plot_U_factor_similarity(
     plt.close()
 
 
-def plot_ID_similarity(
+def plot_ID_similarity(  ### REVIEW - UPDATE
     U: pd.DataFrame,
     associated_factors: list,
     donor_metadata: Optional[pd.DataFrame] = None,
@@ -2029,11 +1960,7 @@ def visualize_GxC_effect(
                 raise FileNotFoundError(
                     "No factor assignment matrix found in `model_results_dir`. Make sure the filename ends in 'factor_assignment_matrix.tsv'."
                 )
-
-    if gene is not None:
-        if hgnc_column is not None:
-            hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
-        if GxC_decoder is None:
+        if GxC_decoder is None and gene is not None:
             GxC_decoder = [
                 re.match("(.*GxC_decoder.tsv)", f)
                 for f in files
@@ -2048,6 +1975,10 @@ def visualize_GxC_effect(
                 raise FileNotFoundError(
                     "No GxC decoder found in `model_results_dir`. Make sure the filename ends in 'GxC_decoder.tsv'."
                 )
+    if gene is not None:
+        assert (
+            GxC_decoder is not None
+        ), "To visualize effect on individual genes either `GxC_decoder` cannot be `None`."
         GxC_effect = calculate_GxC_gene_effect(
             LIVI_associations=GxC_associations,
             SNP_id=SNP,
@@ -2056,6 +1987,12 @@ def visualize_GxC_effect(
             GxC_decoder=GxC_decoder,
         )
         GxC_effect = GxC_effect.filter(gene)
+        if hgnc_column is not None:
+            hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
+            # GxC_effect = GxC_effect.rename(columns=hgnc_name)
+        else:
+            hgnc_name = None
+
     else:
         GxC_effect = calculate_GxC_effect(
             LIVI_associations=GxC_associations,
