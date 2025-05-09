@@ -39,6 +39,223 @@ plt.rcParams["axes.grid"] = False
 rng = np.random.default_rng()
 
 
+## Customize gseapy plot (https://github.com/zqfang/GSEApy/blob/master/gseapy/plot.py)
+from gseapy.plot import DotPlot
+
+
+class gp_DotPlot(DotPlot):
+
+    def __init__(
+        self,
+        df: pd.core.frame.DataFrame,
+        x: Optional[str] = None,
+        y: str = "Term",
+        hue: str = "Adjusted P-value",
+        dot_scale: float = 5.0,
+        x_order: Optional[List[str]] = None,
+        y_order: Optional[List[str]] = None,
+        thresh: float = 0.05,
+        n_terms: int = 10,
+        title: str = "",
+        figsize: Tuple[float, float] = (6, 5.5),
+        cmap: str = "viridis_r",
+        ofname: Optional[str] = None,
+        ax: Optional[str] = None,
+        fig: Optional[str] = None,
+        **kwargs: Any,
+    ):
+        super().__init__(
+            df=df,
+            x=x,
+            y=y,
+            hue=hue,
+            dot_scale=dot_scale,
+            x_order=x_order,
+            y_order=y_order,
+            thresh=thresh,
+            n_terms=n_terms,
+            title=title,
+            figsize=figsize,
+            cmap=cmap,
+            ofname=ofname,
+            **kwargs,
+        )
+
+        self.axis = ax
+        self.fig = fig
+
+    def get_ax(self):
+        """Setup figure axes."""
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+        from matplotlib.figure import Figure
+
+        # create fig
+        if self.axis is not None and self.fig is not None:
+            ax = self.axis
+        else:
+            if hasattr(sys, "ps1") and (self.ofname is None):
+                # working inside python console, show figure
+                fig = plt.figure(figsize=self.figsize)
+            else:
+                # If working on commandline, don't show figure
+                fig = Figure(figsize=self.figsize)
+                _canvas = FigureCanvas(fig)
+            ax = fig.add_subplot(111)
+            self.fig = fig
+        return ax
+
+    def scatter(
+        self,
+        outer_ring: bool = False,
+        rasterize: bool = False,
+    ):
+        """Build scatter."""
+        from matplotlib.category import UnitData
+
+        # scatter colormap range
+        # df = df.assign(colmap=self.data[self.colname].round().astype("int"))
+        # make area bigger to better visualization
+        # area = df["Hits_ratio"] * plt.rcParams["lines.linewidth"] * 100
+        df = self.data.assign(
+            area=(self.data["Hits_ratio"] * self.scale * plt.rcParams["lines.markersize"]).pow(2)
+        )
+        colmap = df[self.colname].astype(int)
+        vmin = np.percentile(colmap.min(), 2)
+        vmax = np.percentile(colmap.max(), 98)
+        # vmin = np.percentile(df.colmap.min(), 2)
+        # vmax = np.percentile(df.colmap.max(), 98)
+        ax = self.get_ax()
+        # if self.x is None:
+        x, xlabel = self.set_x()
+        y = self.y
+        # set x, y order
+        xunits = UnitData(self.get_x_order()) if self.x_order else None
+        yunits = UnitData(self.get_y_order()) if self.y_order else None
+
+        # outer ring
+        if outer_ring:
+            smax = df["area"].max()
+            # TODO:
+            # Matplotlib BUG: when setting edge colors,
+            # there's the center of scatter could not aligned.
+            # Must set backend to TKcario... to fix it
+            # Instead, I just add more dots in the plot to get the ring
+            blk_sc = ax.scatter(
+                x=x,
+                y=y,
+                s=smax * 1.6,
+                edgecolors="none",
+                c="black",
+                data=df,
+                marker=self.marker,
+                xunits=xunits,  # set x categorical order
+                yunits=yunits,  # set y categorical order
+                zorder=0,
+                rasterized=rasterize,
+            )
+            wht_sc = ax.scatter(
+                x=x,
+                y=y,
+                s=smax * 1.3,
+                edgecolors="none",
+                c="white",
+                data=df,
+                marker=self.marker,
+                xunits=xunits,  # set x categorical order
+                yunits=yunits,  # set y categorical order
+                zorder=1,
+                rasterized=rasterize,
+            )
+            # data = np.array(rg.get_offsets()) # get data coordinates
+        # inner circle
+        sc = ax.scatter(
+            x=x,
+            y=y,
+            data=df,
+            s="area",
+            edgecolors="none",
+            c=self.colname,
+            cmap=self.cmap,
+            vmin=vmin,
+            vmax=vmax,
+            marker=self.marker,
+            xunits=xunits,  # set x categorical order
+            yunits=yunits,  # set y categorical order
+            zorder=2,
+            rasterized=rasterize,
+        )
+        ax.set_xlabel(xlabel, fontsize=12, fontweight="bold")
+        ax.xaxis.set_tick_params(labelsize=25)
+        ax.yaxis.set_tick_params(labelsize=27)
+        ax.set_axisbelow(True)  # set grid blew other element
+        ax.grid(axis="y", zorder=-1)  # zorder=-1.0
+        ax.margins(x=0.20)
+
+        ax.set_title(self.title, fontsize=30, fontweight="bold")
+        self.add_colorbar(sc)
+
+        return ax
+
+
+def make_gp_dotplot(
+    df: pd.DataFrame,
+    column: str = "Adjusted P-value",
+    x: Optional[str] = None,
+    y: str = "Term",
+    x_order: Union[List[str], bool] = False,
+    y_order: Union[List[str], bool] = False,
+    title: str = "",
+    cutoff: float = 0.05,
+    top_term: int = 10,
+    size: float = 5,
+    figsize: Tuple[float, float] = (4, 6),
+    cmap: str = "viridis_r",
+    ofname: Optional[str] = None,
+    xticklabels_rot: Optional[float] = None,
+    yticklabels_rot: Optional[float] = None,
+    marker: str = "o",
+    show_ring: bool = False,
+    ax: Optional[str] = None,
+    fig: Optional[str] = None,
+    rasterize: bool = False,
+    **kwargs: Any,
+):
+
+    dot = gp_DotPlot(
+        df=df,
+        x=x,
+        y=y,
+        x_order=x_order,
+        y_order=y_order,
+        hue=column,
+        title=title,
+        thresh=cutoff,
+        n_terms=int(top_term),
+        dot_scale=size,
+        figsize=figsize,
+        cmap=cmap,
+        ofname=ofname,
+        marker=marker,
+        ax=ax,
+        fig=fig,
+    )
+    ax = dot.scatter(outer_ring=show_ring, rasterize=rasterize)
+
+    if xticklabels_rot:
+        for label in ax.get_xticklabels():
+            label.set_ha("right")
+            label.set_rotation(xticklabels_rot)
+
+    if yticklabels_rot:
+        for label in ax.get_yticklabels():
+            label.set_ha("right")
+            label.set_rotation(yticklabels_rot)
+
+    if ofname is None:
+        return ax
+    dot.fig.savefig(ofname, bbox_inches="tight", dpi=300)
+
+
 def visualise_cell_state_latent(
     z: pd.DataFrame,
     cell_metadata: pd.DataFrame,

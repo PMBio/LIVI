@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Tuple, Union
 
+import gseapy as gp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -10,6 +11,8 @@ import torch
 import umap
 from anndata import AnnData
 from scipy.stats import iqr
+
+from src.analysis.plotting import make_gp_dotplot
 
 pl.seed_everything(32)
 
@@ -293,3 +296,349 @@ def calculate_GxC_gene_effect(
     )
 
     return GxC_effect_gene
+
+
+def aggregate_cell_counts(
+    adata: AnnData,
+    aggregate_cols: List[str],
+    sum_gene: bool = False,
+    layer: Optional[str] = None,
+) -> AnnData:
+    """Aggregates single-cell data into pseudobulk profiles based on specified cell metadata
+    columns.
+
+    This function groups cells in an AnnData object (`adata`) by the specified `aggregate_cols` and averages
+    the expression data across those cells to create pseudobulk profiles. It can also aggregate values from a
+    specified layer in `adata.layers` instead of the primary data matrix in `adata.X`. Optionally, it can also
+    sum the expression over all genes.
+
+    Parameters:
+    ----------
+        adata (anndata.AnnData): AnnData object containing gene counts in `adata.X`, cell metadata in `adata.obs`
+            and gene metadata in `adata.var`.
+        aggregate_cols (List[str]): Column names from `adata.obs` used to group cells for aggregation (e.g., ['donor']).
+        sum_gene (bool): If True, sums expression across genes (rows). If False, retains gene-level resolution in the
+            aggregated expression. Default is False.
+        layer (Optional[str]): If specified, aggregates data from the given layer instead of `adata.X`. Default is None,
+            i.e. aggregate data in `adata.X`
+
+    Returns:
+    -------
+        adata_aggr(anndata.AnnData): An `AnnData` object with pseudobulk expression (mean across each group of the specified `aggregate_cols`).
+            The `obs` contains metadata about the aggregated groups, including the number of cells aggregated and the original cell IDs.
+            The `var` contains original gene metadata, or a summary row if `sum_gene=True`.
+    """
+
+    grouped = adata.obs.groupby(by=aggregate_cols, observed=True)
+    grouped_obs = adata.obs.filter(aggregate_cols).drop_duplicates().reset_index(drop=True)
+
+    init = True
+    for k, v in grouped.groups.items():
+        pseudocell = "__".join(k)
+        if init:
+            if layer:
+                pseudoexpression_matrix = adata[v].layers[layer].mean(axis=0)  # mean across donors
+            else:
+                pseudoexpression_matrix = adata[v].X.mean(axis=0)
+            if sum_gene:
+                pseudoexpression_matrix = pseudoexpression_matrix.sum(axis=1)  # sum across genes
+
+            metadata = (
+                adata.obs.loc[v]
+                .filter(aggregate_cols)
+                .drop_duplicates()
+                .reset_index(drop=True)
+                .rename(index={0: pseudocell})
+            )
+            # Save also the number of cells that were aggregated as well as their IDs
+            metadata = pd.concat(
+                [
+                    metadata,
+                    pd.DataFrame(
+                        {"ncells_aggregated": len(v), "cell_ids": ", ".join(v.tolist())},
+                        index=metadata.index,
+                    ),
+                ],
+                axis=1,
+            )
+            init = False
+        else:
+            if layer:
+                pseudoexpression = adata[v].layers[layer].mean(axis=0)
+            else:
+                pseudoexpression = adata[v].X.mean(axis=0)
+            if sum_gene:
+                pseudoexpression = pseudoexpression.sum(axis=1)  # sum across genes
+
+            pseudoexpression_matrix = np.vstack([pseudoexpression_matrix, pseudoexpression])
+            tmp = (
+                adata.obs.loc[v]
+                .filter(aggregate_cols)
+                .drop_duplicates()
+                .reset_index(drop=True)
+                .rename(index={0: pseudocell})
+            )
+            metadata = pd.concat(
+                [
+                    metadata,
+                    pd.concat(
+                        [
+                            tmp,
+                            pd.DataFrame(
+                                {"ncells_aggregated": len(v), "cell_ids": ", ".join(v.tolist())},
+                                index=tmp.index,
+                            ),
+                        ],
+                        axis=1,
+                    ),
+                ],
+                axis=0,
+            )
+    # Check that the aggregation was done correctly
+    assert metadata.shape[0] == grouped_obs.shape[0]
+
+    ## If summing up the gene counts:
+    if sum_gene:
+        if "GeneSymbol" in adata.var.columns:
+            gene_meta = pd.DataFrame(
+                data=[" and ".join(adata.var.GeneSymbol)],
+                index=["__".join(adata.var.index)],
+                columns=["GeneSymbol"],
+            )
+        elif "features" in adata.var.columns:
+            gene_meta = pd.DataFrame(
+                data=[" and ".join(adata.var.features)],
+                index=["__".join(adata.var.index)],
+                columns=["GeneSymbol"],
+            )
+        else:
+            gene_meta = pd.DataFrame(index=["__".join(adata.var.index)])
+    else:
+        gene_meta = adata.var
+
+    adata_aggr = AnnData(X=np.asarray(pseudoexpression_matrix), obs=metadata, var=gene_meta)
+
+    return adata_aggr
+
+
+def annotate_factor_GSEA(
+    factor_loadings: pd.Series,
+    adata_var: pd.DataFrame,
+    hgnc_column: str,
+    n_top_genes: int = 30,
+    background_genes: Optional[List[str]] = None,
+    databases: Optional[List[str]] = None,
+    plot_results: bool = False,
+    figsize: Tuple[int, int] = (8, 13),
+    n_top_terms: int = 5,
+    savefig: Optional[str] = None,
+) -> Tuple[List[str], List[str]]:
+    """Annotates factors by gene set enrichment analysis (GSEA) on top-loading genes for the given
+    factor and optionally plots enriched terms.
+
+    Parameters:
+    ----------
+        factor_loadings (pd.Series): Gene loadings for a factor, indexed by gene IDs matching `adata_var`.
+        adata_var (pd.DataFrame): DataFrame corresponding to `adata.var` containing gene metadata.
+        hgnc_column (str): Name of the column in `adata_var` that contains HGNC gene symbols.
+        n_top_genes (int): Number of top absolute-loading genes to use for the enrichment analysis. Default is 30.
+        background_genes (Optional[List[str]]): List of background genes for the enrichment analysis.
+            If None, all genes in `adata_var[hgnc_column]` are used. Default is None.
+        databases (Optional[List[str]]): List of gene set databases to query (e.g., "GO_Biological_Process_2023").
+            If None, a default list is used. Default is None.
+        plot_results (bool): Whether to generate a dotplot of the top enriched terms. Default is False.
+        figsize (Tuple[int, int]): Figure size if `plot_results` is True. Default is (8, 13).
+        n_top_terms (int): Number of top enriched terms to display in the plot. Default is 5.
+        savefig (Optional[str]): Absolute path of the filename to save the plot. If None, the plot is not saved.
+            Default is None.
+
+    Returns:
+    -------
+        top_pathway (List[str]): Name of the top enriched pathway with the smallest adjusted p-value.
+            If more than one pathways have the same p-value, all of them are included.
+        pathway_genes (List[str]): Genes involved in the top enriched pathway(s).
+    """
+
+    if databases is None:
+        databases_bio = [
+            "GO_Biological_Process_2023",
+            "GO_Molecular_Function_2023",
+            "KEGG_2021_Human",
+            "Reactome_2022",
+        ]
+    else:
+        databases_bio = databases
+
+    if background_genes is None:
+        background_genes = adata_var[hgnc_column].tolist()
+
+    enr_bio = gp.enrichr(
+        gene_list=adata_var.loc[factor_loadings.abs().nlargest(n_top_genes).index][
+            hgnc_column
+        ].tolist(),
+        gene_sets=databases_bio,
+        background=background_genes,
+        outdir=None,
+    )
+    enr_bio_sign = enr_bio.results.loc[enr_bio.results["Adjusted P-value"] <= 0.05]
+    top_pathway = enr_bio_sign.nsmallest(
+        n=1, columns=["Adjusted P-value"], keep="all"
+    ).Term.tolist()
+    pathway_genes = enr_bio_sign.loc[enr_bio_sign.Term.isin(top_pathway)].Genes.tolist()
+
+    if plot_results:
+        fig, axs = plt.subplots(figsize=figsize, constrained_layout=True)
+        make_gp_dotplot(
+            df=enr_bio_sign,
+            x="Gene_set",
+            y="Term",
+            column="Adjusted P-value",
+            size=6,
+            top_term=n_top_terms,
+            title=f"Top {n_top_genes} absolute gene loadings",
+            show_ring=True,
+            marker="o",
+            xticklabels_rot=30,
+            ax=axs,
+            fig=fig,
+            rasterize=True,
+        )
+        axs.set_xlabel("")
+        if savefig is not None:
+            plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
+
+    return top_pathway, pathway_genes
+
+
+def find_cells_with_high_loadings_for_factor(
+    factor_loadings: Union[np.ndarray, pd.Series],
+    iqr_threshold: float = 0.5,
+    value: Optional[float] = None,
+    plot: bool = True,
+) -> Union[np.ndarray, pd.Series]:
+    """Identifies cells with high loadings for a given factor, using either an IQR-based cutoff
+    (`iqr_threshold`) or a user-defined threshold (`value`).
+
+    Parameters:
+    ----------
+        factor_loadings (Union[np.ndarray, pd.Series]): Array or Series of factor loadings per cell.
+        iqr_threshold (float): Multiplier for the interquartile range (IQR) to define outlier threshold. Default is 0.5.
+        value (Optional[float]): If specified, this value overrides the IQR-based upper cutoff. Default is None.
+        plot (bool): If True, plots a histogram of loadings with thresholds. Default is True.
+
+    Returns:
+    -------
+        high_loading_cells (Union[np.ndarray, pd.Series]): Cells with high factor loadings. Returns a `pd.Series` if
+            `factor_loadings` is a `pd.Series`, otherwise returns a NumPy array of selected values.
+    """
+    if isinstance(factor_loadings, pd.Series):
+        name = factor_loadings.name
+        cell_idx = factor_loadings.index
+        factor_loadings = factor_loadings.to_numpy()
+    else:
+        name = "Factor loadings"
+        cell_idx = None
+
+    p_75 = np.percentile(factor_loadings, 75)
+    p_25 = np.percentile(factor_loadings, 25)
+    IQR = iqr(factor_loadings)
+    mean_f = np.mean(factor_loadings)
+
+    lower_cutoff = p_25 - iqr_threshold * IQR
+    upper_cutoff = value if value is not None else p_75 + iqr_threshold * IQR
+
+    cell_subset = np.where(factor_loadings > upper_cutoff)[0]
+
+    if plot:
+        sns.histplot(factor_loadings, kde=True, color="royalblue")
+        plt.xlabel(f"{name}")
+        ax = plt.gca()
+        y_max = ax.get_ylim()[1]
+        plt.vlines(x=mean_f, ymin=0, ymax=y_max, color="darkslategrey", linestyles="--")
+        plt.vlines(x=upper_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
+        plt.vlines(x=lower_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
+
+    return (
+        pd.Series(factor_loadings[cell_subset], index=cell_idx[cell_subset], name=name)
+        if cell_idx is not None
+        else factor_loadings[cell_subset]
+    )
+
+
+def assign_factor_to_known_pathways(
+    known_pathways: pd.DataFrame,
+    gene_loadings: pd.Series,
+    n_top_genes: int = 20,
+    return_pathways_genes: bool = False,
+) -> Union[str, Tuple[str, pd.Series, pd.Series]]:
+    """Ranks top genes for a given factor, and then assigns the factor to known pathway(s) based on
+    pathway occurrences among the top-loading genes.
+
+    Parameters:
+    ----------
+        known_pathways (pd.DataFrame): DataFrame containing known pathway annotations for genes, with columns
+            like 'Geneid' (e.g. ENSEMBL gene ID), 'Gene' (e.g. HGNC gene name), and 'Pathway_Name'.
+        gene_loadings (pd.Series): Series of gene loadings for a given factor. The row indices must correspond to
+            the gene IDs in the `Geneid` column of `known_pathways`.
+        n_top_genes (int): Number of top absolute-loading genes to consider for pathway assignment. Default is 20.
+        return_pathways_genes (bool): If True, also returns gene counts per pathway and contributing genes. Default is False.
+
+    Returns:
+    -------
+        top_pathway (str): Name of the top enriched pathway supported by at least two genes.
+        pathway_counts (pd.Series): (Returned if `return_pathways_genes=True`) Number of top genes supporting each pathway.
+        top_pathways_genes (pd.Series): (Returned if `return_pathways_genes=True`) Top genes supporting each enriched pathway.
+    """
+    info_loadings = pd.DataFrame(gene_loadings.sort_values(ascending=False))
+    info_loadings["rank"] = np.arange(1, info_loadings.shape[0] + 1)
+    info_loadings = info_loadings.merge(
+        pd.DataFrame(gene_loadings.abs().sort_values(ascending=False)).assign(
+            absolute_rank=np.arange(1, gene_loadings.shape[0] + 1)
+        )["absolute_rank"],
+        right_index=True,
+        left_index=True,
+    )
+    info_loadings = info_loadings.merge(
+        known_pathways.filter(regex="ene|Pathway_Name"), on="Geneid", how="left"
+    )
+
+    top_genes = (
+        info_loadings.loc[info_loadings.absolute_rank.isin(np.arange(1, int(n_top_genes) + 1))]
+        .dropna(subset=["Gene"])
+        .Gene.unique()
+    )
+
+    pathway_counts = (
+        info_loadings.loc[info_loadings.Gene.isin(top_genes)]
+        .groupby("Pathway_Name", observed=True)
+        .apply(lambda x: x.Gene.nunique(), include_groups=False)
+        .sort_values(ascending=False)
+    )
+
+    pathway_counts = pathway_counts[pathway_counts >= 2]
+    top_pathway = pathway_counts.nlargest(1, keep="all").index.tolist()
+
+    if len(top_pathway) > 1:
+        top_pathway = ", ".join(top_pathway)
+    elif len(top_pathway) == 1:
+        top_pathway = top_pathway[0]
+    else:
+        top_pathway = None
+
+    if return_pathways_genes:
+        cut_off = pathway_counts.nlargest(1, keep="all").iloc[0] - 4
+        top_pathways_genes = (
+            info_loadings.loc[
+                (info_loadings.Gene.isin(top_genes))
+                & (
+                    info_loadings.Pathway_Name.isin(
+                        pathway_counts[pathway_counts >= cut_off].index
+                    )
+                )
+            ]
+            .groupby("Pathway_Name", observed=True)
+            .apply(lambda x: x.Gene.unique(), include_groups=False)
+        )
+        return top_pathway, pathway_counts, top_pathways_genes
+    else:
+        return top_pathway
