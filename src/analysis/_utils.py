@@ -563,3 +563,82 @@ def find_cells_with_high_loadings_for_factor(
         if cell_idx is not None
         else factor_loadings[cell_subset]
     )
+
+
+def assign_factor_to_known_pathways(
+    known_pathways: pd.DataFrame,
+    gene_loadings: pd.Series,
+    n_top_genes: int = 20,
+    return_pathways_genes: bool = False,
+) -> Union[str, Tuple[str, pd.Series, pd.Series]]:
+    """Ranks top genes for a given factor, and then assigns the factor to known pathway(s) based on
+    pathway occurrences among the top-loading genes.
+
+    Parameters:
+    ----------
+        known_pathways (pd.DataFrame): DataFrame containing known pathway annotations for genes, with columns
+            like 'Geneid' (e.g. ENSEMBL gene ID), 'Gene' (e.g. HGNC gene name), and 'Pathway_Name'.
+        gene_loadings (pd.Series): Series of gene loadings for a given factor. The row indices must correspond to
+            the gene IDs in the `Geneid` column of `known_pathways`.
+        n_top_genes (int): Number of top absolute-loading genes to consider for pathway assignment. Default is 20.
+        return_pathways_genes (bool): If True, also returns gene counts per pathway and contributing genes. Default is False.
+
+    Returns:
+    -------
+        top_pathway (str): Name of the top enriched pathway supported by at least two genes.
+        pathway_counts (pd.Series): (Returned if `return_pathways_genes=True`) Number of top genes supporting each pathway.
+        top_pathways_genes (pd.Series): (Returned if `return_pathways_genes=True`) Top genes supporting each enriched pathway.
+    """
+    info_loadings = pd.DataFrame(gene_loadings.sort_values(ascending=False))
+    info_loadings["rank"] = np.arange(1, info_loadings.shape[0] + 1)
+    info_loadings = info_loadings.merge(
+        pd.DataFrame(gene_loadings.abs().sort_values(ascending=False)).assign(
+            absolute_rank=np.arange(1, gene_loadings.shape[0] + 1)
+        )["absolute_rank"],
+        right_index=True,
+        left_index=True,
+    )
+    info_loadings = info_loadings.merge(
+        known_pathways.filter(regex="ene|Pathway_Name"), on="Geneid", how="left"
+    )
+
+    top_genes = (
+        info_loadings.loc[info_loadings.absolute_rank.isin(np.arange(1, int(n_top_genes) + 1))]
+        .dropna(subset=["Gene"])
+        .Gene.unique()
+    )
+
+    pathway_counts = (
+        info_loadings.loc[info_loadings.Gene.isin(top_genes)]
+        .groupby("Pathway_Name", observed=True)
+        .apply(lambda x: x.Gene.nunique(), include_groups=False)
+        .sort_values(ascending=False)
+    )
+
+    pathway_counts = pathway_counts[pathway_counts >= 2]
+    top_pathway = pathway_counts.nlargest(1, keep="all").index.tolist()
+
+    if len(top_pathway) > 1:
+        top_pathway = ", ".join(top_pathway)
+    elif len(top_pathway) == 1:
+        top_pathway = top_pathway[0]
+    else:
+        top_pathway = None
+
+    if return_pathways_genes:
+        cut_off = pathway_counts.nlargest(1, keep="all").iloc[0] - 4
+        top_pathways_genes = (
+            info_loadings.loc[
+                (info_loadings.Gene.isin(top_genes))
+                & (
+                    info_loadings.Pathway_Name.isin(
+                        pathway_counts[pathway_counts >= cut_off].index
+                    )
+                )
+            ]
+            .groupby("Pathway_Name", observed=True)
+            .apply(lambda x: x.Gene.unique(), include_groups=False)
+        )
+        return top_pathway, pathway_counts, top_pathways_genes
+    else:
+        return top_pathway
