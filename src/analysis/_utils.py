@@ -293,3 +293,126 @@ def calculate_GxC_gene_effect(
     )
 
     return GxC_effect_gene
+
+
+def aggregate_cell_counts(
+    adata: AnnData,
+    aggregate_cols: List[str],
+    sum_gene: bool = False,
+    layer: Optional[str] = None,
+) -> AnnData:
+    """Aggregates single-cell data into pseudobulk profiles based on specified cell metadata
+    columns.
+
+    This function groups cells in an AnnData object (`adata`) by the specified `aggregate_cols` and averages
+    the expression data across those cells to create pseudobulk profiles. It can also aggregate values from a
+    specified layer in `adata.layers` instead of the primary data matrix in `adata.X`. Optionally, it can also
+    sum the expression over all genes.
+
+    Parameters:
+    ----------
+        adata (anndata.AnnData): AnnData object containing gene counts in `adata.X`, cell metadata in `adata.obs`
+            and gene metadata in `adata.var`.
+        aggregate_cols (List[str]): Column names from `adata.obs` used to group cells for aggregation (e.g., ['donor']).
+        sum_gene (bool): If True, sums expression across genes (rows). If False, retains gene-level resolution in the
+            aggregated expression. Default is `False`.
+        layer (Optional[str]): If specified, aggregates data from the given layer instead of `adata.X`. Default is `None`,
+            i.e. aggregate data in `adata.X`
+
+    Returns:
+    -------
+        adata_aggr(anndata.AnnData): An `AnnData` object with pseudobulk expression (mean across each group of the specified `aggregate_cols`).
+            The `obs` contains metadata about the aggregated groups, including the number of cells aggregated and the original cell IDs.
+            The `var` contains original gene metadata, or a summary row if `sum_gene=True`.
+    """
+
+    grouped = adata.obs.groupby(by=aggregate_cols, observed=True)
+    grouped_obs = adata.obs.filter(aggregate_cols).drop_duplicates().reset_index(drop=True)
+
+    init = True
+    for k, v in grouped.groups.items():
+        pseudocell = "__".join(k)
+        if init:
+            if layer:
+                pseudoexpression_matrix = adata[v].layers[layer].mean(axis=0)  # mean across donors
+            else:
+                pseudoexpression_matrix = adata[v].X.mean(axis=0)
+            if sum_gene:
+                pseudoexpression_matrix = pseudoexpression_matrix.sum(axis=1)  # sum across genes
+
+            metadata = (
+                adata.obs.loc[v]
+                .filter(aggregate_cols)
+                .drop_duplicates()
+                .reset_index(drop=True)
+                .rename(index={0: pseudocell})
+            )
+            # Save also the number of cells that were aggregated as well as their IDs
+            metadata = pd.concat(
+                [
+                    metadata,
+                    pd.DataFrame(
+                        {"ncells_aggregated": len(v), "cell_ids": ", ".join(v.tolist())},
+                        index=metadata.index,
+                    ),
+                ],
+                axis=1,
+            )
+            init = False
+        else:
+            if layer:
+                pseudoexpression = adata[v].layers[layer].mean(axis=0)
+            else:
+                pseudoexpression = adata[v].X.mean(axis=0)
+            if sum_gene:
+                pseudoexpression = pseudoexpression.sum(axis=1)  # sum across genes
+
+            pseudoexpression_matrix = np.vstack([pseudoexpression_matrix, pseudoexpression])
+            tmp = (
+                adata.obs.loc[v]
+                .filter(aggregate_cols)
+                .drop_duplicates()
+                .reset_index(drop=True)
+                .rename(index={0: pseudocell})
+            )
+            metadata = pd.concat(
+                [
+                    metadata,
+                    pd.concat(
+                        [
+                            tmp,
+                            pd.DataFrame(
+                                {"ncells_aggregated": len(v), "cell_ids": ", ".join(v.tolist())},
+                                index=tmp.index,
+                            ),
+                        ],
+                        axis=1,
+                    ),
+                ],
+                axis=0,
+            )
+    # Check that the aggregation was done correctly
+    assert metadata.shape[0] == grouped_obs.shape[0]
+
+    ## If summing up the gene counts:
+    if sum_gene:
+        if "GeneSymbol" in adata.var.columns:
+            gene_meta = pd.DataFrame(
+                data=[" and ".join(adata.var.GeneSymbol)],
+                index=["__".join(adata.var.index)],
+                columns=["GeneSymbol"],
+            )
+        elif "features" in adata.var.columns:
+            gene_meta = pd.DataFrame(
+                data=[" and ".join(adata.var.features)],
+                index=["__".join(adata.var.index)],
+                columns=["GeneSymbol"],
+            )
+        else:
+            gene_meta = pd.DataFrame(index=["__".join(adata.var.index)])
+    else:
+        gene_meta = adata.var
+
+    adata_aggr = AnnData(X=np.asarray(pseudoexpression_matrix), obs=metadata, var=gene_meta)
+
+    return adata_aggr
