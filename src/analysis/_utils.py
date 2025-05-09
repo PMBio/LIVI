@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional, Tuple, Union
 
+import gseapy as gp
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -10,6 +11,8 @@ import torch
 import umap
 from anndata import AnnData
 from scipy.stats import iqr
+
+from src.analysis.plotting import make_gp_dotplot
 
 pl.seed_everything(32)
 
@@ -315,8 +318,8 @@ def aggregate_cell_counts(
             and gene metadata in `adata.var`.
         aggregate_cols (List[str]): Column names from `adata.obs` used to group cells for aggregation (e.g., ['donor']).
         sum_gene (bool): If True, sums expression across genes (rows). If False, retains gene-level resolution in the
-            aggregated expression. Default is `False`.
-        layer (Optional[str]): If specified, aggregates data from the given layer instead of `adata.X`. Default is `None`,
+            aggregated expression. Default is False.
+        layer (Optional[str]): If specified, aggregates data from the given layer instead of `adata.X`. Default is None,
             i.e. aggregate data in `adata.X`
 
     Returns:
@@ -416,3 +419,92 @@ def aggregate_cell_counts(
     adata_aggr = AnnData(X=np.asarray(pseudoexpression_matrix), obs=metadata, var=gene_meta)
 
     return adata_aggr
+
+
+def annotate_factor_GSEA(
+    factor_loadings: pd.Series,
+    adata_var: pd.DataFrame,
+    hgnc_column: str,
+    n_top_genes: int = 30,
+    background_genes: Optional[List[str]] = None,
+    databases: Optional[List[str]] = None,
+    plot_results: bool = False,
+    figsize: Tuple[int, int] = (8, 13),
+    n_top_terms: int = 5,
+    savefig: Optional[str] = None,
+) -> Tuple[List[str], List[str]]:
+    """Annotates factors by gene set enrichment analysis (GSEA) on top-loading genes for the given
+    factor and optionally plots enriched terms.
+
+    Parameters:
+    ----------
+        factor_loadings (pd.Series): Gene loadings for a factor, indexed by gene IDs matching `adata_var`.
+        adata_var (pd.DataFrame): DataFrame corresponding to `adata.var` containing gene metadata.
+        hgnc_column (str): Name of the column in `adata_var` that contains HGNC gene symbols.
+        n_top_genes (int): Number of top absolute-loading genes to use for the enrichment analysis. Default is 30.
+        background_genes (Optional[List[str]]): List of background genes for the enrichment analysis.
+            If None, all genes in `adata_var[hgnc_column]` are used. Default is None.
+        databases (Optional[List[str]]): List of gene set databases to query (e.g., "GO_Biological_Process_2023").
+            If None, a default list is used. Default is None.
+        plot_results (bool): Whether to generate a dotplot of the top enriched terms. Default is False.
+        figsize (Tuple[int, int]): Figure size if `plot_results` is True. Default is (8, 13).
+        n_top_terms (int): Number of top enriched terms to display in the plot. Default is 5.
+        savefig (Optional[str]): Absolute path of the filename to save the plot. If None, the plot is not saved.
+            Default is None.
+
+    Returns:
+    -------
+        top_pathway (List[str]): Name of the top enriched pathway with the smallest adjusted p-value.
+            If more than one pathways have the same p-value, all of them are included.
+        pathway_genes (List[str]): Genes involved in the top enriched pathway(s).
+    """
+
+    if databases is None:
+        databases_bio = [
+            "GO_Biological_Process_2023",
+            "GO_Molecular_Function_2023",
+            "KEGG_2021_Human",
+            "Reactome_2022",
+        ]
+    else:
+        databases_bio = databases
+
+    if background_genes is None:
+        background_genes = adata_var[hgnc_column].tolist()
+
+    enr_bio = gp.enrichr(
+        gene_list=adata_var.loc[factor_loadings.abs().nlargest(n_top_genes).index][
+            hgnc_column
+        ].tolist(),
+        gene_sets=databases_bio,
+        background=background_genes,
+        outdir=None,
+    )
+    enr_bio_sign = enr_bio.results.loc[enr_bio.results["Adjusted P-value"] <= 0.05]
+    top_pathway = enr_bio_sign.nsmallest(
+        n=1, columns=["Adjusted P-value"], keep="all"
+    ).Term.tolist()
+    pathway_genes = enr_bio_sign.loc[enr_bio_sign.Term.isin(top_pathway)].Genes.tolist()
+
+    if plot_results:
+        fig, axs = plt.subplots(figsize=figsize, constrained_layout=True)
+        make_gp_dotplot(
+            df=enr_bio_sign,
+            x="Gene_set",
+            y="Term",
+            column="Adjusted P-value",
+            size=6,
+            top_term=n_top_terms,
+            title=f"Top {n_top_genes} absolute gene loadings",
+            show_ring=True,
+            marker="o",
+            xticklabels_rot=30,
+            ax=axs,
+            fig=fig,
+            rasterize=True,
+        )
+        axs.set_xlabel("")
+        if savefig is not None:
+            plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
+
+    return top_pathway, pathway_genes
