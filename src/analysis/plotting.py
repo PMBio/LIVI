@@ -1090,7 +1090,7 @@ def cell_state_factors_heatmap(
 
     if color_map is None:
         color_map = "vlag" if z_score is not None else None
-    if color_map in ["vlag", "RdBu_r"]:
+    if color_map in ["vlag", "RdBu_r", "seismic"]:
         sns.clustermap(
             df_celltype,
             row_cluster=row_cluster,
@@ -2077,6 +2077,305 @@ def overlap_with_known_eQTLs(
                 bbox_inches="tight",
             )
             plt.close()
+
+
+def plot_gene_loadings_for_factor(
+    GxC_decoder: pd.DataFrame,
+    factor: str,
+    adata_var: pd.DataFrame,
+    gene_name_column: str,
+    color: Optional[str] = None,
+    spines_invisible: bool = False,
+    n_top_genes: int = 5,
+    genes_to_annotate: Optional[List[str]] = None,
+    annotation_fontsize: int = 12,
+    offset: float = 0.2,
+    x_distance: float = 1e-2,
+    savefig: Optional[str] = None,
+) -> None:
+    """Plots the distribution of gene loadings for a given factor and annotates the genes with the
+    highest loadings. Alternatively, it can highlight a list of user-specified genes (e.g. genes
+    belonging to a specific regulatory pathway).
+
+    Parameters:
+    ----------
+        GxC_decoder (pd.DataFrame): DataFrame containing gene loadings for each factor (columns).
+        factor (str): Name of the factor whose gene loadings will be visualized.
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
+        color (Optional[str]): Outline color for the boxplot. Default is "darkblue".
+        spines_invisible (bool): If True, hides the top, right, and left spines of the plot. Default is False.
+        n_top_genes (int): Number of top-loading genes to annotate if `genes_to_annotate` is not provided. Default is 5.
+            Warning that large values (>10-15) can lead to cluttered plots.
+        genes_to_annotate (Optional[List[str]]): List of user-specified gene IDs to annotate. Overrides top-gene selection.
+            Default is None.
+        annotation_fontsize (int): Font size for gene name annotations. Default is 12.
+        x_distance (float): If the x-distance between adjacent annotations is smaller than `x_distance`, the positions of the
+            annotation texts are adjusted to reduce overlap. Default is 1e-2.
+        offset (float): Vertical offset to adjust annotation text to avoid overlap. Default is 0.2.
+        savefig (Optional[str]): Absolute path to save the resulting figure (if provided). Default is None.
+
+    Returns:
+    -------
+        None
+    """
+
+    if GxC_decoder.index.name is None:
+        idx_name = "GeneID"
+    else:
+        idx_name = GxC_decoder.index.name
+    gene_loadings = GxC_decoder[factor].reset_index()
+
+    if genes_to_annotate is not None:
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in genes_to_annotate, axis=1)
+        )
+    else:
+        top_genes = GxC_decoder[factor].abs().nlargest(n_top_genes).index.tolist()
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes, axis=1)
+        )
+
+    if adata_var.index.name != idx_name:
+        adata_var.rename_axis(idx_name, axis=0, inplace=True)
+    gene_loadings = gene_loadings.merge(
+        adata_var[gene_name_column].reset_index(), on=idx_name, how="left"
+    )
+
+    fig, axs = plt.subplots(figsize=(7.5, 5), nrows=1, ncols=1, constrained_layout=True)
+
+    sns.boxplot(
+        data=gene_loadings,
+        x=factor,
+        fill=False,
+        color="darkblue" if color is None else color,
+        ax=axs,
+    )
+    axs.legend().remove()
+    axs.set_title(factor.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize + 2)
+    axs.set_yticks([])
+    axs.set_xlabel("Loadings", fontsize=annotation_fontsize + 2)
+    axs.set_xticklabels(axs.get_xticklabels(), fontsize=15)
+    if spines_invisible:
+        axs.spines["top"].set_visible(False)
+        axs.spines["right"].set_visible(False)
+        axs.spines["left"].set_visible(False)
+    # axis.spines["bottom"].set_visible(False)
+
+    f_loadings_anno = gene_loadings.loc[gene_loadings["annotate_gene"]]
+    f_loadings_anno = f_loadings_anno.sort_values(
+        by=factor, ascending=gene_loadings[factor].max() != gene_loadings[factor].abs().max()
+    ).reset_index(drop=True)
+    x_previous = 0
+    y_previous = []
+    offset = offset
+    for idx, row in f_loadings_anno.iterrows():
+        y_loc = 0.05 if idx % 2 == 0 else -0.05
+        if np.abs(np.abs(row[factor]) - x_previous) < x_distance:
+            if y_loc > 0:
+                y_loc += offset
+                while y_loc in y_previous:
+                    y_loc += offset
+            else:
+                y_loc -= offset
+                while y_loc in y_previous:
+                    y_loc -= offset
+
+        axs.annotate(
+            row[gene_name_column],
+            xy=(row[factor], 0),
+            xytext=(row[factor], y_loc),
+            arrowprops=dict(
+                arrowstyle="-",
+                connectionstyle="arc3",
+                color="darkgrey",
+                linewidth=0.8,
+            ),
+            ha="center",
+            va="center",
+            size=annotation_fontsize,
+            color="black",
+            weight="regular",
+            alpha=0.9,
+        )
+        x_previous = np.abs(row[factor])
+        y_previous.append(y_loc)
+
+    if savefig:
+        plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
+
+
+def plot_gene_loadings_for_associated_variable(
+    GxC_effects: pd.DataFrame,
+    variable: str,
+    GxC_decoder: pd.DataFrame,
+    adata_var: pd.DataFrame,
+    gene_name_column: str,
+    color: Optional[str] = None,
+    spines_invisible: bool = False,
+    n_top_genes: int = 5,
+    genes_to_annotate: Optional[List[str]] = None,
+    annotation_fontsize: int = 12,
+    offset: float = 0.2,
+    x_distance: float = 1e-2,
+    d: int = 5,
+    savefig: Optional[str] = None,
+) -> None:
+    """Plots distributions of loadings for all factors associated with a given donor variable, and
+    annotates the top genes for each factor. Alternatively, it can highlight a list of user-
+    specified genes (e.g. genes belonging to a specific regulatory pathway).
+
+    Parameters:
+    ----------
+        GxC_effects (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
+        variable (str): Name of the variable (e.g., SNP ID) for which factor loadings should be visualized.
+        GxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each factor (columns).
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
+        color (Optional[str]): Color for boxplot outlines. If None, defaults to "darkblue".
+        spines_invisible (bool): Whether to hide the top, right, and left plot spines. Default is False.
+        n_top_genes (int): Number of top-loading genes to annotate if `genes_to_annotate` is not provided. Default is 5.
+             Warning that large values (>10-15) can lead to cluttered plots.
+        genes_to_annotate (Optional[List[str]]): List of user-specified gene IDs to annotate. Overrides `n_top_genes`. Default is None.
+        annotation_fontsize (int): Font size for gene name annotations. Default is 12.
+        x_distance (float): If the x-distance between adjacent annotations is smaller than `x_distance`, the positions of the
+            annotation texts are adjusted to reduce overlap. Default is 1e-2.
+        offset (float): Vertical offset to adjust annotation text to avoid overlap. Default is 0.2.
+        d (int): Scaling factor for figure size (width and height per subplot). Default is 5.
+        savefig (Optional[str]): Absolute path to save the resulting figure (if provided). Default is None.
+
+    Returns:
+    -------
+        None
+    """
+    GxC_effects_variable = GxC_effects.loc[GxC_effects.SNP_id == variable]
+    if GxC_decoder.index.name is None:
+        idx_name = "GeneID"
+    else:
+        idx_name = GxC_decoder.index.name
+    gene_loadings = GxC_decoder.filter(
+        [f.replace("U", "GxC") for f in GxC_effects_variable.Factor.unique().tolist()]
+    )
+    gene_loadings = pd.melt(
+        gene_loadings, var_name="Factor", value_name="loadings", ignore_index=False
+    )
+    gene_loadings = (
+        gene_loadings.assign(gene_factor=gene_loadings.index + "__" + gene_loadings.Factor)
+        .reset_index()
+        .set_index("gene_factor")
+    )
+
+    if genes_to_annotate is not None:
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in genes_to_annotate, axis=1)
+        )
+    else:
+        top_genes = {}
+        for f_gxc in GxC_effects_variable.Factor.unique():
+            f_gxc = f_gxc.replace("U", "GxC")
+            top_genes[f_gxc] = GxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes[x.Factor], axis=1)
+        )
+
+    if adata_var.index.name != idx_name:
+        adata_var.rename_axis(idx_name, axis=0, inplace=True)
+    gene_loadings = gene_loadings.merge(
+        adata_var[gene_name_column].reset_index(), on=idx_name, how="left"
+    )
+
+    if GxC_effects_variable.Factor.nunique() % 3 == 0:
+        n_rows = GxC_effects_variable.Factor.nunique() // 3
+    else:
+        n_rows = (GxC_effects_variable.Factor.nunique() // 3) + 1
+    n_cols = (
+        3 if GxC_effects_variable.Factor.nunique() > 2 else GxC_effects_variable.Factor.nunique()
+    )
+
+    figure_size = ((n_cols + 0.5) * d, n_rows * d)
+    fig, axs = plt.subplots(
+        figsize=figure_size, nrows=n_rows, ncols=n_cols, constrained_layout=True
+    )
+    if n_rows > 1:
+        axs = axs.flatten()
+
+    for f_idx, f_gxc in enumerate(gene_loadings.Factor.unique()):
+        f_gxc_loadings = gene_loadings.loc[gene_loadings.Factor == f_gxc]
+        if n_rows > 1:
+            axis = axs[f_idx]
+        else:
+            axis = axs
+
+        sns.boxplot(
+            data=f_gxc_loadings,
+            x="loadings",
+            fill=False,
+            color="darkblue" if color is None else color,
+            ax=axis,
+        )
+        axis.legend().remove()
+        axis.set_title(f_gxc.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize)
+        axis.set_yticks([])
+        axis.set_xlabel("Loadings", fontsize=annotation_fontsize + 2)
+        axis.set_xticklabels(axis.get_xticklabels(), fontsize=annotation_fontsize - 3)
+        if spines_invisible:
+            axis.spines["top"].set_visible(False)
+            axis.spines["right"].set_visible(False)
+            axis.spines["left"].set_visible(False)
+        # axis.spines["bottom"].set_visible(False)
+
+        f_gxc_loadings_anno = f_gxc_loadings.loc[f_gxc_loadings["annotate_gene"]]
+        f_gxc_loadings_anno = f_gxc_loadings_anno.sort_values(
+            by="loadings",
+            ascending=f_gxc_loadings.loadings.max() != f_gxc_loadings.loadings.abs().max(),
+        ).reset_index(drop=True)
+        x_previous = 0
+        y_previous = []
+        offset = offset
+        for idx, row in f_gxc_loadings_anno.iterrows():
+            y_loc = 0.05 if idx % 2 == 0 else -0.05
+            if np.abs(np.abs(row["loadings"]) - x_previous) < x_distance:
+                if y_loc > 0:
+                    y_loc += offset
+                    while y_loc in y_previous:
+                        y_loc += offset
+                else:
+                    y_loc -= offset
+                    while y_loc in y_previous:
+                        y_loc -= offset
+
+            axis.annotate(
+                row["GeneSymbol"],
+                xy=(row["loadings"], 0),
+                xytext=(row["loadings"], y_loc),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    connectionstyle="arc3",
+                    color="darkgrey",
+                    linewidth=0.8,
+                ),
+                ha="center",
+                va="center",
+                size=annotation_fontsize,
+                color="black",
+                weight="regular",
+                alpha=0.9,
+            )
+            x_previous = np.abs(row["loadings"])
+            y_previous.append(y_loc)
+
+    if GxC_effects_variable.Factor.nunique() > 1:
+        fig.suptitle(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="left")
+    else:
+        axis.set_title(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="center")
+
+    if n_rows > 1 and len(axs) > gene_loadings.Factor.nunique():
+        for i in range(len(axs)):
+            if i >= gene_loadings.Factor.nunique():
+                fig.delaxes(axs[i])
+
+    if savefig:
+        plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
 
 
 def visualize_GxC_effect(
