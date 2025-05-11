@@ -12,8 +12,6 @@ import umap
 from anndata import AnnData
 from scipy.stats import iqr
 
-from src.analysis.plotting import make_gp_dotplot
-
 pl.seed_everything(32)
 
 
@@ -421,6 +419,61 @@ def aggregate_cell_counts(
     return adata_aggr
 
 
+def find_cells_with_high_loadings_for_factor(
+    factor_loadings: Union[np.ndarray, pd.Series],
+    iqr_threshold: float = 0.5,
+    value: Optional[float] = None,
+    plot: bool = True,
+) -> Union[np.ndarray, pd.Series]:
+    """Identifies cells with high loadings for a given factor, using either an IQR-based cutoff
+    (`iqr_threshold`) or a user-defined threshold (`value`).
+
+    Parameters:
+    ----------
+        factor_loadings (Union[np.ndarray, pd.Series]): Array or Series of factor loadings per cell.
+        iqr_threshold (float): Multiplier for the interquartile range (IQR) to define outlier threshold. Default is 0.5.
+        value (Optional[float]): If specified, this value overrides the IQR-based upper cutoff. Default is None.
+        plot (bool): If True, plots a histogram of loadings with thresholds. Default is True.
+
+    Returns:
+    -------
+        high_loading_cells (Union[np.ndarray, pd.Series]): Cells with high factor loadings. Returns a `pd.Series` if
+            `factor_loadings` is a `pd.Series`, otherwise returns a NumPy array of selected values.
+    """
+    if isinstance(factor_loadings, pd.Series):
+        name = factor_loadings.name
+        cell_idx = factor_loadings.index
+        factor_loadings = factor_loadings.to_numpy()
+    else:
+        name = "Factor loadings"
+        cell_idx = None
+
+    p_75 = np.percentile(factor_loadings, 75)
+    p_25 = np.percentile(factor_loadings, 25)
+    IQR = iqr(factor_loadings)
+    mean_f = np.mean(factor_loadings)
+
+    lower_cutoff = p_25 - iqr_threshold * IQR
+    upper_cutoff = value if value is not None else p_75 + iqr_threshold * IQR
+
+    cell_subset = np.where(factor_loadings > upper_cutoff)[0]
+
+    if plot:
+        sns.histplot(factor_loadings, kde=True, color="royalblue")
+        plt.xlabel(f"{name}")
+        ax = plt.gca()
+        y_max = ax.get_ylim()[1]
+        plt.vlines(x=mean_f, ymin=0, ymax=y_max, color="darkslategrey", linestyles="--")
+        plt.vlines(x=upper_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
+        plt.vlines(x=lower_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
+
+    return (
+        pd.Series(factor_loadings[cell_subset], index=cell_idx[cell_subset], name=name)
+        if cell_idx is not None
+        else factor_loadings[cell_subset]
+    )
+
+
 def annotate_factor_GSEA(
     factor_loadings: pd.Series,
     adata_var: pd.DataFrame,
@@ -428,7 +481,6 @@ def annotate_factor_GSEA(
     n_top_genes: int = 30,
     background_genes: Optional[List[str]] = None,
     databases: Optional[List[str]] = None,
-    plot_results: bool = False,
     figsize: Tuple[int, int] = (8, 13),
     n_top_terms: int = 5,
     savefig: Optional[str] = None,
@@ -486,83 +538,7 @@ def annotate_factor_GSEA(
     ).Term.tolist()
     pathway_genes = enr_bio_sign.loc[enr_bio_sign.Term.isin(top_pathway)].Genes.tolist()
 
-    if plot_results:
-        fig, axs = plt.subplots(figsize=figsize, constrained_layout=True)
-        make_gp_dotplot(
-            df=enr_bio_sign,
-            x="Gene_set",
-            y="Term",
-            column="Adjusted P-value",
-            size=6,
-            top_term=n_top_terms,
-            title=f"Top {n_top_genes} absolute gene loadings",
-            show_ring=True,
-            marker="o",
-            xticklabels_rot=30,
-            ax=axs,
-            fig=fig,
-            rasterize=True,
-        )
-        axs.set_xlabel("")
-        if savefig is not None:
-            plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
-
     return top_pathway, pathway_genes
-
-
-def find_cells_with_high_loadings_for_factor(
-    factor_loadings: Union[np.ndarray, pd.Series],
-    iqr_threshold: float = 0.5,
-    value: Optional[float] = None,
-    plot: bool = True,
-) -> Union[np.ndarray, pd.Series]:
-    """Identifies cells with high loadings for a given factor, using either an IQR-based cutoff
-    (`iqr_threshold`) or a user-defined threshold (`value`).
-
-    Parameters:
-    ----------
-        factor_loadings (Union[np.ndarray, pd.Series]): Array or Series of factor loadings per cell.
-        iqr_threshold (float): Multiplier for the interquartile range (IQR) to define outlier threshold. Default is 0.5.
-        value (Optional[float]): If specified, this value overrides the IQR-based upper cutoff. Default is None.
-        plot (bool): If True, plots a histogram of loadings with thresholds. Default is True.
-
-    Returns:
-    -------
-        high_loading_cells (Union[np.ndarray, pd.Series]): Cells with high factor loadings. Returns a `pd.Series` if
-            `factor_loadings` is a `pd.Series`, otherwise returns a NumPy array of selected values.
-    """
-    if isinstance(factor_loadings, pd.Series):
-        name = factor_loadings.name
-        cell_idx = factor_loadings.index
-        factor_loadings = factor_loadings.to_numpy()
-    else:
-        name = "Factor loadings"
-        cell_idx = None
-
-    p_75 = np.percentile(factor_loadings, 75)
-    p_25 = np.percentile(factor_loadings, 25)
-    IQR = iqr(factor_loadings)
-    mean_f = np.mean(factor_loadings)
-
-    lower_cutoff = p_25 - iqr_threshold * IQR
-    upper_cutoff = value if value is not None else p_75 + iqr_threshold * IQR
-
-    cell_subset = np.where(factor_loadings > upper_cutoff)[0]
-
-    if plot:
-        sns.histplot(factor_loadings, kde=True, color="royalblue")
-        plt.xlabel(f"{name}")
-        ax = plt.gca()
-        y_max = ax.get_ylim()[1]
-        plt.vlines(x=mean_f, ymin=0, ymax=y_max, color="darkslategrey", linestyles="--")
-        plt.vlines(x=upper_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
-        plt.vlines(x=lower_cutoff, ymin=0, ymax=y_max, color="darkslategrey", linestyles=":")
-
-    return (
-        pd.Series(factor_loadings[cell_subset], index=cell_idx[cell_subset], name=name)
-        if cell_idx is not None
-        else factor_loadings[cell_subset]
-    )
 
 
 def assign_factor_to_known_pathways(
