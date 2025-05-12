@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 import scanpy as sc
 import seaborn as sns
 import torch
+import torch.nn as nn
 import umap
 from anndata import AnnData
 from scipy.stats import iqr
@@ -171,7 +172,9 @@ def assign_U_to_celltype(
     A: pd.DataFrame,
     cell_metadata: pd.DataFrame,
     celltype_column: str,
+    top_one: bool = False,
     assignment_threshold: float = 0.8,
+    strict: bool = True,
 ):
     """Assigns U factors to known celltypes. Only U factors assigned to at least one cell-state
     based on `assignment_threshold` are assigned to a celltype.
@@ -190,10 +193,11 @@ def assign_U_to_celltype(
         factor was not assigned to any specific cell-state).
     """
 
-    U_not_assigned = A.columns[
-        A[A >= assignment_threshold].isna().sum(axis=0) == cell_state_latent.shape[1]
-    ]
-    celltypes_factors = cell_state_latent.merge(
+    zbase_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
+    zbase_softmax = pd.DataFrame(
+        zbase_softmax, index=cell_state_latent.index, columns=cell_state_latent.columns
+    )
+    celltypes_factors = zbase_softmax.merge(
         cell_metadata[celltype_column], right_index=True, left_index=True, how="left"
     )
     # Average of each factor across cells belonging to the same celltype
@@ -201,12 +205,34 @@ def assign_U_to_celltype(
         by=celltype_column, observed=True
     ).mean()  # celltypes x C factors
 
-    celltypes_U = pd.DataFrame(
-        celltypes_factors.to_numpy() @ A.to_numpy(),
-        index=celltypes_factors.index,
-        columns=A.columns,
-    )  # celltypes x U factors
-    U_celltype = celltypes_U.idxmax(axis=0).to_dict()
+    if not top_one and strict:
+        U_not_assigned = A.columns[A[A >= 0.9].isna().sum(axis=0) == cell_state_latent.shape[1]]
+    else:
+        U_not_assigned = A.columns[
+            A[A >= assignment_threshold].isna().sum(axis=0) == cell_state_latent.shape[1]
+        ]
+
+    if top_one:
+        celltypes_U = pd.DataFrame(
+            celltypes_factors.to_numpy() @ A.to_numpy(),
+            index=celltypes_factors.index,
+            columns=A.columns,
+        )  # celltypes x U factors
+        # Assign each U factor to the celltype with the highest value
+        U_celltype = celltypes_U.idxmax(axis=0).to_dict()
+    else:
+        threshold = 0.9 if strict else assignment_threshold
+        # Assign each cell-state factor to the celltype with the highest value
+        temp_dict = celltypes_factors.idxmax(axis=0).to_dict()
+        # Substitute cell-state factor names with corresponding celltype names
+        A_ct = A.rename(index=temp_dict).T  # U x celltypes
+        # For each U factor pick the celltypes (cell-state factors with A values >= threshold)
+        U_celltype = (
+            A_ct.apply(lambda x: x >= threshold, axis=1)
+            .apply(lambda x: x.index[x].unique().tolist(), axis=1)
+            .to_dict()
+        )
+
     for u in U_not_assigned:
         U_celltype[u] = None
 
