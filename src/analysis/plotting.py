@@ -2,7 +2,8 @@ import argparse
 import os
 import re
 import sys
-from textwrap import wrap
+import textwrap
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -12,20 +13,19 @@ import plotnine as pn
 import scanpy as sc
 import seaborn as sns
 import torch
-import umap
-import webcolors
 from anndata import AnnData
 from matplotlib import cm, colormaps, colors
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredText
 from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
 from scipy.spatial.distance import pdist, squareform
-from scipy.stats import probplot, zscore
+from scipy.stats import mannwhitneyu, probplot, zscore
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 
 from src.analysis._utils import (
     add_livi_umaps_to_cell_metadata,
+    aggregate_cell_counts,
     calculate_GxC_effect,
     calculate_GxC_gene_effect,
     compute_umap,
@@ -537,7 +537,7 @@ def visualise_livi_embeddings(
                 ncol=1,
             )
 
-    plt.suptitle("\n".join(wrap(plot_title, 60)))
+    plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_U-embedding_UMAP.{format}"),
         bbox_inches="tight",
@@ -606,7 +606,7 @@ def visualise_livi_embeddings(
                     markerscale=4,
                 )
                 axs_idx += 1
-            fig.suptitle("\n".join(wrap(plot_title, 60)))
+            fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
                 os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_Batch.{format}"),
                 dpi=600,
@@ -665,7 +665,7 @@ def visualise_livi_embeddings(
                     markerscale=4,
                 )
                 axs_idx += 1
-            fig.suptitle("\n".join(wrap(plot_title, 60)))
+            fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
                 os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_sex.{format}"),
                 dpi=600,
@@ -761,7 +761,7 @@ def visualise_livi_embeddings(
         else:
             ax2 = fig.add_subplot(1, 2, 2)
 
-    plt.suptitle("\n".join(wrap(plot_title, 60)))
+    plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_GxC-latent_UMAP.{format}"),
         bbox_inches="tight",
@@ -829,7 +829,7 @@ def visualise_livi_embeddings(
         )
         axs_idx += 1
 
-    fig.suptitle("\n".join(wrap(plot_title, 60)))
+    fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.tight_layout()
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_celltype.{format}"),
@@ -886,7 +886,7 @@ def visualise_livi_embeddings(
                 markerscale=4,
             )
             axs_idx += 1
-        fig.suptitle("\n".join(wrap(plot_title, 60)))
+        fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
             os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_Batch.{format}"),
             dpi=600,
@@ -944,7 +944,7 @@ def visualise_livi_embeddings(
                 markerscale=4,
             )
             axs_idx += 1
-        fig.suptitle("\n".join(wrap(plot_title, 60)))
+        fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
             os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_sex.{format}"),
             dpi=600,
@@ -1022,7 +1022,7 @@ def visualise_livi_embeddings(
                 ncol=1,
             )
 
-    plt.suptitle("\n".join(wrap(plot_title, 60)))
+    plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_V-embedding_UMAP.{format}"),
         bbox_inches="tight",
@@ -2378,6 +2378,225 @@ def plot_gene_loadings_for_associated_variable(
         plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
 
 
+def plot_ct_gex_vs_gt(
+    adata,
+    gene: Union[str, List[str]],
+    iid_column: str,
+    GT_matrix: pd.DataFrame,
+    SNP_id: str,
+    GxC_effects: pd.DataFrame,
+    celltype: Optional[Union[str, List[str]]] = None,
+    celltype_column: Optional[str] = None,
+    cell_indices: Optional[List[int]] = None,
+    HGNC_column: Optional[str] = None,
+    savefig: bool = True,
+    output_dir: Optional[str] = None,
+    output_prefix: Optional[str] = None,
+    format: Optional[str] = None,
+    return_df: bool = False,
+) -> Optional[pd.DataFrame]:
+    """Plots pseudobulk gene expression (at the donor level) versus genotype for a given SNP and
+    gene, across one or more specified celltype(s) or set of cells. Genotypes not present in at
+    least 5% of the individuals are ignored.
+
+    Parameters:
+    ----------
+        adata (anndata.AnnData): AnnData object with single-cell expression values and cell metadata (incl. donor IDs).
+        gene (Union[str, List[str]]): Name or list of gene IDs to plot expression for. If more than one gene is passed,
+            expression values are summed over all genes.
+        iid_column (str): Column in `adata.obs` indicating individual (donor) IDs. Individual IDs must be the same as
+            in the genotype matrix.
+        GT_matrix (pd.DataFrame): Genotype matrix with SNPs as rows and individual IDs as columns.
+        SNP_id (str): ID of the SNP to use.
+        GxC_effects (pd.DataFrame): DataFrame containing LIVI testing results, including the assessed allele for the SNP.
+            SNP IDs must be the same as in the genotype matrix.
+        celltype (Optional[Union[str, List[str]]]): Aggregate expression values only across cells of the given celltype(s).
+            Default is None.
+        celltype_column (Optional[str]): Column in `adata.obs` that contains cell type annotations. Required if `celltype` is used.
+        cell_indices (Optional[List[int]]): Aggregate expression values only across these specific cells.
+            `cell_indices` must be present in `adata.obs`. Default is None.
+        HGNC_column (Optional[str]): Column in `adata.var` with gene symbols. Used for labeling. Default is None.
+        savefig (bool): Whether to save the figure to a file. Default is True.
+        output_dir (Optional[str]): Absolute path of the directory to save the plot if `savefig=True`. If not specified,
+            the current working directory is used.
+        output_prefix (Optional[str]): Optional prefix for the output filename. Default is None.
+        format (Optional[str]): File format to save (e.g., 'pdf', 'png'). Default is 'png'.
+        return_df (bool): If True, returns the DataFrame used for plotting, containing donor-level gene expression and genotypes.
+            Default is False.
+
+    Returns:
+    -------
+        plot_df (Optional[pd.DataFrame]): DataFrame containing donor-level gene expression and genotypes, only returned if `return_df=True`.
+    """
+
+    if isinstance(gene, list):
+        warnings.warn(
+            "More than one gene was passed. Expression values will be summed over genes."
+        )
+
+    if cell_indices is not None:
+        adata_aggr = aggregate_cell_counts(
+            adata=adata[cell_indices, gene], aggregate_cols=[iid_column], layer=None, sum_gene=True
+        )
+    elif celltype is not None:
+        assert (
+            celltype_column is not None
+        ), "Please specify `celltype_column` when `celltype` is passed."
+        if isinstance(celltype, str):
+            celltype = [celltype]
+        adata_aggr = aggregate_cell_counts(
+            adata=adata[adata.obs.loc[adata.obs[celltype_column].isin(celltype)].index, gene],
+            aggregate_cols=[iid_column],
+            layer=None,
+            sum_gene=True,
+        )
+    else:
+        warnings.warn(
+            "Neither `cell_indices` nor `celltype` were provided.\nAggregating gene expression over all cells."
+        )
+        adata_aggr = aggregate_cell_counts(
+            adata=adata, aggregate_cols=[iid_column], layer=None, sum_gene=True
+        )
+
+    plot_df = pd.DataFrame(
+        adata_aggr.X.astype(np.float32),
+        index=adata_aggr.obs[iid_column],
+        columns=adata_aggr.var.index,
+    )
+    plot_df = (
+        plot_df.reset_index(drop=False)
+        .merge(
+            GT_matrix.loc[SNP_id].T.rename_axis(iid_column).reset_index(drop=False),
+            on=iid_column,
+            how="left",
+        )
+        .set_index(iid_column)
+    )
+
+    alleles = re.search(
+        re.compile(".*[0-9]+_([A-Z]+)_([A-Z]+)"), GT_matrix.loc[SNP_id].T.name
+    ).groups()
+
+    if (alleles[0] == GxC_effects.loc[GxC_effects.SNP_id == SNP_id].assessed_allele).all():
+        allele_dict = {
+            0: "/".join([alleles[1], alleles[1]]),
+            1: "/".join([alleles[0], alleles[1]]),
+            2: "/".join([alleles[0], alleles[0]]),
+        }
+        plot_df = plot_df.replace({SNP_id: allele_dict})
+        plot_df[SNP_id] = pd.Categorical(
+            plot_df[SNP_id],
+            categories=[
+                "/".join([alleles[1], alleles[1]]),
+                "/".join([alleles[0], alleles[1]]),
+                "/".join([alleles[0], alleles[0]]),
+            ],
+        )
+    else:
+        allele_dict = {
+            0: "/".join([alleles[0], alleles[0]]),
+            1: "/".join([alleles[0], alleles[1]]),
+            2: "/".join([alleles[1], alleles[1]]),
+        }
+        plot_df = plot_df.replace({SNP_id: allele_dict})
+        plot_df[SNP_id] = pd.Categorical(
+            plot_df[SNP_id],
+            categories=[
+                "/".join([alleles[0], alleles[0]]),
+                "/".join([alleles[0], alleles[1]]),
+                "/".join([alleles[1], alleles[1]]),
+            ],
+        )
+
+    # Remove genotypes not present in at least 5% of the donors
+    snp_counts = plot_df[SNP_id].value_counts()
+    total_donors = sum(snp_counts.tolist())
+    min_donors = int(np.round(total_donors * 0.05))
+    plot_df = plot_df.loc[plot_df[SNP_id].isin(snp_counts.loc[snp_counts >= min_donors].index)]
+    plot_df[SNP_id] = plot_df[SNP_id].cat.remove_unused_categories()
+
+    gene_hgnc = adata.var.loc[gene][HGNC_column] if HGNC_column is not None else gene
+    if isinstance(gene, list):
+        gene_hgnc = " and ".join(gene_hgnc)
+        gene_hgnc = textwrap.fill(gene_hgnc, width=30)
+        gene = "__".join(gene)
+    fig, axs = plt.subplots(ncols=1, nrows=1, figsize=(8, 7), constrained_layout=False)
+    sns.violinplot(
+        plot_df,
+        y=gene,
+        x=SNP_id,
+        hue=SNP_id,
+        palette=(
+            ["lightblue", "royalblue", "blue"]
+            if len(plot_df[SNP_id].cat.categories) == 3
+            else ["lightblue", "blue"]
+        ),
+        ax=axs,
+        legend=False,
+        rasterized=True,
+    )
+    axs.set_ylabel(gene_hgnc, fontdict={"fontsize": 22, "fontstyle": "italic"})
+    axs.xaxis.get_ticklabels()[0].set_color("lightblue")
+    axs.xaxis.get_label().set_fontsize(22)
+    [t.set_fontsize(20) for t in axs.xaxis.get_ticklabels()]
+    [t.set_fontsize(17) for t in axs.yaxis.get_ticklabels()]
+    gt_groups = plot_df[[gene, SNP_id]].groupby(by=SNP_id, observed=True).groups
+    gt_groups = [plot_df.loc[gt_groups[k], gene].to_numpy() for k in gt_groups.keys()]
+    pval1 = mannwhitneyu(gt_groups[0], gt_groups[1], alternative="two-sided")[1]
+    y_max = axs.get_ylim()[1]
+    axs.text(
+        axs.get_xticks()[0] - 0.15,
+        y_max - (0.15 * y_max),
+        f"Mann-Whitney \n$p$-value = {pval1:.2e}",
+        fontdict={"color": "black", "fontsize": "large", "ma": "right"},
+    )
+    if len(gt_groups) > 2:
+        pval2 = mannwhitneyu(gt_groups[0], gt_groups[2], alternative="two-sided")[1]
+        axs.text(
+            axs.get_xticks()[1] + 0.1,
+            y_max - (0.15 * y_max),
+            f"Mann-Whitney \n$p$-value = {pval2:.2e}",
+            fontdict={"color": "black", "fontsize": "large", "ma": "right"},
+        )
+        axs.xaxis.get_ticklabels()[1].set_color("royalblue")
+        axs.xaxis.get_ticklabels()[2].set_color("blue")
+    else:
+        axs.xaxis.get_ticklabels()[1].set_color("blue")
+    gt_group_median = (
+        plot_df.filter([gene, SNP_id]).groupby(by=SNP_id, observed=True)[gene].median()
+    )
+    axs.plot(gt_group_median.index, gt_group_median.values, marker="o", linestyle="-", color="r")
+    if celltype is not None:
+        CT = " and ".join(celltype) if len(celltype) > 1 else celltype[0]
+    else:
+        CT = ""
+    axs.set_title(CT, fontdict={"fontweight": "bold", "fontsize": 22})
+
+    if savefig:
+        od = output_dir if output_dir else os.getcwd()
+        op = output_prefix if output_prefix else ""
+        ext = "." + format if format else ".png"
+        genes_filename = gene_hgnc.replace(" ", "-").replace("\n", "-")
+
+        plt.savefig(
+            os.path.join(
+                od,
+                (
+                    f"{op}_{SNP_id}_vs_{genes_filename}_{CT.replace(' ', '-')}{ext}"
+                    if CT != ""
+                    else f"{op}_{SNP_id}_vs_{genes_filename}{ext}"
+                ),
+            ),
+            bbox_inches="tight",
+            dpi=400,
+            transparent=True,
+        )
+
+    #  plt.close()
+    if return_df:
+        return plot_df
+
+
 def visualize_GxC_effect(
     SNP: str,
     adata: AnnData,
@@ -2393,22 +2612,35 @@ def visualize_GxC_effect(
     UMAP_cell_state: Optional[Union[str, pd.DataFrame]] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
-):
-    """Visualise SNP effect on cell-state.
+) -> Optional[pd.DataFrame]:
+    """Visualise SNP effect on cells.
 
     Parameters
     ----------
         SNP (str): ID of the SNP, whose effect should be calculated.
         adata (AnnData): AnnData object containing the cell metadata in adata.obs.
         celltype_column (str): Column name in adata.obs indicating the celltype.
-        model_results_dir (str or None): Absolute path of the directory containing the inference and testing results files of the LIVI model. Must be provided if `cell_state_latent`, `CxG_associations`, `assignment_matrix` are None. Default is None.
-        cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead of `model_results_dir`. Default is None.
-        GxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC effects. Can be used instead of `model_results_dir`. Default is None.
-        assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead of `model_results_dir`. Default is None.
-        UMAP_cell_state (str, pd.DataFrame or None): Dataframe or name of the file containing a precomputed 2D UMAP of LIVI cell-state latent. If None, the UMAP is computed. Default is None.
+        return_GxC_effect (bool): If True, returns the quantified SNP effect at the single-cell level.
+        model_results_dir (str or None): Absolute path of the directory containing the inference and testing
+            results files of the LIVI model. Must be provided if `cell_state_latent`, `GxC_associations`,
+            `assignment_matrix` are None. Default is None.
+        cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead
+            of `model_results_dir`. Default is None.
+        GxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC effects. Can be used instead of
+            `model_results_dir`. Default is None.
+        assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead
+            of `model_results_dir`. Default is None.
+        UMAP_cell_state (str, pd.DataFrame or None): Dataframe or name of the file containing a precomputed 2D UMAP of LIVI
+            cell-state latent. If None, the UMAP is computed. Default is None.
         savefig (str or None): If provided, save the generated plots in this path (and prefix). Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
-            extension of savefig, if savefig is not None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file
+            format is inferred from the extension of savefig, if savefig is not None.
+
+
+    Returns:
+    -------
+        GxC_effect (Optional[pd.DataFrame]): Dataframe containing the effect of the given SNP at the single-cell level for cells
+            belonging to different cell-states.
     """
     if all(
         [
