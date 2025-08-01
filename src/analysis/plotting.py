@@ -2,7 +2,8 @@ import argparse
 import os
 import re
 import sys
-from textwrap import wrap
+import textwrap
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -12,20 +13,19 @@ import plotnine as pn
 import scanpy as sc
 import seaborn as sns
 import torch
-import umap
-import webcolors
 from anndata import AnnData
 from matplotlib import cm, colormaps, colors
 from matplotlib.lines import Line2D
 from matplotlib.offsetbox import AnchoredText
 from matplotlib_venn import venn2, venn2_circles, venn3, venn3_circles
 from scipy.spatial.distance import pdist, squareform
-from scipy.stats import probplot, zscore
+from scipy.stats import mannwhitneyu, probplot, zscore
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 
 from src.analysis._utils import (
     add_livi_umaps_to_cell_metadata,
+    aggregate_cell_counts,
     calculate_GxC_effect,
     calculate_GxC_gene_effect,
     compute_umap,
@@ -537,7 +537,7 @@ def visualise_livi_embeddings(
                 ncol=1,
             )
 
-    plt.suptitle("\n".join(wrap(plot_title, 60)))
+    plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_U-embedding_UMAP.{format}"),
         bbox_inches="tight",
@@ -606,7 +606,7 @@ def visualise_livi_embeddings(
                     markerscale=4,
                 )
                 axs_idx += 1
-            fig.suptitle("\n".join(wrap(plot_title, 60)))
+            fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
                 os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_Batch.{format}"),
                 dpi=600,
@@ -665,7 +665,7 @@ def visualise_livi_embeddings(
                     markerscale=4,
                 )
                 axs_idx += 1
-            fig.suptitle("\n".join(wrap(plot_title, 60)))
+            fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
                 os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_sex.{format}"),
                 dpi=600,
@@ -761,7 +761,7 @@ def visualise_livi_embeddings(
         else:
             ax2 = fig.add_subplot(1, 2, 2)
 
-    plt.suptitle("\n".join(wrap(plot_title, 60)))
+    plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_GxC-latent_UMAP.{format}"),
         bbox_inches="tight",
@@ -829,7 +829,7 @@ def visualise_livi_embeddings(
         )
         axs_idx += 1
 
-    fig.suptitle("\n".join(wrap(plot_title, 60)))
+    fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.tight_layout()
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_celltype.{format}"),
@@ -886,7 +886,7 @@ def visualise_livi_embeddings(
                 markerscale=4,
             )
             axs_idx += 1
-        fig.suptitle("\n".join(wrap(plot_title, 60)))
+        fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
             os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_Batch.{format}"),
             dpi=600,
@@ -944,7 +944,7 @@ def visualise_livi_embeddings(
                 markerscale=4,
             )
             axs_idx += 1
-        fig.suptitle("\n".join(wrap(plot_title, 60)))
+        fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
             os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_sex.{format}"),
             dpi=600,
@@ -1022,7 +1022,7 @@ def visualise_livi_embeddings(
                 ncol=1,
             )
 
-    plt.suptitle("\n".join(wrap(plot_title, 60)))
+    plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
         os.path.join(output_dir, f"{of_prefix}_V-embedding_UMAP.{format}"),
         bbox_inches="tight",
@@ -1090,7 +1090,7 @@ def cell_state_factors_heatmap(
 
     if color_map is None:
         color_map = "vlag" if z_score is not None else None
-    if color_map in ["vlag", "RdBu_r"]:
+    if color_map in ["vlag", "RdBu_r", "seismic"]:
         sns.clustermap(
             df_celltype,
             row_cluster=row_cluster,
@@ -1582,7 +1582,9 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
 
 
 ### Edited from venny4py package ###
-def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dpi=300, size=3.5):
+def venny4py_custom_colors(
+    sets, plot_title, custom_colors=None, out="./", asax=False, ext="png", dpi=300, size=3.5
+):
     from itertools import combinations
 
     import matplotlib.patches as mpatches
@@ -1592,7 +1594,8 @@ def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dp
 
     shared = vp_get_shared(sets)
     unique = vp_get_unique(shared)
-    ce = ["green", "darkorange", "maroon", "royalblue"]  # colors
+    if custom_colors is None:
+        custom_colors = ["green", "darkorange", "maroon", "royalblue"]  # colors
     lw = size * 0.12  # line width
     fs = size * 2  # font size
     nc = 2  # legend cols
@@ -1620,7 +1623,14 @@ def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dp
 
         for i, s in enumerate(sets):
             ax.add_artist(
-                Ellipse(xy=(xe[i], ye[i]), width=ew, height=eh, fc=ce[i], angle=ae[i], alpha=0.3)
+                Ellipse(
+                    xy=(xe[i], ye[i]),
+                    width=ew,
+                    height=eh,
+                    fc=custom_colors[i],
+                    angle=ae[i],
+                    alpha=0.3,
+                )
             )
             ax.add_artist(
                 Ellipse(
@@ -1662,7 +1672,9 @@ def venny4py_custom_colors(sets, plot_title, out="./", asax=False, ext="png", dp
             )
 
         # legend
-        handles = [mpatches.Patch(color=ce[i], label=l, alpha=0.3) for i, l in enumerate(sets)]
+        handles = [
+            mpatches.Patch(color=custom_colors[i], label=l, alpha=0.3) for i, l in enumerate(sets)
+        ]
         ax.legend(
             labels=sets,
             handles=handles,
@@ -2079,37 +2091,601 @@ def overlap_with_known_eQTLs(
             plt.close()
 
 
+def plot_gene_loadings_for_factor(
+    GxC_decoder: pd.DataFrame,
+    factor: str,
+    adata_var: pd.DataFrame,
+    gene_name_column: str,
+    color: Optional[str] = None,
+    spines_invisible: bool = False,
+    n_top_genes: int = 5,
+    genes_to_annotate: Optional[List[str]] = None,
+    annotation_fontsize: int = 14,
+    offset: float = 0.07,
+    x_distance: float = 5e-2,
+    savefig: Optional[str] = None,
+) -> None:
+    """Plots the distribution of gene loadings for a given factor and annotates the genes with the
+    highest loadings. Alternatively, it can highlight a list of user-specified genes (e.g. genes
+    belonging to a specific regulatory pathway).
+
+    Parameters:
+    ----------
+        GxC_decoder (pd.DataFrame): DataFrame containing gene loadings for each factor (columns).
+        factor (str): Name of the factor whose gene loadings will be visualized.
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
+        color (Optional[str]): Outline color for the boxplot. Default is "darkblue".
+        spines_invisible (bool): If True, hides the top, right, and left spines of the plot. Default is False.
+        n_top_genes (int): Number of top-loading genes to annotate if `genes_to_annotate` is not provided. Default is 5.
+            Warning that large values (>10-15) can lead to cluttered plots.
+        genes_to_annotate (Optional[List[str]]): List of user-specified gene IDs to annotate. Overrides top-gene selection.
+            Default is None.
+        annotation_fontsize (int): Font size for gene name annotations. Default is 14.
+        x_distance (float): If the x-distance between adjacent annotations is smaller than `x_distance`, the positions of the
+            annotation texts are adjusted to reduce overlap. Default is 5e-2.
+        offset (float): Vertical offset to adjust annotation text to avoid overlap. Default is 0.07.
+        savefig (Optional[str]): Absolute path to save the resulting figure (if provided). Default is None.
+
+    Returns:
+    -------
+        None
+    """
+
+    if GxC_decoder.index.name is None:
+        idx_name = "GeneID"
+    else:
+        idx_name = GxC_decoder.index.name
+    gene_loadings = GxC_decoder[factor].reset_index()
+
+    if genes_to_annotate is not None:
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in genes_to_annotate, axis=1)
+        )
+    else:
+        top_genes = GxC_decoder[factor].abs().nlargest(n_top_genes).index.tolist()
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes, axis=1)
+        )
+
+    if adata_var.index.name != idx_name:
+        adata_var.rename_axis(idx_name, axis=0, inplace=True)
+    gene_loadings = gene_loadings.merge(
+        adata_var[gene_name_column].reset_index(), on=idx_name, how="left"
+    )
+
+    fig, axs = plt.subplots(figsize=(7.5, 5), nrows=1, ncols=1, constrained_layout=True)
+
+    sns.boxplot(
+        data=gene_loadings,
+        x=factor,
+        fill=False,
+        color="darkblue" if color is None else color,
+        ax=axs,
+    )
+    axs.legend().remove()
+    axs.set_title(factor.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize + 2)
+    axs.set_yticks([])
+    axs.set_xlabel("Loadings", fontsize=annotation_fontsize + 2)
+    axs.set_xticklabels(axs.get_xticklabels(), fontsize=15)
+    if spines_invisible:
+        axs.spines["top"].set_visible(False)
+        axs.spines["right"].set_visible(False)
+        axs.spines["left"].set_visible(False)
+    # axis.spines["bottom"].set_visible(False)
+
+    f_loadings_anno = gene_loadings.loc[gene_loadings["annotate_gene"]]
+    f_loadings_anno = f_loadings_anno.sort_values(
+        by=factor, ascending=gene_loadings[factor].max() != gene_loadings[factor].abs().max()
+    ).reset_index(drop=True)
+    x_previous = 0
+    y_previous = []
+    offset = offset
+    for idx, row in f_loadings_anno.iterrows():
+        y_loc = 0.05 if idx % 2 == 0 else -0.05
+        if np.abs(np.abs(row[factor]) - x_previous) < x_distance:
+            if y_loc > 0:
+                y_loc += offset
+                while y_loc in y_previous:
+                    y_loc += offset
+            else:
+                y_loc -= offset
+                while y_loc in y_previous:
+                    y_loc -= offset
+
+        axs.annotate(
+            row[gene_name_column],
+            xy=(row[factor], 0),
+            xytext=(row[factor], y_loc),
+            arrowprops=dict(
+                arrowstyle="-",
+                connectionstyle="arc3",
+                color="darkgrey",
+                linewidth=0.8,
+            ),
+            ha="center",
+            va="center",
+            size=annotation_fontsize,
+            color="black",
+            weight="regular",
+            alpha=0.9,
+        )
+        x_previous = np.abs(row[factor])
+        y_previous.append(y_loc)
+
+    if savefig:
+        plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
+
+
+def plot_gene_loadings_for_associated_variable(
+    GxC_associations: pd.DataFrame,
+    variable: str,
+    GxC_decoder: pd.DataFrame,
+    adata_var: pd.DataFrame,
+    gene_name_column: str,
+    color: Optional[str] = None,
+    spines_invisible: bool = False,
+    n_top_genes: int = 5,
+    genes_to_annotate: Optional[List[str]] = None,
+    annotation_fontsize: int = 14,
+    offset: float = 0.07,
+    x_distance: float = 5e-2,
+    d: int = 5,
+    savefig: Optional[str] = None,
+) -> None:
+    """Plots distributions of loadings for all factors associated with a given donor variable, and
+    annotates the top genes for each factor. Alternatively, it can highlight a list of user-
+    specified genes (e.g. genes belonging to a specific regulatory pathway).
+
+    Parameters:
+    ----------
+        GxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
+        variable (str): Name of the variable (e.g., SNP ID) for which factor loadings should be visualized.
+        GxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each GxC factor (columns).
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
+        color (Optional[str]): Color for boxplot outlines. If None, defaults to "darkblue".
+        spines_invisible (bool): Whether to hide the top, right, and left plot spines. Default is False.
+        n_top_genes (int): Number of top-loading genes to annotate if `genes_to_annotate` is not provided. Default is 5.
+             Warning that large values (>10-15) can lead to cluttered plots.
+        genes_to_annotate (Optional[List[str]]): List of user-specified gene IDs to annotate. Overrides `n_top_genes`. Default is None.
+        annotation_fontsize (int): Font size for gene name annotations. Default is 14.
+        x_distance (float): If the x-distance between adjacent annotations is smaller than `x_distance`, the positions of the
+            annotation texts are adjusted to reduce overlap. Default is 5e-2.
+        offset (float): Vertical offset to adjust annotation text to avoid overlap. Default is 0.07.
+        d (int): Scaling factor for figure size (width and height per subplot). Default is 5.
+        savefig (Optional[str]): Absolute path to save the resulting figure (if provided). Default is None.
+
+    Returns:
+    -------
+        None
+    """
+    GxC_associations_variable = GxC_associations.loc[GxC_associations.SNP_id == variable]
+    if GxC_decoder.index.name is None:
+        idx_name = "GeneID"
+    else:
+        idx_name = GxC_decoder.index.name
+    gene_loadings = GxC_decoder.filter(
+        [f.replace("U", "GxC") for f in GxC_associations_variable.Factor.unique().tolist()]
+    )
+    gene_loadings = pd.melt(
+        gene_loadings, var_name="Factor", value_name="loadings", ignore_index=False
+    )
+    gene_loadings = (
+        gene_loadings.assign(gene_factor=gene_loadings.index + "__" + gene_loadings.Factor)
+        .reset_index()
+        .set_index("gene_factor")
+    )
+
+    if genes_to_annotate is not None:
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in genes_to_annotate, axis=1)
+        )
+    else:
+        top_genes = {}
+        for f_gxc in GxC_associations_variable.Factor.unique():
+            f_gxc = f_gxc.replace("U", "GxC")
+            top_genes[f_gxc] = GxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
+        gene_loadings = gene_loadings.assign(
+            annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes[x.Factor], axis=1)
+        )
+
+    if adata_var.index.name != idx_name:
+        adata_var.rename_axis(idx_name, axis=0, inplace=True)
+    gene_loadings = gene_loadings.merge(
+        adata_var[gene_name_column].reset_index(), on=idx_name, how="left"
+    )
+
+    if GxC_associations_variable.Factor.nunique() % 3 == 0:
+        n_rows = GxC_associations_variable.Factor.nunique() // 3
+    else:
+        n_rows = (GxC_associations_variable.Factor.nunique() // 3) + 1
+    n_cols = (
+        3
+        if GxC_associations_variable.Factor.nunique() > 2
+        else GxC_associations_variable.Factor.nunique()
+    )
+
+    figure_size = ((n_cols + 0.5) * d, n_rows * d)
+    fig, axs = plt.subplots(
+        figsize=figure_size, nrows=n_rows, ncols=n_cols, constrained_layout=True
+    )
+    if n_rows > 1:
+        axs = axs.flatten()
+
+    for f_idx, f_gxc in enumerate(gene_loadings.Factor.unique()):
+        f_gxc_loadings = gene_loadings.loc[gene_loadings.Factor == f_gxc]
+        if n_rows > 1 or n_cols > 1:
+            axis = axs[f_idx]
+        else:
+            axis = axs
+
+        sns.boxplot(
+            data=f_gxc_loadings,
+            x="loadings",
+            fill=False,
+            color="darkblue" if color is None else color,
+            ax=axis,
+        )
+        axis.legend().remove()
+        axis.set_title(f_gxc.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize)
+        axis.set_yticks([])
+        axis.set_xlabel("Loadings", fontsize=annotation_fontsize + 2)
+        axis.tick_params(axis="x", which="major", labelsize=annotation_fontsize - 3)
+        if spines_invisible:
+            axis.spines["top"].set_visible(False)
+            axis.spines["right"].set_visible(False)
+            axis.spines["left"].set_visible(False)
+        # axis.spines["bottom"].set_visible(False)
+
+        f_gxc_loadings_anno = f_gxc_loadings.loc[f_gxc_loadings["annotate_gene"]]
+        f_gxc_loadings_anno = f_gxc_loadings_anno.sort_values(
+            by="loadings",
+            ascending=f_gxc_loadings.loadings.max() != f_gxc_loadings.loadings.abs().max(),
+        ).reset_index(drop=True)
+        x_previous = 0
+        y_previous = []
+        offset = offset
+        for idx, row in f_gxc_loadings_anno.iterrows():
+            y_loc = 0.05 if idx % 2 == 0 else -0.05
+            if np.abs(np.abs(row["loadings"]) - x_previous) < x_distance:
+                if y_loc > 0:
+                    y_loc += offset
+                    while y_loc in y_previous:
+                        y_loc += offset
+                else:
+                    y_loc -= offset
+                    while y_loc in y_previous:
+                        y_loc -= offset
+
+            axis.annotate(
+                row["GeneSymbol"],
+                xy=(row["loadings"], 0),
+                xytext=(row["loadings"], y_loc),
+                arrowprops=dict(
+                    arrowstyle="-",
+                    connectionstyle="arc3",
+                    color="darkgrey",
+                    linewidth=0.8,
+                ),
+                ha="center",
+                va="center",
+                size=annotation_fontsize,
+                color="black",
+                weight="regular",
+                alpha=0.9,
+            )
+            x_previous = np.abs(row["loadings"])
+            y_previous.append(y_loc)
+
+    if GxC_associations_variable.Factor.nunique() > 1:
+        fig.suptitle(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="left")
+    else:
+        axis.set_title(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="center")
+
+    if n_rows > 1 and len(axs) > gene_loadings.Factor.nunique():
+        for i in range(len(axs)):
+            if i >= gene_loadings.Factor.nunique():
+                fig.delaxes(axs[i])
+
+    if savefig:
+        plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
+
+
+def plot_ct_gex_vs_gt(
+    adata,
+    gene: Union[str, List[str]],
+    iid_column: str,
+    GT_matrix: pd.DataFrame,
+    SNP_id: str,
+    GxC_associations: pd.DataFrame,
+    filter_maf: bool = True,
+    test_gt_groups: bool = True,
+    annotation_fontsize: int = 20,
+    celltype: Optional[Union[str, List[str]]] = None,
+    celltype_column: Optional[str] = None,
+    cell_indices: Optional[List[int]] = None,
+    hgnc_column: Optional[str] = None,
+    savefig: bool = True,
+    output_dir: Optional[str] = None,
+    output_prefix: Optional[str] = None,
+    format: Optional[str] = None,
+    return_df: bool = False,
+) -> Optional[pd.DataFrame]:
+    """Plots pseudobulk gene expression (at the donor level) versus genotype for a given SNP and
+    gene, across one or more specified celltype(s) or set of cells. Optionally genotypes not
+    present in at least 5% of the individuals are ignored.
+
+    Parameters:
+    ----------
+        adata (anndata.AnnData): AnnData object with single-cell expression values and cell metadata (incl. donor IDs).
+        gene (Union[str, List[str]]): Name or list of gene IDs to plot expression for. If more than one gene is passed,
+            expression values are summed over all genes.
+        iid_column (str): Column in `adata.obs` indicating individual (donor) IDs. Individual IDs must be the same as
+            in the genotype matrix.
+        GT_matrix (pd.DataFrame): Genotype matrix with SNPs as rows and individual IDs as columns.
+        SNP_id (str): ID of the SNP to use.
+        GxC_associations (pd.DataFrame): DataFrame containing LIVI testing results, including the assessed allele for the SNP.
+            SNP IDs must be the same as in the genotype matrix.
+        filter_maf (bool): Whether to omit genotypes present in less than 5% of the donors. Default is True.
+        annotation_fontsize (int): Fontsize for axis (tick)labels. Ticks of the x axis (i.e. the SNP genotypes) are annotated
+            with the given fontsize, while axis/plot title fontsizes are adjusted to be slightly larger than that.
+        celltype (Optional[Union[str, List[str]]]): Aggregate expression values only across cells of the given celltype(s).
+            Default is None.
+        celltype_column (Optional[str]): Column in `adata.obs` that contains cell type annotations. Required if `celltype` is used.
+        cell_indices (Optional[List[int]]): Aggregate expression values only across these specific cells.
+            `cell_indices` must be present in `adata.obs`. Default is None.
+        hgnc_column (Optional[str]): Column in `adata.var` with gene symbols. Used for labeling. Default is None.
+        savefig (bool): Whether to save the figure to a file. Default is True.
+        output_dir (Optional[str]): Absolute path of the directory to save the plot if `savefig=True`. If not specified,
+            the current working directory is used.
+        output_prefix (Optional[str]): Optional prefix for the output filename. Default is None.
+        format (Optional[str]): File format to save (e.g., 'pdf', 'png'). Default is 'png'.
+        return_df (bool): If True, returns the DataFrame used for plotting, containing donor-level gene expression and genotypes.
+            Default is False.
+
+    Returns:
+    -------
+        plot_df (Optional[pd.DataFrame]): DataFrame containing donor-level gene expression and genotypes, only returned if `return_df=True`.
+    """
+
+    if isinstance(gene, list) and len(gene) > 1:
+        warnings.warn(
+            "More than one gene was passed. Expression values will be summed over genes."
+        )
+
+    if cell_indices is not None:
+        adata_aggr = aggregate_cell_counts(
+            adata=adata[cell_indices, gene], aggregate_cols=[iid_column], layer=None, sum_gene=True
+        )
+    elif celltype is not None:
+        assert (
+            celltype_column is not None
+        ), "Please specify `celltype_column` when `celltype` is passed."
+        if isinstance(celltype, str):
+            celltype = [celltype]
+        adata_aggr = aggregate_cell_counts(
+            adata=adata[adata.obs.loc[adata.obs[celltype_column].isin(celltype)].index, gene],
+            aggregate_cols=[iid_column],
+            layer=None,
+            sum_gene=True,
+        )
+    else:
+        warnings.warn(
+            "Neither `cell_indices` nor `celltype` were provided.\nAggregating gene expression over all cells."
+        )
+        adata_aggr = aggregate_cell_counts(
+            adata=adata[:, gene], aggregate_cols=[iid_column], layer=None, sum_gene=True
+        )
+
+    plot_df = pd.DataFrame(
+        adata_aggr.X.astype(np.float32),
+        index=adata_aggr.obs[iid_column],
+        columns=adata_aggr.var.index,
+    )
+    plot_df = (
+        plot_df.reset_index(drop=False)
+        .merge(
+            GT_matrix.loc[SNP_id].T.rename_axis(iid_column).reset_index(drop=False),
+            on=iid_column,
+            how="left",
+        )
+        .set_index(iid_column)
+    )
+
+    alleles = re.search(
+        re.compile(".*[0-9]+_([A-Z]+)_([A-Z]+)"), GT_matrix.loc[SNP_id].T.name
+    ).groups()
+
+    if (
+        alleles[0] == GxC_associations.loc[GxC_associations.SNP_id == SNP_id].assessed_allele
+    ).all():
+        allele_dict = {
+            0: "/".join([alleles[1], alleles[1]]),
+            1: "/".join([alleles[0], alleles[1]]),
+            2: "/".join([alleles[0], alleles[0]]),
+        }
+        plot_df = plot_df.replace({SNP_id: allele_dict})
+        plot_df[SNP_id] = pd.Categorical(
+            plot_df[SNP_id],
+            categories=[
+                "/".join([alleles[1], alleles[1]]),
+                "/".join([alleles[0], alleles[1]]),
+                "/".join([alleles[0], alleles[0]]),
+            ],
+        )
+    else:
+        allele_dict = {
+            0: "/".join([alleles[0], alleles[0]]),
+            1: "/".join([alleles[0], alleles[1]]),
+            2: "/".join([alleles[1], alleles[1]]),
+        }
+        plot_df = plot_df.replace({SNP_id: allele_dict})
+        plot_df[SNP_id] = pd.Categorical(
+            plot_df[SNP_id],
+            categories=[
+                "/".join([alleles[0], alleles[0]]),
+                "/".join([alleles[0], alleles[1]]),
+                "/".join([alleles[1], alleles[1]]),
+            ],
+        )
+
+    if filter_maf:
+        # Remove genotypes not present in at least 5% of the donors
+        snp_counts = plot_df[SNP_id].value_counts()
+        total_donors = sum(snp_counts.tolist())
+        min_donors = int(np.round(total_donors * 0.05))
+        plot_df = plot_df.loc[plot_df[SNP_id].isin(snp_counts.loc[snp_counts >= min_donors].index)]
+        plot_df[SNP_id] = plot_df[SNP_id].cat.remove_unused_categories()
+
+    gene_hgnc = adata.var.loc[gene][hgnc_column] if hgnc_column is not None else gene
+    if isinstance(gene, list):
+        gene_hgnc = " and ".join(gene_hgnc)
+        gene_hgnc = textwrap.fill(gene_hgnc, width=30)
+        gene = "__".join(gene)
+    fig, axs = plt.subplots(ncols=1, nrows=1, figsize=(8, 7), constrained_layout=False)
+    sns.violinplot(
+        plot_df,
+        y=gene,
+        x=SNP_id,
+        hue=SNP_id,
+        palette=(
+            ["lightblue", "royalblue", "blue"]
+            if len(plot_df[SNP_id].cat.categories) == 3
+            else ["lightblue", "blue"]
+        ),
+        ax=axs,
+        legend=False,
+        rasterized=True,
+    )
+    axs.set_ylabel(
+        gene_hgnc, fontdict={"fontsize": annotation_fontsize + 2, "fontstyle": "italic"}
+    )
+    axs.xaxis.get_ticklabels()[0].set_color("lightblue")
+    axs.xaxis.get_label().set_fontsize(22)
+    [t.set_fontsize(annotation_fontsize) for t in axs.xaxis.get_ticklabels()]
+    [t.set_fontsize(annotation_fontsize - 3) for t in axs.yaxis.get_ticklabels()]
+    gt_groups = plot_df[[gene, SNP_id]].groupby(by=SNP_id, observed=True).groups
+    gt_groups = [plot_df.loc[gt_groups[k], gene].to_numpy() for k in gt_groups.keys()]
+    pval1 = mannwhitneyu(gt_groups[0], gt_groups[1], alternative="two-sided")[1]
+    if test_gt_groups:
+        y_max = axs.get_ylim()[1]
+        axs.text(
+            axs.get_xticks()[0] - 0.15,
+            y_max - (0.15 * y_max),
+            f"Mann-Whitney \n$p$-value = {pval1:.2e}",
+            fontdict={"color": "black", "fontsize": "large", "ma": "right"},
+        )
+    if len(gt_groups) > 2:
+        if test_gt_groups:
+            pval2 = mannwhitneyu(gt_groups[0], gt_groups[2], alternative="two-sided")[1]
+            axs.text(
+                axs.get_xticks()[1] + 0.1,
+                y_max - (0.15 * y_max),
+                f"Mann-Whitney \n$p$-value = {pval2:.2e}",
+                fontdict={"color": "black", "fontsize": "large", "ma": "right"},
+            )
+        axs.xaxis.get_ticklabels()[1].set_color("royalblue")
+        axs.xaxis.get_ticklabels()[2].set_color("blue")
+    else:
+        axs.xaxis.get_ticklabels()[1].set_color("blue")
+    gt_group_median = (
+        plot_df.filter([gene, SNP_id]).groupby(by=SNP_id, observed=True)[gene].median()
+    )
+    axs.plot(
+        gt_group_median.index, gt_group_median.values, marker="o", linestyle="-", color="maroon"
+    )
+    if celltype is not None:
+        CT = " and ".join(celltype) if len(celltype) > 1 else celltype[0]
+    else:
+        CT = ""
+    axs.set_title(CT, fontdict={"fontweight": "bold", "fontsize": annotation_fontsize + 2})
+
+    if savefig:
+        od = output_dir if output_dir else os.getcwd()
+        op = output_prefix if output_prefix else ""
+        ext = "." + format if format else ".png"
+        genes_filename = gene_hgnc.replace(" ", "-").replace("\n", "-")
+
+        plt.savefig(
+            os.path.join(
+                od,
+                (
+                    f"{op}_{SNP_id}_vs_{genes_filename}_{CT.replace(' ', '-')}{ext}"
+                    if CT != ""
+                    else f"{op}_{SNP_id}_vs_{genes_filename}{ext}"
+                ),
+            ),
+            bbox_inches="tight",
+            dpi=400,
+            transparent=True,
+        )
+
+    #  plt.close()
+    if return_df:
+        return plot_df
+
+
 def visualize_GxC_effect(
-    SNP: str,
+    SNP_id: str,
     adata: AnnData,
     celltype_column: str,
     return_GxC_effect: bool = False,
+    marker_size: int = 2,
+    axis_title_fontsize: int = 26,
+    d: int = 10,
     model_results_dir: Optional[str] = None,
     cell_state_latent: Optional[pd.DataFrame] = None,
     GxC_associations: Optional[pd.DataFrame] = None,
     assignment_matrix: Optional[pd.DataFrame] = None,
-    gene: Optional[str] = None,
-    hgnc_column: Optional[str] = None,
     GxC_decoder: Optional[pd.DataFrame] = None,
-    UMAP_cell_state: Optional[Union[str, pd.DataFrame]] = None,
+    gene: Optional[str] = None,
+    factor_id: Optional[str] = None,
+    hgnc_column: Optional[str] = None,
+    umap_cell_state: Optional[Union[str, pd.DataFrame]] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
-):
-    """Visualise SNP effect on cell-state.
+) -> Optional[pd.DataFrame]:
+    """Visualise SNP effect on cells.
 
     Parameters
     ----------
-        SNP (str): ID of the SNP, whose effect should be calculated.
+        SNP_id (str): ID of the SNP, whose effect should be calculated.
         adata (AnnData): AnnData object containing the cell metadata in adata.obs.
         celltype_column (str): Column name in adata.obs indicating the celltype.
-        model_results_dir (str or None): Absolute path of the directory containing the inference and testing results files of the LIVI model. Must be provided if `cell_state_latent`, `CxG_associations`, `assignment_matrix` are None. Default is None.
-        cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead of `model_results_dir`. Default is None.
-        GxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC effects. Can be used instead of `model_results_dir`. Default is None.
-        assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead of `model_results_dir`. Default is None.
-        UMAP_cell_state (str, pd.DataFrame or None): Dataframe or name of the file containing a precomputed 2D UMAP of LIVI cell-state latent. If None, the UMAP is computed. Default is None.
-        savefig (str or None): If provided, save the generated plots in this path (and prefix). Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
-            extension of savefig, if savefig is not None.
+        return_GxC_effect (bool): If True, returns the quantified SNP effect at the single-cell level.
+        marker_size (int): Scatterplot marker size. Default is 2.
+        axis_title_fontsize (int): Fontsize of the title for each axis/plot.
+        d (int): Controls figure size. Resulting figure will have a width of 2.5 x d and a height d x number of axis/plots.
+            Default is 10.
+        model_results_dir (str or None): Absolute path of the directory containing the inference and testing
+            results files of the LIVI model. Must be provided if `cell_state_latent`, `GxC_associations`,
+            `assignment_matrix` are None. Default is None.
+        cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead
+            of `model_results_dir`. Default is None.
+        GxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC associations. Can be used instead of
+            `model_results_dir`. Default is None.
+        assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead
+            of `model_results_dir`. Default is None.
+        GxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each GxC factor (columns).
+        gene (Optional[str]): Plot the effect of the SNPs on the specific genes(s). Gene IDs must be the same as in `GxC_decoder`
+            and `adata.var` index.
+        factor_id (Optional[str]): ID of the factor to use for reconstruction. For SNPs associated with more than one factors, it
+            is recommended to specify which one to use when calculating the effect of the SNP on genes, in order to obtain
+            meaningful results.
+        hgnc_column (Optional[str]): Column in `adata.var` containing the HGNC gene names. If provided the genes will be annotated
+            using HGNC names instead of the gene IDs in `gene`.
+        umap_cell_state (str, pd.DataFrame or None): Dataframe or name of the file containing a precomputed 2D UMAP of LIVI
+            cell-state latent. If None, the UMAP is computed. Default is None.
+        savefig (Optional[str]): If provided, save the generated plots in this path (and prefix). Default is None.
+        format (Optional[str]): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file
+            format is inferred from the extension of savefig, if savefig is not None.
+
+
+    Returns:
+    -------
+        GxC_effect (Optional[pd.DataFrame]): Dataframe containing the effect of the given SNP at the single-cell level for cells
+            belonging to different cell-states.
     """
     if all(
         [
@@ -2195,13 +2771,14 @@ def visualize_GxC_effect(
     if gene is not None:
         assert (
             GxC_decoder is not None
-        ), "To visualize effect on individual genes either `GxC_decoder` cannot be `None`."
+        ), "To visualize effect on individual genes `GxC_decoder` cannot be `None`."
         GxC_effect = calculate_GxC_gene_effect(
             LIVI_associations=GxC_associations,
-            SNP_id=SNP,
+            SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
             GxC_decoder=GxC_decoder,
+            factor_id=factor_id,
         )
         GxC_effect = GxC_effect.filter(gene)
         if hgnc_column is not None:
@@ -2213,25 +2790,25 @@ def visualize_GxC_effect(
     else:
         GxC_effect = calculate_GxC_effect(
             LIVI_associations=GxC_associations,
-            SNP_id=SNP,
+            SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
         )
         hgnc_name = None
 
-    if UMAP_cell_state is not None:
-        if isinstance(UMAP_cell_state, pd.DataFrame):
-            umap_base = UMAP_cell_state
+    if umap_cell_state is not None:
+        if isinstance(umap_cell_state, pd.DataFrame):
+            umap_base = umap_cell_state
         else:
-            if not os.path.isfile(UMAP_cell_state) and not os.path.isfile(
-                os.path.join(model_results_dir, UMAP_cell_state)
+            if not os.path.isfile(umap_cell_state) and not os.path.isfile(
+                os.path.join(model_results_dir, umap_cell_state)
             ):
                 raise FileNotFoundError("UMAP cell state file not found.")
             else:
                 umap_base = (
-                    UMAP_cell_state
-                    if os.path.isfile(UMAP_cell_state)
-                    else os.path.join(model_results_dir, UMAP_cell_state)
+                    umap_cell_state
+                    if os.path.isfile(umap_cell_state)
+                    else os.path.join(model_results_dir, umap_cell_state)
                 )
                 umap_base = pd.read_csv(umap_base, sep="\t", index_col=0)
     else:
@@ -2243,17 +2820,13 @@ def visualize_GxC_effect(
     )
     umap_base = umap_base.merge(GxC_effect, right_index=True, left_index=True)
 
-    marker_size = 2
-    d = 10
-    legend_fontsize = 20
-    axis_title_fontsize = 26
+    legend_fontsize = axis_title_fontsize - 6
     # Plot the effect for each factor/gene (column in `GxC_effect`) associated with the given SNP
     if len(GxC_effect.columns) % 2 == 0:
         n_rows = len(GxC_effect.columns) // 2 + 1
     else:
         n_rows = int(len(GxC_effect.columns) // 2) + 1
 
-    d = d
     figure_size = (2.5 * d, n_rows * d)
     fig, axs = plt.subplots(ncols=2, nrows=n_rows, figsize=figure_size, constrained_layout=False)
     axs = axs.flatten()
@@ -2276,62 +2849,71 @@ def visualize_GxC_effect(
                 loc="center left",
                 bbox_to_anchor=(1.03, 0.5),
                 frameon=False,
-                fontsize=legend_fontsize,
-                title_fontsize=legend_fontsize + 2,
+                fontsize=legend_fontsize + 2,
+                title_fontsize=legend_fontsize + 3,
                 ncol=ncol_ct,
-                markerscale=5,
+                markerscale=6,
             )
             axs[0].set_title(
                 label="Cell type", fontdict={"fontsize": axis_title_fontsize}, loc="center"
             )
+            axs[0].xaxis.label.set_fontsize(axis_title_fontsize - 1)
+            axs[0].yaxis.label.set_fontsize(axis_title_fontsize - 1)
+            axs[0].tick_params(labelsize=legend_fontsize)
+
         elif 0 < i < len(GxC_effect.columns) + 1:
+            GE = GxC_effect.columns[i - 1]
+            if GxC_effect[GE].min() < 0 and GxC_effect[GE].max() < 0:
+                comap = "Blues_r"
+            elif GxC_effect[GE].min() <= 0 and GxC_effect[GE].max() > 0:
+                comap = "RdBu_r"
+            else:
+                comap = "Reds"
             sns.scatterplot(
                 x="UMAP1",
                 y="UMAP2",
-                hue=GxC_effect.columns[i - 1],
+                hue=GE,
                 data=umap_base,
                 ax=ax,
                 s=marker_size,
-                palette="RdBu_r",  # "vlag",
+                palette=comap,
                 legend=False,
                 rasterized=True,
             )
-            try:
-                sm = cm.ScalarMappable(
-                    cmap="RdBu_r",
-                    norm=colors.TwoSlopeNorm(
-                        vcenter=0.0,
-                        vmin=umap_base[GxC_effect.columns[i - 1]].min(),
-                        vmax=umap_base[GxC_effect.columns[i - 1]].max(),
-                    ),
+            norM = (
+                colors.TwoSlopeNorm(
+                    vcenter=0.0, vmin=GxC_effect[GE].min(), vmax=GxC_effect[GE].max()
                 )
-                cb = plt.colorbar(sm, ax=ax)
-                cb.ax.tick_params(labelsize=12)
-            except ValueError:
-                pass
+                if comap == "RdBu_r"
+                else colors.Normalize(vmin=GxC_effect[GE].min(), vmax=GxC_effect[GE].max())
+            )
+            sm = cm.ScalarMappable(cmap=comap, norm=norM)
+            cb = plt.colorbar(sm, ax=ax)
+            cb.ax.tick_params(labelsize=axis_title_fontsize - 10)
 
             ax.set_title(
                 label=(
-                    f"{SNP} - {hgnc_name[GxC_effect.columns[i - 1]]}"
+                    f"{SNP_id} effect on ${hgnc_name[GE]}$"
                     if hgnc_name is not None
-                    else f"{SNP} - {GxC_effect.columns[i - 1]}"
+                    else f"{SNP_id} effect on {GE}"
                 ),
                 fontdict={"fontsize": axis_title_fontsize},
                 loc="center",
             )
-            ax.xaxis.label.set_fontsize(axis_title_fontsize - 2)
-            ax.yaxis.label.set_fontsize(axis_title_fontsize - 2)
+            ax.xaxis.label.set_fontsize(axis_title_fontsize - 1)
+            ax.yaxis.label.set_fontsize(axis_title_fontsize - 1)
             ax.tick_params(labelsize=legend_fontsize)
         else:
             fig.delaxes(ax)
 
     plt.tight_layout()
+
     if savefig is not None:
         prefix, ext = os.path.splitext(savefig)
         ext = "." + format if format is not None else ".png" if ext == "" else ext
         effect_on = "genes" if gene is not None else "cells"
         plt.savefig(
-            f"{prefix}_SNP-{SNP}-effect-on-{effect_on}{ext}",
+            f"{prefix}_SNP-{SNP_id}-effect-on-{effect_on}{ext}",
             bbox_inches="tight",
             dpi=500,
             transparent=True,

@@ -449,6 +449,7 @@ def main(args):
                 re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f)
                 for f in files_i
                 if re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f) is not None
+                and "PRS" not in f
             ]
         if len(U_associations) > 0:
             if len(U_associations) > 1:
@@ -618,6 +619,7 @@ def main(args):
             A=seed_A,
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
+            top_one=True,
             assignment_threshold=0.8,
         )
 
@@ -967,8 +969,34 @@ def main(args):
             seeds_GxC_decoder.append(seed_GxC_dec)
 
         factor_correlations = correlate_factors_across_runs(seeds_GxC_decoder)
+
         robust_factors = aggregate_correlated_factors_across_runs(
             seeds_U, args.factor_correlation_theshold, factor_correlations=factor_correlations
+        )
+        robust_factors.to_csv(
+            os.path.join(output_dir, "Robust_aggregated_U_factors.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
+        )
+
+        robust_loadings = aggregate_correlated_factors_across_runs(
+            [
+                loadings.rename(
+                    columns=dict(
+                        zip(loadings.columns, [f.replace("GxC", "U") for f in loadings.columns])
+                    )
+                )
+                for loadings in seeds_GxC_decoder
+            ],
+            args.factor_correlation_theshold,
+            factor_correlations=factor_correlations,
+        )
+        robust_loadings.to_csv(
+            os.path.join(output_dir, "Robust_aggregated_GxC_decoder_loadings.tsv"),
+            sep="\t",
+            header=True,
+            index=True,
         )
 
         print(f"Found {robust_factors.shape[1]} robust factors across runs.")

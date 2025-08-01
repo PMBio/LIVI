@@ -8,11 +8,10 @@ import pytorch_lightning as pl
 import scanpy as sc
 import seaborn as sns
 import torch
+import torch.nn as nn
 import umap
 from anndata import AnnData
 from scipy.stats import iqr
-
-from src.analysis.plotting import make_gp_dotplot
 
 pl.seed_everything(32)
 
@@ -173,7 +172,9 @@ def assign_U_to_celltype(
     A: pd.DataFrame,
     cell_metadata: pd.DataFrame,
     celltype_column: str,
+    top_one: bool = False,
     assignment_threshold: float = 0.8,
+    strict: bool = True,
 ):
     """Assigns U factors to known celltypes. Only U factors assigned to at least one cell-state
     based on `assignment_threshold` are assigned to a celltype.
@@ -185,6 +186,12 @@ def assign_U_to_celltype(
         cell_metadata (pd.DataFrame): DataFrame containing cell information, such as celltype, donor ID etc.
             Cell IDs must be the index, and they must be the same as in `cell_state_latent`.
         celltype_column (str): Column in `cell_metadata` containing celltype information.
+        top_one (bool): If True, a celltypes x U factors matrix is calculated, and each U factor is assigned
+            to the celltype (row) that has the max value for that U factor (column). Else, U factors are assigned
+            to all the cell-state factors that have values >= 0.9 (or values >= `assignment_threshold` if strict
+            is False). Cell-state factor values are aggregated across cells within each cell type, and cell-
+            state factors are mapped to the cell type that has the highest average value (across cells) for that
+            factor. Default is False.
 
     Returns
     -------
@@ -192,10 +199,11 @@ def assign_U_to_celltype(
         factor was not assigned to any specific cell-state).
     """
 
-    U_not_assigned = A.columns[
-        A[A >= assignment_threshold].isna().sum(axis=0) == cell_state_latent.shape[1]
-    ]
-    celltypes_factors = cell_state_latent.merge(
+    zbase_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
+    zbase_softmax = pd.DataFrame(
+        zbase_softmax, index=cell_state_latent.index, columns=cell_state_latent.columns
+    )
+    celltypes_factors = zbase_softmax.merge(
         cell_metadata[celltype_column], right_index=True, left_index=True, how="left"
     )
     # Average of each factor across cells belonging to the same celltype
@@ -203,12 +211,34 @@ def assign_U_to_celltype(
         by=celltype_column, observed=True
     ).mean()  # celltypes x C factors
 
-    celltypes_U = pd.DataFrame(
-        celltypes_factors.to_numpy() @ A.to_numpy(),
-        index=celltypes_factors.index,
-        columns=A.columns,
-    )  # celltypes x U factors
-    U_celltype = celltypes_U.idxmax(axis=0).to_dict()
+    if not top_one and strict:
+        U_not_assigned = A.columns[A[A >= 0.9].isna().sum(axis=0) == cell_state_latent.shape[1]]
+    else:
+        U_not_assigned = A.columns[
+            A[A >= assignment_threshold].isna().sum(axis=0) == cell_state_latent.shape[1]
+        ]
+
+    if top_one:
+        celltypes_U = pd.DataFrame(
+            celltypes_factors.to_numpy() @ A.to_numpy(),
+            index=celltypes_factors.index,
+            columns=A.columns,
+        )  # celltypes x U factors
+        # Assign each U factor to the celltype with the highest value
+        U_celltype = celltypes_U.idxmax(axis=0).to_dict()
+    else:
+        threshold = 0.9 if strict else assignment_threshold
+        # Assign each cell-state factor to the celltype with the highest value
+        temp_dict = celltypes_factors.idxmax(axis=0).to_dict()
+        # Substitute cell-state factor names with corresponding celltype names
+        A_ct = A.rename(index=temp_dict).T  # U x celltypes
+        # For each U factor pick the celltypes (cell-state factors with A values >= threshold)
+        U_celltype = (
+            A_ct.apply(lambda x: x >= threshold, axis=1)
+            .apply(lambda x: x.index[x].unique().tolist(), axis=1)
+            .to_dict()
+        )
+
     for u in U_not_assigned:
         U_celltype[u] = None
 
@@ -216,7 +246,7 @@ def assign_U_to_celltype(
 
 
 def calculate_GxC_effect(
-    LIVI_associations: pd.DataFrame,
+    GxC_associations: pd.DataFrame,
     SNP_id: str,
     cell_state_latent: pd.DataFrame,
     A: pd.DataFrame,
@@ -232,23 +262,21 @@ def calculate_GxC_effect(
 
     Returns
     -------
-        GxC_effect (pd.DataFrame): Dataframe containing the effect of the given SNP on each associated cell-state factor.
+        GxC_effect (pd.DataFrame): Dataframe containing the effect of the given SNP at the single-cell
+            level for cells belonging to different cell-states.
     """
 
-    snp_associations = LIVI_associations.loc[LIVI_associations.SNP_id == SNP_id]
+    snp_associations = GxC_associations.loc[GxC_associations.SNP_id == SNP_id]
     factor_beta = snp_associations.filter(["Factor", "effect_size"]).set_index("Factor").T
     ## Visualise the effect as if all individuals had the assessed allele
     # genotypes = GT_matrix.loc[SNP_id, IIDs].astype(int)
     # genotypes = genotypes.replace({2:1})
     # genotypes = genotypes.to_numpy().reshape(-1,1) # genotypes is now n_cells x 1  SNP
 
-    ## G_effect = genotypes*factor_beta.values
-
     A = A.filter(snp_associations.Factor)
+    cell_state_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
 
-    GxC_effect = (
-        cell_state_latent.to_numpy() @ A.to_numpy() * factor_beta.to_numpy()  # G_effect.to_numpy()
-    )
+    GxC_effect = cell_state_softmax @ A.to_numpy() * factor_beta.to_numpy()  # G_effect.to_numpy()
     GxC_effect = pd.DataFrame(
         GxC_effect,
         index=cell_state_latent.index,
@@ -259,27 +287,33 @@ def calculate_GxC_effect(
 
 
 def calculate_GxC_gene_effect(
-    LIVI_associations: pd.DataFrame,
+    GxC_associations: pd.DataFrame,
     SNP_id: str,
     cell_state_latent: pd.DataFrame,
     A: pd.DataFrame,
     GxC_decoder: pd.DataFrame,
+    factor_id: Optional[str] = None,
 ):
     """Compute effect of a given SNP on cell-states.
 
     Parameters
     ----------
-        LIVI_associations (pd.DataFrame): Dataframe containing LIVI CxG effects.
+        LIVI_associations (pd.DataFrame): Dataframe containing LIVI GxC effects.
         SNP_id (str): ID of the SNP, whose effect should be calculated.
         cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
         A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
+        factor_id (Optional[str]): ID of the factor to use for reconstruction. For SNPs associated with more than one factors, it
+            is recommended to specify which one to use when calculating the effect of the SNP on genes, in order to obtain
+            meaningful results.
 
     Returns
     -------
         GxC_effect_gene (pd.DataFrame): Dataframe containing the effect of the given SNP on each gene.
     """
 
-    snp_associations = LIVI_associations.loc[LIVI_associations.SNP_id == SNP_id]
+    snp_associations = GxC_associations.loc[GxC_associations.SNP_id == SNP_id]
+    if factor_id is not None:
+        snp_associations = snp_associations.loc[snp_associations.Factor == factor_id]
     factor_beta = snp_associations.filter(["Factor", "effect_size"]).set_index("Factor").T
 
     A = A.filter(snp_associations.Factor)
@@ -287,7 +321,8 @@ def calculate_GxC_gene_effect(
         snp_associations.Factor.str.replace("U", "GxC")
     ).T  # U x genes
 
-    GxC_effect = cell_state_latent.to_numpy() @ A.to_numpy() * factor_beta.to_numpy()  # cells x U
+    cell_state_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
+    GxC_effect = cell_state_softmax @ A.to_numpy() * factor_beta.to_numpy()  # cells x U
     GxC_effect_gene = GxC_effect @ GxC_decoder.to_numpy()  # cells x genes
     GxC_effect_gene = pd.DataFrame(
         GxC_effect_gene,
@@ -421,95 +456,6 @@ def aggregate_cell_counts(
     return adata_aggr
 
 
-def annotate_factor_GSEA(
-    factor_loadings: pd.Series,
-    adata_var: pd.DataFrame,
-    hgnc_column: str,
-    n_top_genes: int = 30,
-    background_genes: Optional[List[str]] = None,
-    databases: Optional[List[str]] = None,
-    plot_results: bool = False,
-    figsize: Tuple[int, int] = (8, 13),
-    n_top_terms: int = 5,
-    savefig: Optional[str] = None,
-) -> Tuple[List[str], List[str]]:
-    """Annotates factors by gene set enrichment analysis (GSEA) on top-loading genes for the given
-    factor and optionally plots enriched terms.
-
-    Parameters:
-    ----------
-        factor_loadings (pd.Series): Gene loadings for a factor, indexed by gene IDs matching `adata_var`.
-        adata_var (pd.DataFrame): DataFrame corresponding to `adata.var` containing gene metadata.
-        hgnc_column (str): Name of the column in `adata_var` that contains HGNC gene symbols.
-        n_top_genes (int): Number of top absolute-loading genes to use for the enrichment analysis. Default is 30.
-        background_genes (Optional[List[str]]): List of background genes for the enrichment analysis.
-            If None, all genes in `adata_var[hgnc_column]` are used. Default is None.
-        databases (Optional[List[str]]): List of gene set databases to query (e.g., "GO_Biological_Process_2023").
-            If None, a default list is used. Default is None.
-        plot_results (bool): Whether to generate a dotplot of the top enriched terms. Default is False.
-        figsize (Tuple[int, int]): Figure size if `plot_results` is True. Default is (8, 13).
-        n_top_terms (int): Number of top enriched terms to display in the plot. Default is 5.
-        savefig (Optional[str]): Absolute path of the filename to save the plot. If None, the plot is not saved.
-            Default is None.
-
-    Returns:
-    -------
-        top_pathway (List[str]): Name of the top enriched pathway with the smallest adjusted p-value.
-            If more than one pathways have the same p-value, all of them are included.
-        pathway_genes (List[str]): Genes involved in the top enriched pathway(s).
-    """
-
-    if databases is None:
-        databases_bio = [
-            "GO_Biological_Process_2023",
-            "GO_Molecular_Function_2023",
-            "KEGG_2021_Human",
-            "Reactome_2022",
-        ]
-    else:
-        databases_bio = databases
-
-    if background_genes is None:
-        background_genes = adata_var[hgnc_column].tolist()
-
-    enr_bio = gp.enrichr(
-        gene_list=adata_var.loc[factor_loadings.abs().nlargest(n_top_genes).index][
-            hgnc_column
-        ].tolist(),
-        gene_sets=databases_bio,
-        background=background_genes,
-        outdir=None,
-    )
-    enr_bio_sign = enr_bio.results.loc[enr_bio.results["Adjusted P-value"] <= 0.05]
-    top_pathway = enr_bio_sign.nsmallest(
-        n=1, columns=["Adjusted P-value"], keep="all"
-    ).Term.tolist()
-    pathway_genes = enr_bio_sign.loc[enr_bio_sign.Term.isin(top_pathway)].Genes.tolist()
-
-    if plot_results:
-        fig, axs = plt.subplots(figsize=figsize, constrained_layout=True)
-        make_gp_dotplot(
-            df=enr_bio_sign,
-            x="Gene_set",
-            y="Term",
-            column="Adjusted P-value",
-            size=6,
-            top_term=n_top_terms,
-            title=f"Top {n_top_genes} absolute gene loadings",
-            show_ring=True,
-            marker="o",
-            xticklabels_rot=30,
-            ax=axs,
-            fig=fig,
-            rasterize=True,
-        )
-        axs.set_xlabel("")
-        if savefig is not None:
-            plt.savefig(savefig, transparent=True, bbox_inches="tight", dpi=500)
-
-    return top_pathway, pathway_genes
-
-
 def find_cells_with_high_loadings_for_factor(
     factor_loadings: Union[np.ndarray, pd.Series],
     iqr_threshold: float = 0.5,
@@ -563,6 +509,77 @@ def find_cells_with_high_loadings_for_factor(
         if cell_idx is not None
         else factor_loadings[cell_subset]
     )
+
+
+def annotate_factor_GSEA(
+    factor_loadings: pd.Series,
+    adata_var: pd.DataFrame,
+    hgnc_column: str,
+    n_top_genes: int = 30,
+    background_genes: Optional[List[str]] = None,
+    databases: Optional[List[str]] = None,
+) -> Tuple[List[str], List[str]]:
+    """Annotates factors by gene set enrichment analysis (GSEA) on top-loading genes for the given
+    factor and optionally plots enriched terms.
+
+    Parameters:
+    ----------
+        factor_loadings (pd.Series): Gene loadings for a factor, indexed by gene IDs matching `adata_var`.
+        adata_var (pd.DataFrame): DataFrame corresponding to `adata.var` containing gene metadata.
+        hgnc_column (str): Name of the column in `adata_var` that contains HGNC gene symbols.
+        n_top_genes (int): Number of top absolute-loading genes to use for the enrichment analysis. Default is 30.
+        background_genes (Optional[List[str]]): List of background genes for the enrichment analysis.
+            If None, all genes in `adata_var[hgnc_column]` are used. Default is None.
+        databases (Optional[List[str]]): List of gene set databases to query (e.g., "GO_Biological_Process_2023").
+            If None, a default list is used. Default is None.
+        plot_results (bool): Whether to generate a dotplot of the top enriched terms. Default is False.
+
+    Returns:
+    -------
+        top_pathway (List[str]): Name of the top enriched pathway with the smallest adjusted p-value.
+            If more than one pathways have the same p-value, all of them are included.
+        pathway_genes (List[str]): Genes involved in the top enriched pathway(s).
+    """
+
+    if databases is None:
+        databases_bio = [
+            "GO_Biological_Process_2023",
+            "GO_Molecular_Function_2023",
+            "KEGG_2021_Human",
+            "Reactome_2022",
+        ]
+    else:
+        databases_bio = databases
+
+    if background_genes is None:
+        background_genes = adata_var[hgnc_column].tolist()
+
+    enr_bio = gp.enrichr(
+        gene_list=adata_var.loc[factor_loadings.abs().nlargest(n_top_genes).index][
+            hgnc_column
+        ].tolist(),
+        gene_sets=databases_bio,
+        background=background_genes,
+        outdir=None,
+    )
+    enr_bio_sign = enr_bio.results.loc[enr_bio.results["Adjusted P-value"] <= 0.05]
+    if enr_bio_sign.shape[0] > 0:
+        top_pathways = (
+            enr_bio_sign.groupby("Gene_set")
+            .apply(
+                lambda x: x.nsmallest(n=1, columns=["Adjusted P-value"], keep="all").Term.tolist(),
+                include_groups=False,
+            )
+            .rename("Term")
+            .to_frame()
+        )
+        top_pathways = top_pathways.explode("Term")
+        top_genes = enr_bio_sign.loc[enr_bio_sign.Term.isin(top_pathways.Term)].Genes.to_frame()
+        top_genes.index = top_pathways.index
+        top_pathways_genes = pd.concat([top_pathways, top_genes], axis=1, ignore_index=False)
+    else:
+        top_pathways_genes = None
+    return top_pathways_genes
 
 
 def assign_factor_to_known_pathways(
