@@ -874,8 +874,8 @@ class LIVI_cis(pl.LightningModule):
             torch.randn(z_dim, n_gxc_factors, device=device)  # , generator=self.G_gen)
         )
         self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
-        if self.hparams.genetics_seed is not None:
-            self.init_individual_embedding(self.U_context, self.hparams.genetics_seed)
+        # if self.hparams.genetics_seed is not None:
+        #     self.init_individual_embedding(self.U_context, self.hparams.genetics_seed)
         # nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
         if n_persistent_factors != 0:
@@ -907,14 +907,14 @@ class LIVI_cis(pl.LightningModule):
         self.set_train_V_mode(self.train_V_mode)
         self.set_train_GxC_mode(self.train_GxC_mode)
 
-    def init_individual_embedding(self, embedding, seed):
-        # Save the current random state
-        current_state = torch.get_rng_state()
-        torch.manual_seed(seed)
-        # Initialize the embedding using the specified random seed
-        embedding.reset_parameters()
-        # Restore the original random state
-        torch.set_rng_state(current_state)
+    # def init_individual_embedding(self, embedding, seed):
+    #     # Save the current random state
+    #     current_state = torch.get_rng_state()
+    #     torch.manual_seed(seed)
+    #     # Initialize the embedding using the specified random seed
+    #     embedding.reset_parameters()
+    #     # Restore the original random state
+    #     torch.set_rng_state(current_state)
 
     def prepare_batch(self, batch):
         x = batch["x"]
@@ -996,10 +996,11 @@ class LIVI_cis(pl.LightningModule):
             #     cell_snp_mask @ known_cis_effect
             # )  # cells x genes: mean cis-SNP effect on each gene
             # # Make the cis effect cell-state-specific by multiplying with the reconstructed cell-state GEX (=> genes essentially define the cell-state; if a gene is less relevant for the given cells (i.e. closer to 0), then the cis effect will become close to zero as well)
-            # y_c = F.softmax(self.decoder.mean(z), dim=-1)
+            # x_c = F.softmax(self.decoder.mean(z), dim=-1)
             # celltype_known_cis_effect = (
-            #     known_cis_effect * y_c
-            # )  # celltype_known_cis_effect = known_cis_effect
+            #     known_cis_effect * x_c
+            # )
+            # Cis-effect per cell-state
             known_cis_effect = (
                 snp_gene_mask.resize(1, self.hparams.n_cis_snps, self.x_dim) * self.SNP_gene_effect
             )  # z x SNPs x genes
@@ -1009,6 +1010,8 @@ class LIVI_cis(pl.LightningModule):
             celltype_known_cis_effect = torch.einsum(
                 "ik,kil->il", z, celltype_known_cis_effect
             )  # cells x genes
+        else:
+            celltype_known_cis_effect
 
         log_lik = (
             self.decoder(
@@ -1017,11 +1020,12 @@ class LIVI_cis(pl.LightningModule):
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
                 size_factor=size_factor,
                 covariate_effect=covariate_effect,
-                known_cis_effect=(
-                    celltype_known_cis_effect
-                    if snp_gene_mask is not None and self.hparams.n_cis_snps != 0
-                    else None
-                ),
+                known_cis_effect=celltype_known_cis_effect,
+                # known_cis_effect=(
+                #     celltype_known_cis_effect
+                #     if snp_gene_mask is not None and self.hparams.n_cis_snps != 0
+                #     else None
+                # ),
             )
             .log_prob(x)
             .mean()
@@ -1386,6 +1390,385 @@ class LIVI_cis_gen(LIVI_cis):
         self.set_pretrain_mode(self.pretrain_mode)
         self.set_train_V_mode(self.train_V_mode)
         self.set_train_GxC_mode(self.train_GxC_mode)
+
+
+class LIVI_cis_efficient(LIVI_cis):
+    """LIVI model accounting for cell-state-specific cis genetic effects in a memory efficint
+    manner."""
+
+    def __init__(
+        self,
+        x_dim: int,
+        z_dim: int,
+        y_dim: int,
+        n_gxc_factors: int,
+        n_persistent_factors: int,
+        n_cis_eqtls: int,
+        encoder_hidden_dims: List[int],
+        learning_rate: float,
+        warmup_epochs_vae: int = 60,
+        warmup_epochs_G: int = 0,
+        covariates_dims: Optional[List[int]] = None,
+        l1_weight: float = 0.001,
+        A_weight: float = 0.001,
+        batch_norm_decoder: bool = False,
+        device: str = "cuda",
+        genetics_seed: Optional[int] = None,
+        initialise_training_mode: bool = True,
+    ):
+        super().__init__(
+            x_dim=x_dim,
+            z_dim=z_dim,
+            y_dim=y_dim,
+            n_gxc_factors=n_gxc_factors,
+            n_persistent_factors=n_persistent_factors,
+            n_cis_snps=n_cis_eqtls,
+            encoder_hidden_dims=encoder_hidden_dims,
+            learning_rate=learning_rate,
+            warmup_epochs_vae=warmup_epochs_vae,
+            warmup_epochs_G=warmup_epochs_G,
+            covariates_dims=covariates_dims,
+            l1_weight=l1_weight,
+            A_weight=A_weight,
+            batch_norm_decoder=batch_norm_decoder,
+            device=device,
+            genetics_seed=genetics_seed,
+            initialise_training_mode=False,
+        )
+
+        self.save_hyperparameters()
+
+        if self.hparams.genetics_seed is not None:
+            self.G_gen = torch.Generator(device=device)
+            self.G_gen.manual_seed(genetics_seed)
+        else:
+            self.G_gen = None
+
+        self.x_dim = x_dim
+        self.z_dim = z_dim
+        self.y_dim = y_dim
+        self.n_gxc_factors = n_gxc_factors
+        self.n_persistent_factors = n_persistent_factors
+        self.warmup_epochs_G = 0 if self.n_persistent_factors == 0 else warmup_epochs_G
+        self.pretrain_mode = True if warmup_epochs_vae > 0 else False
+        self.train_V_mode = False if self.pretrain_mode or self.n_persistent_factors == 0 else True
+        self.train_GxC_mode = False if self.pretrain_mode or self.n_gxc_factors == 0 else True
+        self.checkpointing_epoch = warmup_epochs_vae + self.warmup_epochs_G + 5
+        self.frozen = False
+
+        self.encoder = Encoder(
+            x_dim=x_dim,
+            z_dim=z_dim,
+            encoder_hidden_dims=encoder_hidden_dims,
+            layer_norm=True,
+            device=device,
+        )
+
+        self.register_buffer("z_prior_loc", torch.zeros(self.z_dim))
+        self.register_buffer("z_prior_scale", torch.ones(self.z_dim))
+
+        self.decoder = LIVIcis_Decoder_gen(
+            z_dim=z_dim,
+            x_dim=x_dim,
+            decoder_hidden_dims=[],
+            layer_norm=True,
+            n_gxc_factors=n_gxc_factors,
+            n_persistent_factors=n_persistent_factors,
+            pretrain_VAE=self.pretrain_mode,
+            train_V=self.train_V_mode,
+            train_GxC=self.train_GxC_mode,
+            batch_norm=batch_norm_decoder,
+            device=device,
+            genetics_generator=self.G_gen,
+        )
+
+        self.A = nn.Parameter(
+            torch.randn(z_dim, n_gxc_factors, device=device, generator=self.G_gen)
+        )
+        self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+        if self.hparams.genetics_seed is not None:
+            nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
+
+        if n_persistent_factors != 0:
+            self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
+
+        # Covariate (e.g. experimental batch) correction per gene
+        if self.hparams.covariates_dims is not None:
+            self.covariate_effect = nn.Embedding(
+                sum(self.hparams.covariates_dims), x_dim, device=device
+            )
+        else:
+            self.covariate_effect = None
+
+        if n_cis_eqtls != 0:
+            self.SNP_gene_effect = nn.Parameter(
+                torch.randn(self.z_dim, n_cis_eqtls, device=device, generator=self.G_gen)
+            )
+            self.nonzero_indices_set = False
+
+        self.automatic_optimization = False
+
+        if initialise_training_mode:
+            self.initialise_model()
+
+    def prepare_batch(self, batch):
+        x = batch["x"]
+        y = batch["y"]
+        if self.hparams.covariates_dims is not None:
+            assert len(self.hparams.covariates_dims) == len(
+                batch["covariates"]
+            ), "Number of covariates different than the number of covariates in data module."
+            covariates = batch["covariates"]
+        else:
+            covariates = None
+        size_factor = batch["size_factor"]
+        known_cis_associations = None if self.hparams.n_cis_eqtls == 0 else batch["known_cis"]
+        cell_gt = None if self.hparams.n_cis_eqtls == 0 else batch["GT_cells"]
+
+        if not self.nonzero_indices_set and known_cis_associations is not None:
+            self.nonzero_indices = known_cis_associations.nonzero(as_tuple=True)
+            self.nonzero_indices_set = True
+            assert (
+                self.nonzero_indices[0].numel() == self.hparams.n_cis_eqtls
+            ), "The number of known cis-eQTLs in the DataModule does not match the number of known cis-eQTLs in the model args."
+
+        return x, y, covariates, size_factor, known_cis_associations, cell_gt
+
+    def compute_elbo(
+        self,
+        z_dist: torch.distributions.Distribution,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        covariates: Optional[List[torch.Tensor]] = None,
+        size_factor: Optional[torch.Tensor] = None,
+        snp_gene_mask: Optional[torch.Tensor] = None,
+        cell_snp_mask: Optional[torch.Tensor] = None,
+    ):
+        """Computes evidence lower bound (ELBO).
+
+        Parameters
+        ----------
+            z_dist: Variational distribution.
+            x: Input data.
+            y: Donor IDs.
+            covariates: Cell/donor covariates (e.g. technical batch ID or sex).
+            size_factor: Size factor to correct for gene count differences.
+
+        Returns
+        -------
+            Mean evidence lower bound (ELBO).
+        """
+        z = z_dist.rsample()
+        z = nn.Softmax(dim=1)(z)
+
+        kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
+
+        if self.n_gxc_factors != 0:
+            A = torch.sigmoid(self.A)
+            z_interaction = (z @ A) * self.U_context(y)
+        else:
+            z_interaction = None
+            A = None
+
+        if covariates is not None:
+            covariate_effect = torch.zeros_like(x)
+            for covar in range(len(covariates)):
+                covar_indices = covariates[covar]
+                # increase the indices by the number of categories of the previous covariate(s)
+                embedding_indices = covar_indices + sum(self.hparams.covariates_dims[:covar])
+                covariate_effect += self.covariate_effect(embedding_indices)
+        else:
+            covariate_effect = None
+
+        if (
+            snp_gene_mask is not None
+            and cell_snp_mask is not None
+            and self.hparams.n_cis_eqtls != 0
+        ):
+
+            row_indices, col_indices = self.nonzero_indices
+
+            # Select only eSNPs
+            cell_snp_mask = cell_snp_mask[:, row_indices]  # cells x non-zero
+            # Cell-state-specific cis effect
+            celltype_cis_effect = z @ self.SNP_gene_effect  # cells x non-zero
+            # Element-wise multiplication with the GT
+            celltype_cis_effect = cell_snp_mask * celltype_cis_effect  # cells x non-zero
+            # Scatter back to cells x genes
+            celltype_known_cis_effect = torch.zeros(
+                (celltype_cis_effect.size(0), self.x_dim), device=self.hparams.device
+            )
+            celltype_known_cis_effect.scatter_add_(
+                dim=1,
+                index=col_indices.unsqueeze(0).expand(celltype_cis_effect.shape),
+                src=celltype_cis_effect.to(torch.float),
+            )
+        else:
+            celltype_known_cis_effect = None
+
+        log_lik = (
+            self.decoder(
+                z=z,
+                GxC=z_interaction,
+                persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
+                size_factor=size_factor,
+                covariate_effect=covariate_effect,
+                known_cis_effect=celltype_known_cis_effect,
+            )
+            .log_prob(x)
+            .mean()
+        )
+
+        return log_lik - kl_div, A
+
+    def step(self, batch, batch_idx, mode="train"):
+        """Performs a single training or validation step."""
+        x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask = self.prepare_batch(batch)
+
+        # # First-time setup: extract nonzero indices and initialize SNP_gene_effect
+        # # if not hasattr(self, "SNP_gene_effect") or self.SNP_gene_effect is None:
+        # if self.SNP_gene_effect.numel() == 0:
+        #     print("Initializing SNP_gene_effect")
+        #     self.nonzero_indices = snp_gene_mask.nonzero(as_tuple=True)
+        #     num_nonzero = self.nonzero_indices[0].numel()
+        #     self.SNP_gene_effect = nn.Parameter(
+        #         torch.randn(self.z_dim, num_nonzero).to(self.hparams.device),
+        #         requires_grad = self.train_GxC_mode
+        #     )
+        #     self.register_parameter("cis_effect", self.SNP_gene_effect)
+        #     # Reinitialize optimizer to include SNP_gene_effect
+        #     self.reinitialize_optimizer()
+
+        optim_vae = self.optimizers()
+
+        z_dist = self(x)
+
+        elbo, A = self.compute_elbo(
+            z_dist, x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask
+        )
+        logs = {f"{mode}/elbo": elbo.item()}
+        if not self.train_GxC_mode or self.n_gxc_factors == 0:
+            l1_loss_context = torch.zeros([1], device=self.device)
+            loss_A = torch.zeros([1], device=self.device)
+        else:
+            l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
+                torch.cat([p for p in self.decoder.GxC_decoder.parameters()]),
+                ord=1,
+                dim=(0, 1),
+            )
+            A_penalty = (A * (1 - A)).pow(2)  # forces entries of A to be towards 0 or 1
+            loss_A = self.hparams.A_weight * A_penalty.sum()
+
+        logs[f"{mode}/L1_penalty_context"] = l1_loss_context.item()
+        logs[f"{mode}/penalty_A"] = loss_A.item()
+        loss = -elbo + l1_loss_context + loss_A
+        logs[f"{mode}/livi_loss"] = loss.item()
+        logs["hp_metric"] = loss.item()
+
+        if mode == "train":
+            optim_vae.zero_grad()
+            self.manual_backward(loss)
+            optim_vae.step()
+
+        self.log_dict(
+            logs,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+        )
+
+    def set_train_GxC_mode(self, mode: bool):
+        self.train_GxC_mode = mode
+        self.decoder.train_GxC = mode
+        if mode:
+            if self.n_gxc_factors != 0:
+                self.U_context.requires_grad_(True)
+                self.decoder.GxC_decoder.requires_grad_(True)
+                self.A.requires_grad_(True)
+            if self.hparams.n_cis_eqtls != 0:
+                self.SNP_gene_effect.requires_grad_(True)
+        else:
+            if self.n_gxc_factors != 0:
+                self.U_context.requires_grad_(False)
+                self.decoder.GxC_decoder.requires_grad_(False)
+                self.A.requires_grad_(False)
+            if self.hparams.n_cis_eqtls != 0:
+                self.SNP_gene_effect.requires_grad_(False)
+
+    def predict(self, x, y):
+        """Model inference. Get latent space and individual embeddings for the input data.
+
+        Parameters
+        ----------
+            x (torch.Tensor): Input gene expression vector per cell.
+            y (torch.Tensor): ID of the individual the cell is derived from.
+
+        Returns
+        -------
+        Inference results (Dict[str,torch.Tensor])
+            'cell-state_latent' (torch.Tensor): Cell state latent space.
+            'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
+            'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
+            'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+            'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
+            'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
+            'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
+        """
+
+        with torch.no_grad():
+            self.eval()
+
+            z = self(x).rsample()
+            cell_state_decoder = self.decoder.mean[0].weight
+            if self.n_gxc_factors != 0:
+                U = self.U_context(y)
+                GxC_decoder = self.decoder.GxC_decoder[0].weight
+            else:
+                U = None
+                GxC_decoder = None
+            if self.n_persistent_factors != 0:
+                V = self.V_persistent(y)
+                V_decoder = self.decoder.persistent_decoder[0].weight
+            else:
+                V = None
+                V_decoder = None
+
+            if self.hparams.n_cis_eqtls != 0:
+                cell_state_cis_effect = torch.zeros(
+                    self.z_dim, self.hparams.n_cis_eqtls, self.x_dim
+                )
+                cell_state_cis_effect[:, self.nonzero_indices[0], self.nonzero_indices[1]] = (
+                    self.SNP_gene_effect
+                )
+            else:
+                cell_state_cis_effect = None
+
+        return {
+            "cell-state_latent": z,
+            "cell-state_decoder": cell_state_decoder,
+            "U_embedding": U,
+            "GxC_decoder": GxC_decoder,
+            "assignment_matrix": self.A,
+            "V_embedding": V,
+            "V_decoder": V_decoder,
+            "cis_SNP_effect": cell_state_cis_effect,
+        }
+
+    # def reinitialize_optimizer(self):
+    #     """Reinitialize optimizer dynamically to include additional model parameters."""
+    #     if self.trainer is not None:
+    #         self.trainer.optimizers = [self.configure_optimizers()]
+
+    def configure_optimizers(self):
+        """Configures optimizer."""
+
+        optim_vae = torch.optim.Adam(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+        )
+
+        return optim_vae
 
 
 class LIVI_cis_gen_GT_PCs(LIVI_cis_gen):
