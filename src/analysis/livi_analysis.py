@@ -47,9 +47,8 @@ from src.data_modules.livi_data import LIVIDataModule
 from src.models.livi import LIVI
 from src.models.livi_experimental import (
     LIVI_cis,
+    LIVI_cis_efficient,
     LIVI_cis_gen,
-    LIVI_cis_gen_adversary_U,
-    LIVI_cis_gen_GT_PCs,
 )
 
 
@@ -376,7 +375,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             metric="euclidean",
             factors=None,
             z_score=None,
-            color_map="vlag",
+            color_map="RdBu_r",
             savefig=os.path.join(output_dir, f"{of_prefix}.png"),
             return_df=False,
         )
@@ -387,7 +386,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
-            color_map="vlag",
+            color_map="RdBu_r",
             row_cluster=True,
             column_cluster=False,
             z_score=1,
@@ -406,7 +405,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             metric="euclidean",
             factors=None,
             z_score=None,
-            color_map="vlag",
+            color_map="RdBu_r",
             savefig=os.path.join(output_dir, ""),
             format="png",
             return_df=False,
@@ -423,7 +422,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             metric="euclidean",
             factors=None,
             z_score=1,
-            color_map="vlag",
+            color_map="RdBu_r",
             savefig=os.path.join(output_dir, "Zscored.png"),
             return_df=False,
         )
