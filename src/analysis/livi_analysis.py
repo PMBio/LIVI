@@ -302,7 +302,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
         'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
         'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-        'CxG_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+        'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
         'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
         'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
         'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
@@ -513,7 +513,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
                 index=True,
             )
             warnings.warn(
-                "Could not save CxG decoder dataframe under provided filename (filename too long).\nSaved as '_CxG_decoder.tsv' instead."
+                "Could not save GxC decoder dataframe under provided filename (filename too long).\nSaved as '_GxC_decoder.tsv' instead."
             )
 
     else:
@@ -605,6 +605,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     else:
         assignment_matrix = None
 
+    cell_state_decoder = None
     return (
         zbase,
         cell_state_decoder,
@@ -678,15 +679,15 @@ def main(args):
             f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
         )
 
-    associations_CxG = associations[0] if isinstance(associations, tuple) else associations
+    associations_GxC = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
 
-    if U_context is not None and associations_CxG is not None and A is not None:
+    if U_context is not None and associations_GxC is not None and A is not None:
         ## Exceptions for too-long filenames
         try:
             plot_U_factor_similarity(
                 U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+                associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 assign_to_celltypes=True,
                 cell_state_factors=zbase,
@@ -697,7 +698,7 @@ def main(args):
         except OSError:
             plot_U_factor_similarity(
                 U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+                associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 assign_to_celltypes=True,
                 cell_state_factors=zbase,
@@ -712,13 +713,13 @@ def main(args):
         try:
             plot_ID_similarity(
                 U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+                associated_factors=associations_GxC.Factor.unique(),
                 savefig=os.path.join(output_dir, of_prefix),
             )
         except OSError:
             plot_ID_similarity(
                 U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+                associated_factors=associations_GxC.Factor.unique(),
                 savefig=os.path.join(output_dir, ""),
             )
             warnings.warn(
@@ -729,7 +730,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations_CxG,
+                GxC_effects_LIVI=associations_GxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -741,7 +742,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations_CxG,
+                GxC_effects_LIVI=associations_GxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
