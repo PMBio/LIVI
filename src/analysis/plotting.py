@@ -1335,7 +1335,7 @@ def QQplot(
             linestyles=":",
             linewidth=4,
             color=color,
-            label="Data not shown",
+            label="Truncated",
         )
     ax.legend(loc="upper left", fontsize=14, frameon=False)
     ax.set(xlabel=r"Expected $-\log_{10} P$", ylabel=r"Observed $-\log_{10} P$")
@@ -1583,7 +1583,16 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
 
 ### Edited from venny4py package ###
 def venny4py_custom_colors(
-    sets, plot_title, custom_colors=None, out="./", asax=False, ext="png", dpi=300, size=3.5
+    sets,
+    plot_title,
+    custom_colors=None,
+    out="./",
+    asax=False,
+    ext="png",
+    dpi=300,
+    size=3.5,
+    alpha=0.4,
+    fontsize=None,
 ):
     from itertools import combinations
 
@@ -1597,7 +1606,7 @@ def venny4py_custom_colors(
     if custom_colors is None:
         custom_colors = ["green", "darkorange", "maroon", "royalblue"]  # colors
     lw = size * 0.12  # line width
-    fs = size * 2  # font size
+    fs = fontsize if fontsize is not None else size * 2  # font size
     nc = 2  # legend cols
     cs = 4  # columnspacing
 
@@ -1629,7 +1638,7 @@ def venny4py_custom_colors(
                     height=eh,
                     fc=custom_colors[i],
                     angle=ae[i],
-                    alpha=0.3,
+                    alpha=alpha,
                 )
             )
             ax.add_artist(
@@ -1673,14 +1682,15 @@ def venny4py_custom_colors(
 
         # legend
         handles = [
-            mpatches.Patch(color=custom_colors[i], label=l, alpha=0.3) for i, l in enumerate(sets)
+            mpatches.Patch(color=custom_colors[i], label=l, alpha=alpha)
+            for i, l in enumerate(sets)
         ]
         ax.legend(
             labels=sets,
             handles=handles,
             fontsize=fs * 1.1,
             frameon=False,
-            bbox_to_anchor=(0.5, 0.99),
+            bbox_to_anchor=(0.5, 1.05),
             bbox_transform=ax.transAxes,
             loc=9,
             handlelength=1.5,
@@ -1690,11 +1700,11 @@ def venny4py_custom_colors(
         )
         plt.title(
             label=plot_title,
-            fontdict={"weight": "bold", "fontsize": 8},
+            fontdict={"weight": "bold", "fontsize": fs},
         )
         if asax is False:
             fig.savefig(
-                f"{out}{ext}",
+                f"{out}.{ext}",
                 dpi=dpi,
                 bbox_inches="tight",
                 transparent=True,
