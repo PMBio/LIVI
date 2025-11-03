@@ -2416,6 +2416,7 @@ def plot_ct_gex_vs_gt(
     celltype_column: Optional[str] = None,
     cell_indices: Optional[List[int]] = None,
     hgnc_column: Optional[str] = None,
+    violin_colors: Optional[List[str]] = None,
     savefig: bool = True,
     output_dir: Optional[str] = None,
     output_prefix: Optional[str] = None,
@@ -2446,6 +2447,8 @@ def plot_ct_gex_vs_gt(
         cell_indices (Optional[List[int]]): Aggregate expression values only across these specific cells.
             `cell_indices` must be present in `adata.obs`. Default is None.
         hgnc_column (Optional[str]): Column in `adata.var` with gene symbols. Used for labeling. Default is None.
+        violin_colors (Optional[List[str]]): List of colors to use for the distributions of the different genotypes.
+            Must be of the same length as the number of the different possible genotype groups.
         savefig (bool): Whether to save the figure to a file. Default is True.
         output_dir (Optional[str]): Absolute path of the directory to save the plot if `savefig=True`. If not specified,
             the current working directory is used.
@@ -2504,7 +2507,7 @@ def plot_ct_gex_vs_gt(
     )
 
     alleles = re.search(
-        re.compile(".*[0-9]+_([A-Z]+)_([A-Z]+)"), GT_matrix.loc[SNP_id].T.name
+        re.compile(".*[0-9]+.{1}([A-Z]+).{1}([A-Z]+)"), GT_matrix.loc[SNP_id].T.name
     ).groups()
 
     if (
@@ -2553,17 +2556,33 @@ def plot_ct_gex_vs_gt(
         gene_hgnc = " and ".join(gene_hgnc)
         gene_hgnc = textwrap.fill(gene_hgnc, width=30)
         gene = "__".join(gene)
+
+    gt_group_median = (
+        plot_df.filter([gene, SNP_id]).groupby(by=SNP_id, observed=True)[gene].median()
+    )
+    if violin_colors is None:
+        if len(plot_df[SNP_id].cat.categories) == 3:
+            violin_colors = (
+                ["lightsteelblue", "cornflowerblue", "blue"]
+                if gt_group_median.iloc[0] > gt_group_median.iloc[-1]
+                else ["mistyrose", "indianred", "brown"]
+            )
+        else:
+            violin_colors = (
+                ["lightsteelblue", "blue"]
+                if gt_group_median.iloc[0] > gt_group_median.iloc[-1]
+                else ["mistyrose", "brown"]
+            )
+    else:
+        violin_colors = violin_colors
+
     fig, axs = plt.subplots(ncols=1, nrows=1, figsize=(8, 7), constrained_layout=False)
     sns.violinplot(
         plot_df,
         y=gene,
         x=SNP_id,
         hue=SNP_id,
-        palette=(
-            ["lightblue", "royalblue", "blue"]
-            if len(plot_df[SNP_id].cat.categories) == 3
-            else ["lightblue", "blue"]
-        ),
+        palette=violin_colors,
         ax=axs,
         legend=False,
         rasterized=True,
@@ -2571,7 +2590,7 @@ def plot_ct_gex_vs_gt(
     axs.set_ylabel(
         gene_hgnc, fontdict={"fontsize": annotation_fontsize + 2, "fontstyle": "italic"}
     )
-    axs.xaxis.get_ticklabels()[0].set_color("lightblue")
+    axs.xaxis.get_ticklabels()[0].set_color(violin_colors[0])
     axs.xaxis.get_label().set_fontsize(22)
     [t.set_fontsize(annotation_fontsize) for t in axs.xaxis.get_ticklabels()]
     [t.set_fontsize(annotation_fontsize - 3) for t in axs.yaxis.get_ticklabels()]
@@ -2595,15 +2614,17 @@ def plot_ct_gex_vs_gt(
                 f"Mann-Whitney \n$p$-value = {pval2:.2e}",
                 fontdict={"color": "black", "fontsize": "large", "ma": "right"},
             )
-        axs.xaxis.get_ticklabels()[1].set_color("royalblue")
-        axs.xaxis.get_ticklabels()[2].set_color("blue")
+        axs.xaxis.get_ticklabels()[1].set_color(violin_colors[1])
+        axs.xaxis.get_ticklabels()[2].set_color(violin_colors[2])
     else:
-        axs.xaxis.get_ticklabels()[1].set_color("blue")
-    gt_group_median = (
-        plot_df.filter([gene, SNP_id]).groupby(by=SNP_id, observed=True)[gene].median()
-    )
+        axs.xaxis.get_ticklabels()[1].set_color(violin_colors[-1])
+
     axs.plot(
-        gt_group_median.index, gt_group_median.values, marker="o", linestyle="-", color="maroon"
+        gt_group_median.index,
+        gt_group_median.values,
+        marker="o",
+        linestyle="-",
+        color="midnightblue" if "blue" in violin_colors else "maroon",
     )
     if celltype is not None:
         CT = " and ".join(celltype) if len(celltype) > 1 else celltype[0]
@@ -2783,7 +2804,7 @@ def visualize_GxC_effect(
             GxC_decoder is not None
         ), "To visualize effect on individual genes `GxC_decoder` cannot be `None`."
         GxC_effect = calculate_GxC_gene_effect(
-            LIVI_associations=GxC_associations,
+            GxC_associations=GxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
@@ -2799,7 +2820,7 @@ def visualize_GxC_effect(
 
     else:
         GxC_effect = calculate_GxC_effect(
-            LIVI_associations=GxC_associations,
+            GxC_associations=GxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
