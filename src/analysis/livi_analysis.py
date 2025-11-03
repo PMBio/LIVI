@@ -44,11 +44,13 @@ from src.analysis.plotting import (
     visualise_cell_state_latent,
 )
 from src.data_modules.livi_data import LIVIDataModule
-from src.models.livi import LIVI
+from src.models.livi import LIVI, LIVI_cis
 from src.models.livi_experimental import (
-    LIVI_cis,
     LIVI_cis_efficient,
-    LIVI_cis_gen,
+    LIVI_cis_with_adversary,
+    LIVI_wo_cis_with_adversary,
+    LIVI_wo_cis_with_adversary_test,
+    old_LIVI_cis_gen,
 )
 
 
@@ -113,6 +115,7 @@ def validate_and_read_passed_args(
     assert (
         args.individual_column in adata.obs.columns
     ), f"`individual_column`: '{args.individual_column}' not in adata.obs columns."
+    adata.obs[args.individual_column] = adata.obs[args.individual_column].astype(str)
     if args.batch_column:
         assert (
             args.batch_column in adata.obs.columns
@@ -131,6 +134,7 @@ def validate_and_read_passed_args(
         pgr = pgen.PgenReader(args.genotype_matrix)
         GT_matrix = pgr.load_genotypes()  # SNPs x donors
         variant_info = pgr.variant_df
+        variant_info = variant_info.reset_index(names="variant_id")
     else:
         assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
         _, ext = os.path.splitext(args.genotype_matrix)
@@ -187,6 +191,7 @@ def validate_and_read_passed_args(
         GT_PCs = pd.read_csv(
             args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
         )  # donors x PCs
+        GT_PCs.index = GT_PCs.index.astype(str)
         GT_PCs = GT_PCs.loc[GT_PCs.index.isin(adata.obs[args.individual_column].unique())]
         if GT_PCs.shape[0] == 0:
             raise ValueError(
@@ -239,7 +244,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI_cis_gen.load_from_checkpoint(
+    LIVI_model = LIVI_wo_cis_with_adversary_test.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
