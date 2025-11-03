@@ -43,7 +43,7 @@ from src.analysis.plotting import (
     plot_U_factor_similarity,
     visualise_cell_state_latent,
 )
-from src.data_modules.livi_data import LIVIDataModule
+from src.data_modules.livi_data import LIVIDataset
 from src.models.livi import LIVI, LIVI_cis
 from src.models.livi_experimental import (
     LIVI_cis_efficient,
@@ -313,31 +313,59 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
     """
 
-    X = (
-        torch.Tensor(adata.layers[args.adata_layer].todense())
-        if args.adata_layer
-        else torch.Tensor(adata.X.todense())
+    ### Inference in batches to save memory
+
+    dataset = LIVIDataset(
+        adata=adata,
+        y_key="IID",
+        use_size_factor=True,
+        size_factor_key=None,
+        layer_key=None,
+        covariates_keys=None,
+        known_cis_eqtls=None,
+        eqtl_genotypes=None,
+        strict=False,
     )
+
+    nbatches = adata.shape[0] // int(5e5)  ### batch_size TO BE ADDED AS A USER-SPECIFIED ARG
+    batch_indices = [
+        (int((current_batch - 1) * 5e5), int(current_batch * 5e5))
+        for current_batch in range(1, nbatches + 1)
+    ]
+    # add last cells if any:
+    if batch_indices[-1][1] < adata.shape[0]:
+        batch_indices.append((batch_indices[-1][1], adata.shape[0]))
+
+    cell_state_latent = pd.DataFrame(
+        columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)]
+    )
+    for i in range(len(batch_indices)):
+        data = dataset.__getitem__(
+            list(np.arange(batch_indices[i][0], batch_indices[i][1], 1, dtype=int))
+        )
+        livi_results_batch = LIVI_model.predict(x=data["x"], y=data["y"])
+        c_latent_batch = livi_results_batch["cell-state_latent"].detach().numpy()
+        c_latent_batch = pd.DataFrame(
+            c_latent_batch,
+            index=adata.obs.index[batch_indices[i][0] : batch_indices[i][1]],
+            columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)],
+        )
+        cell_state_latent = pd.concat([cell_state_latent, c_latent_batch], axis=0)
+
     Y, _ = pd.factorize(adata.obs[args.individual_column])
     Y = torch.Tensor(Y).to(torch.long)
 
-    livi_results = LIVI_model.predict(x=X, y=Y)
+    livi_results = LIVI_model.predict(x=data["x"], y=Y)
 
-    zbase = livi_results["cell-state_latent"].detach().numpy()
-    zbase = pd.DataFrame(
-        zbase,
-        index=adata.obs.index,
-        columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)],
-    )
     try:
-        zbase.to_csv(
+        cell_state_latent.to_csv(
             os.path.join(output_dir, f"{of_prefix}_cell-state_latent.tsv"),
             sep="\t",
             header=True,
             index=True,
         )
     except OSError:
-        zbase.to_csv(
+        cell_state_latent.to_csv(
             os.path.join(output_dir, "_cell-state_latent.tsv"),
             sep="\t",
             header=True,
@@ -348,7 +376,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         )
     try:
         visualise_cell_state_latent(
-            z=zbase,
+            z=cell_state_latent,
             cell_metadata=adata.obs,
             output_dir=output_dir,
             of_prefix=of_prefix,
@@ -358,7 +386,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
     except OSError:
         visualise_cell_state_latent(
-            z=zbase,
+            z=cell_state_latent,
             cell_metadata=adata.obs,
             output_dir=output_dir,
             of_prefix="",
@@ -371,7 +399,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         )
     try:
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -387,7 +415,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
         # Z-score across celltypes
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -401,7 +429,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
     except OSError:
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -418,7 +446,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
         # Z-score across celltypes
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -438,7 +466,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
     cell_state_decoder = livi_results["cell-state_decoder"].detach().numpy()
     cell_state_decoder = pd.DataFrame(
-        cell_state_decoder, index=adata.var.index, columns=zbase.columns
+        cell_state_decoder, index=adata.var.index, columns=cell_state_latent.columns
     )
     try:
         cell_state_decoder.to_csv(
@@ -588,7 +616,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
         assignment_matrix = torch.sigmoid(livi_results["assignment_matrix"]).detach().numpy()
         assignment_matrix = pd.DataFrame(
-            assignment_matrix, index=zbase.columns, columns=U_context.columns
+            assignment_matrix, index=cell_state_latent.columns, columns=U_context.columns
         )
         try:
             assignment_matrix.to_csv(
@@ -612,7 +640,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
     cell_state_decoder = None
     return (
-        zbase,
+        cell_state_latent,
         cell_state_decoder,
         U_context,
         GxC_decoder,
@@ -641,7 +669,7 @@ def main(args):
     print("\n-------- Performing inference --------\n")
 
     (
-        zbase,
+        cell_state_latent,
         cell_state_decoder,
         U_context,
         GxC_decoder,
@@ -695,7 +723,7 @@ def main(args):
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 assign_to_celltypes=True,
-                cell_state_factors=zbase,
+                cell_state_factors=cell_state_latent,
                 cell_metadata=adata.obs,
                 celltype_column=args.celltype_column,
                 savefig=os.path.join(output_dir, of_prefix),
@@ -706,7 +734,7 @@ def main(args):
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 assign_to_celltypes=True,
-                cell_state_factors=zbase,
+                cell_state_factors=cell_state_latent,
                 cell_metadata=adata.obs,
                 celltype_column=args.celltype_column,
                 savefig=os.path.join(output_dir, ""),
