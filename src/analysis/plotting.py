@@ -13,6 +13,7 @@ import plotnine as pn
 import scanpy as sc
 import seaborn as sns
 import torch
+import torch.nn as nn
 from anndata import AnnData
 from matplotlib import cm, colormaps, colors
 from matplotlib.lines import Line2D
@@ -1347,29 +1348,20 @@ def QQplot(
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
 
 
-def plot_U_factor_similarity(  ### REVIEW - UPDATE
+def plot_U_factor_corr(
     U: pd.DataFrame,
     associated_factors: list,
     A: pd.DataFrame,
-    assign_to_celltypes: bool = False,
-    cell_state_factors: Optional[pd.DataFrame] = None,
-    cell_metadata: Optional[pd.DataFrame] = None,
-    celltype_column: Optional[str] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
 ) -> None:
-    """Plot the pairwise correlations of SNP-associated GxC factors and clustering of the
-    individuals based on those.
+    """Creates a heatmap of the pairwise Pearson correlations of SNP-associated U factors.
 
     Parameters
     ----------
         U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
         A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
-        assign_to_celltypes (bool): Whether to assign U factors to cell-types by z-scoring the cell-state factor loadings across cells.
-        cell_state_factors (pd.DataFrame or None): Dataframe containing LIVI cell-state latent.
-        cell_metadata (pd.DataFrame or None): Dataframe containing cell metadata.
-        celltype_column (str or None): Column name in cell metadata indicating the celltype.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
         format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
@@ -1391,85 +1383,91 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
 
     # Visualize pearson cor between significant U factors
     plt.figure(figsize=(12, 10))
-    sns.heatmap(pairwise_correlations, cmap="vlag", center=0, rasterized=ext == ".pdf")
+    sns.heatmap(pairwise_correlations, cmap="RdBu_r", center=0, rasterized=ext == ".pdf")
     plt.title("Pearson's $\\rho$ between significant $U$ factors", fontsize=15, pad=20)
     if savefig:
         plt.savefig(
             f"{prefix}_U_factor_correlations{ext}",
-            dpi=200,
+            dpi=400,
             transparent=True,
             bbox_inches="tight",
         )
     plt.close()
-    # Assign cell-state factors to known cell types
-    if assign_to_celltypes:
-        assert (
-            cell_state_factors is not None
-            and cell_metadata is not None
-            and celltype_column is not None
-        ), "To assign cell-state factors to celltypes, the `cell_state_factors`, `cell_metadata` and `celltype_column` arguments are required."
-        df_celltype = cell_state_factors.copy()
-        df_celltype["Cell type"] = cell_metadata[celltype_column].values
-        # Average of each factor across cells belonging to the same celltype
-        df_celltype = (
-            df_celltype.groupby(by="Cell type", observed=True)
-            .mean()
-            .reset_index()
-            .set_index("Cell type")
-        )
-        # zscore factor values across celltypes
-        df_celltype = pd.DataFrame(
-            zscore(df_celltype.to_numpy(), axis=0),
-            index=df_celltype.index,
-            columns=df_celltype.columns,
-        )
-        # Assign each factor to the celltype with the highest value
-        temp_dict = df_celltype.idxmax(axis=0).to_dict()
-        A = A.rename(index=temp_dict)
 
-    # Cluster cell-state factors based on the U factors that are assigned to them
+
+def plot_GxC_similarity(
+    U: pd.DataFrame,
+    associated_factors: list,
+    A: pd.DataFrame,
+    cell_state_factors: pd.DataFrame,
+    cell_metadata: pd.DataFrame,
+    celltype_column: str,
+    donor_column: str,
+    savefig: str,
+    format: str,
+) -> None:
+    """Creates a clustermap of the cosine similarity between GxC factors and their assigned cell
+    types.
+
+    Parameters
+    ----------
+        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        associated_factors (list): List of associated factors to filter and plot.
+        A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
+        cell_state_factors (pd.DataFrame or None): Dataframe containing LIVI cell-state latent.
+        cell_metadata (pd.DataFrame or None): Dataframe containing cell metadata.
+        celltype_column (str or None): Column name in cell metadata indicating the cell type.
+        donor_column (str or None): Column name in cell metadata indicating the donor.
+        savefig (str or None): If provided, the path to save the generated plots. Default is None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
+
+    Returns
+    -------
+        None
+    """
+
+    A = A.filter(associated_factors)
+    U = U.filter(associated_factors)
+
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
+    cc_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_factors.to_numpy())).numpy()
+    GxC = pd.DataFrame(
+        (cc_softmax @ A.to_numpy()) * U.loc[cell_metadata[donor_column]].to_numpy(),
+        index=cell_state_factors.index,
+        columns=A.columns,
+    )
+    GxC.columns = [c.replace("U_", "GxC ") for c in GxC.columns]
+
+    GxC = GxC.merge(cell_metadata[celltype_column], right_index=True, left_index=True)
+    GxC = GxC.groupby(celltype_column, observed=True).apply(lambda x: x.mean())
+
     clm = sns.clustermap(
-        A,
-        col_cluster=False,
+        GxC,
+        col_cluster=True,
         row_cluster=True,
         metric="cosine",
-        cmap="RdBu",
+        cmap="Reds",
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
-        center=1,
         rasterized=ext == ".pdf",
     )
-    # clm.fig.suptitle("", fontsize=16, y=1.05)
-    if savefig:
-        clm.savefig(
-            f"{prefix}_cell-state-factor_clustering_based_on_U-factors{ext}",
-            dpi=200,
-            transparent=True,
-            bbox_inches="tight",
-        )
-    plt.close()
 
-    # Cluster U factors based on the cell-state factors in which they are active
-    clm = sns.clustermap(
-        A,
-        col_cluster=True,
-        row_cluster=False,
-        metric="cosine",
-        cmap="RdBu",
-        cbar_pos=(0.99, 0.14, 0.022, 0.2),
-        center=1,
-        rasterized=ext == ".pdf",
-    )
     if savefig:
         clm.savefig(
-            f"{prefix}_U-factor_clustering_based_on_cell-state-factors{ext}",
-            dpi=200,
+            f"{prefix}_GxC-factor_celltype_clustering{ext}",
+            dpi=400,
             transparent=True,
             bbox_inches="tight",
         )
     plt.close()
 
 
-def plot_ID_similarity(  ### REVIEW - UPDATE
+def plot_donor_similarity(
     U: pd.DataFrame,
     associated_factors: list,
     donor_metadata: Optional[pd.DataFrame] = None,
@@ -1479,7 +1477,7 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
     format: Optional[str] = None,
 ):
     """Cluster donors and draw a heatmap of donor similarity based on LIVI's U embedding.
-    Optionally color the donor IDs after a donor covariate of interest.
+    Optionally color the donor IDs according to a donor covariate of interest.
 
         Parameters
         ----------
@@ -1535,15 +1533,15 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
         col_cluster=False,
         row_cluster=True,
         metric="cosine",
-        # cmap="RdBu",
-        center=1,
+        cmap="RdBu_r",
+        center=0,
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
         rasterized=ext == ".pdf",
     )
     if savefig:
         clm.savefig(
             f"{prefix}_IID_clustering_based_on_U_factors{ext}",
-            dpi=200,
+            dpi=400,
             transparent=True,
             bbox_inches="tight",
         )
@@ -1576,7 +1574,7 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
         plt.savefig(
             f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
             bbox_inches="tight",
-            dpi=300,
+            dpi=400,
             transparent=True,
         )
     plt.close()

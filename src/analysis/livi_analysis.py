@@ -39,8 +39,9 @@ from src.analysis.livi_testing import (
 from src.analysis.plotting import (
     cell_state_factors_heatmap,
     overlap_with_known_eQTLs,
-    plot_ID_similarity,
-    plot_U_factor_similarity,
+    plot_donor_similarity,
+    plot_GxC_similarity,
+    plot_U_factor_corr,
     visualise_cell_state_latent,
 )
 from src.data_modules.livi_data import LIVIDataset
@@ -718,42 +719,65 @@ def main(args):
     if U_context is not None and associations_GxC is not None and A is not None:
         ## Exceptions for too-long filenames
         try:
-            plot_U_factor_similarity(
+            plot_U_factor_corr(
                 U=U_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
-                assign_to_celltypes=True,
-                cell_state_factors=cell_state_latent,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
                 savefig=os.path.join(output_dir, of_prefix),
+                format="png",
             )
         except OSError:
-            plot_U_factor_similarity(
+            plot_U_factor_corr(
                 U=U_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
-                assign_to_celltypes=True,
-                cell_state_factors=cell_state_latent,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
                 savefig=os.path.join(output_dir, ""),
+                format="png",
             )
             warnings.warn(
                 "Could not save U factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
             )
 
         try:
-            plot_ID_similarity(
+            plot_GxC_similarity(
+                U=U_context,
+                associated_factors=associations_GxC.Factor.unique(),
+                A=A,
+                cell_state_factors=cell_state_latent,
+                cell_metadata=adata.obs,
+                celltype_column=args.celltype_column,
+                donor_column=args.individual_column,
+                savefig=os.path.join(output_dir, of_prefix),
+                format="png",
+            )
+        except OSError:
+            plot_GxC_similarity(
+                U=U_context,
+                associated_factors=associations_GxC.Factor.unique(),
+                A=A,
+                cell_state_factors=cell_state_latent,
+                cell_metadata=adata.obs,
+                celltype_column=args.celltype_column,
+                donor_column=args.individual_column,
+                savefig=os.path.join(output_dir, ""),
+                format="png",
+            )
+            warnings.warn(
+                "Could not save GxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+            )
+        try:
+            plot_donor_similarity(
                 U=U_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 savefig=os.path.join(output_dir, of_prefix),
+                format="png",
             )
         except OSError:
-            plot_ID_similarity(
+            plot_donor_similarity(
                 U=U_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 savefig=os.path.join(output_dir, ""),
+                format="png",
             )
             warnings.warn(
                 "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
