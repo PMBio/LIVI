@@ -26,6 +26,7 @@ from tqdm import tqdm
 from src.analysis._utils import (
     add_livi_umaps_to_cell_metadata,
     aggregate_cell_counts,
+    assign_U_to_celltype,
     calculate_GxC_effect,
     calculate_GxC_gene_effect,
     compute_umap,
@@ -274,7 +275,7 @@ def visualise_cell_state_latent(
         cell_metadata (pd.DataFrame): DataFrame containing cell metadata.
         output_dir (str): Directory to save the figure.
         of_prefix (str): Prefix for the output figure.
-        format (str): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to.
+        format (str): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to.
         args (argparse.Namespace): Parsed command-line arguments; must include the name
         of cell-type and batch columns in cell_metadata.
 
@@ -312,7 +313,7 @@ def visualise_cell_state_latent(
         ax=axs[0],
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     axs[0].legend(
         title="Cell type",
@@ -332,7 +333,7 @@ def visualise_cell_state_latent(
         ax=axs[1],
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     axs[1].legend(
         title="Batch",
@@ -372,7 +373,7 @@ def visualise_livi_embeddings(
         cell_metadata (pd.DataFrame): DataFrame containing cell information.
         output_dir (str): Directory to save the figures.
         of_prefix (str): Prefix for the output figures.
-        format (str): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to.
+        format (str): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to.
         plot_title (str): Title for the plots.
         celltype_column (str): Column containing cell type information.
         batch_column (str, optional): Column containing batch information.
@@ -426,7 +427,7 @@ def visualise_livi_embeddings(
         ax=ax1,
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     ax1.legend(
         title="Cell type",
@@ -448,7 +449,7 @@ def visualise_livi_embeddings(
             ax=ax2,
             s=3,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax2.legend(
             title="Batch",
@@ -504,7 +505,7 @@ def visualise_livi_embeddings(
             ax=ax1,
             s=6,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax1.legend(
             title="Batch",
@@ -525,7 +526,7 @@ def visualise_livi_embeddings(
                 ax=ax2,
                 s=6,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             ax2.legend(
                 title="Sex",
@@ -572,7 +573,7 @@ def visualise_livi_embeddings(
                     data=pca_U,
                     ax=axs[p1 - 2],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[p1 - 2].legend(
                     title="Batch",
@@ -593,7 +594,7 @@ def visualise_livi_embeddings(
                     data=pca_U,
                     ax=axs[axs_idx],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[axs_idx].legend(
                     title="Batch",
@@ -629,7 +630,7 @@ def visualise_livi_embeddings(
                     ax=axs[p1 - 2],
                     palette=["lightpink", "slategrey"],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[p1 - 2].legend(
                     title="Sex",
@@ -652,7 +653,7 @@ def visualise_livi_embeddings(
                     ax=axs[axs_idx],
                     palette=["lightpink", "slategrey"],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[axs_idx].legend(
                     title="Sex",
@@ -704,7 +705,7 @@ def visualise_livi_embeddings(
         ax=ax1,
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     ax1.legend(
         title="Cell type",
@@ -726,7 +727,7 @@ def visualise_livi_embeddings(
             ax=ax2,
             s=3,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax2.legend(
             title="Batch",
@@ -747,7 +748,7 @@ def visualise_livi_embeddings(
                 ax=ax3,
                 s=6,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             ax3.legend(
                 title="Sex",
@@ -793,7 +794,7 @@ def visualise_livi_embeddings(
             ax=axs[p1 - 2],
             s=4,
             palette="tab20",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         axs[p1 - 2].legend(
             title="Cell type",
@@ -815,7 +816,7 @@ def visualise_livi_embeddings(
             ax=axs[axs_idx],
             s=4,
             palette="tab20",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         axs[axs_idx].legend(
             title="Cell type",
@@ -852,7 +853,7 @@ def visualise_livi_embeddings(
                 data=pca_GxC,
                 ax=axs[p1 - 2],
                 s=4,
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[p1 - 2].legend(
                 title="Batch",
@@ -873,7 +874,7 @@ def visualise_livi_embeddings(
                 data=pca_GxC,
                 ax=axs[axs_idx],
                 s=4,
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[axs_idx].legend(
                 title="Batch",
@@ -909,7 +910,7 @@ def visualise_livi_embeddings(
                 ax=axs[p1 - 2],
                 s=4,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[p1 - 2].legend(
                 title="Sex",
@@ -931,7 +932,7 @@ def visualise_livi_embeddings(
                 ax=axs[axs_idx],
                 s=4,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[axs_idx].legend(
                 title="Sex",
@@ -989,7 +990,7 @@ def visualise_livi_embeddings(
             ax=ax1,
             s=6,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax1.legend(
             title="Batch",
@@ -1010,7 +1011,7 @@ def visualise_livi_embeddings(
                 ax=ax2,
                 s=6,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             ax2.legend(
                 title="Sex",
@@ -1062,7 +1063,7 @@ def cell_state_factors_heatmap(
         zscore (int, optional): Whether to z-score the data row- (0) or column-wise (1). Default is None.
         color_map (str, optional): Name of `matplotlib` colormap to use.
         savefig (str, optional): Absolute filepath to save the figure. If None, the figure is not saved. Default is None.
-        format (str, optional): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str, optional): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
     """
 
@@ -1101,7 +1102,7 @@ def cell_state_factors_heatmap(
             center=0.0,
             figsize=(10, 10),
             annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
-            rasterized=ext == ".svg",
+            rasterized=ext == ".pdf",
         )
     else:
         sns.clustermap(
@@ -1113,7 +1114,7 @@ def cell_state_factors_heatmap(
             cmap=color_map,
             figsize=(10, 10),
             annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
-            rasterized=ext == ".svg",
+            rasterized=ext == ".pdf",
         )
     if savefig:
         plt.savefig(
@@ -1156,7 +1157,7 @@ def plot_celltype_factors(
         zscore (bool, optional): Whether to z-score the factor values across factors for a given celltype. Default is False.
         return_celltype_factors (bool, optional): Whether to return the characteristic celltype factors. Default is False.
         savefig (str, optional): Absolute filepath to save the figure. If None, the figure is not saved. Default is None.
-        format (str, optional): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str, optional): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
 
     Returns
@@ -1223,7 +1224,7 @@ def plot_celltype_factors(
                 ax=axs[0],
                 s=3,
                 palette="tab20",
-                rasterized=ext == ".svg",
+                rasterized=ext == ".pdf",
             )
             axs[0].legend(
                 title="Cell type",
@@ -1253,7 +1254,7 @@ def plot_celltype_factors(
                 s=marker_size,
                 palette="vlag",
                 legend=False,
-                rasterized=ext == ".svg",
+                rasterized=ext == ".pdf",
             )
             sm = cm.ScalarMappable(
                 cmap="vlag",
@@ -1357,7 +1358,7 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
     savefig: Optional[str] = None,
     format: Optional[str] = None,
 ) -> None:
-    """Plot the pairwise correlations of SNP-associated CxG factors and clustering of the
+    """Plot the pairwise correlations of SNP-associated GxC factors and clustering of the
     individuals based on those.
 
     Parameters
@@ -1370,7 +1371,7 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
         cell_metadata (pd.DataFrame or None): Dataframe containing cell metadata.
         celltype_column (str or None): Column name in cell metadata indicating the celltype.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
 
     Returns
@@ -1390,11 +1391,11 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
 
     # Visualize pearson cor between significant U factors
     plt.figure(figsize=(12, 10))
-    sns.heatmap(pairwise_correlations, cmap="vlag", center=0, rasterized=ext == ".svg")
+    sns.heatmap(pairwise_correlations, cmap="vlag", center=0, rasterized=ext == ".pdf")
     plt.title("Pearson's $\\rho$ between significant $U$ factors", fontsize=15, pad=20)
     if savefig:
         plt.savefig(
-            f"{prefix}_CxG_factor_correlations{ext}",
+            f"{prefix}_U_factor_correlations{ext}",
             dpi=200,
             transparent=True,
             bbox_inches="tight",
@@ -1435,7 +1436,7 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
         cmap="RdBu",
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
         center=1,
-        rasterized=ext == ".svg",
+        rasterized=ext == ".pdf",
     )
     # clm.fig.suptitle("", fontsize=16, y=1.05)
     if savefig:
@@ -1456,7 +1457,7 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
         cmap="RdBu",
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
         center=1,
-        rasterized=ext == ".svg",
+        rasterized=ext == ".pdf",
     )
     if savefig:
         clm.savefig(
@@ -1488,7 +1489,7 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
         donor_covariate (str or None): Column name in donor metadata indicating the donor covariate to use to color the donor IDs. Default is None.
         covariate_colors (list or None): If provided, each donor category will be colored with the corresponding color from the list (as indicated by the color order), otherwise colors will be chosen randomly. Default is None, i.e. use random colors.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
 
     Returns
@@ -1537,7 +1538,7 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
         # cmap="RdBu",
         center=1,
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
-        rasterized=ext == ".svg",
+        rasterized=ext == ".pdf",
     )
     if savefig:
         clm.savefig(
