@@ -28,9 +28,9 @@ import seaborn as sns
 import torch
 from anndata import AnnData
 from pandas_plink import read_plink
-from scipy.stats import kruskal, ks_2samp, mannwhitneyu, pearsonr, zscore
+from scipy.stats import zscore
 from sklearn.preprocessing import StandardScaler
-from tensorqtl import pgen, trans
+from tensorqtl import pgen
 
 from src.analysis.livi_testing import (
     run_LIVI_genetic_association_testing,
