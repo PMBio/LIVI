@@ -255,7 +255,7 @@ def calculate_GxC_effect(
 
     Parameters
     ----------
-        LIVI_associations (pd.DataFrame): Dataframe containing LIVI CxG effects.
+        GxC_associations (pd.DataFrame): Dataframe containing LIVI GxC effects.
         SNP_id (str): ID of the SNP, whose effect should be calculated.
         cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
         A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
