@@ -83,7 +83,6 @@ def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 
     -------
     np.ndarray: Likelihood ratio test p-values.
     """
-    import numpy as np
 
     super_tiny = np.finfo(float).tiny
     tiny = np.finfo(float).eps
@@ -273,6 +272,7 @@ def set_up_covariates(args: argparse.Namespace, U_context: pd.DataFrame) -> pd.D
     covars = pd.read_csv(
         args.covariates, sep="," if ".csv" in args.covariates else "\t", index_col=0
     )
+    covars.index = covars.index.astype(str)
     covariates = covariates.merge(covars, how="left", left_index=True, right_index=True)
 
     return covariates
