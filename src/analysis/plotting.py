@@ -1452,7 +1452,8 @@ def plot_GxC_similarity(
         col_cluster=True,
         row_cluster=True,
         metric="cosine",
-        cmap="Reds",
+        cmap="RdBu_r",
+        center=0,
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
         rasterized=ext == ".pdf",
     )
