@@ -10,7 +10,7 @@ known_cis_eqtls: ${paths.data_dir}/OneK1K/Known_NOMINAL_cis_associations_for_LIV
 eqtl_genotypes: ${paths.data_dir}/OneK1K/Known_NOMINAL_cis_associations_for_LIVI_HVG-HEX-10K_Genotypes.tsv
 data_split: [1.0]
 batch_size: 1024
-num_workers: 2
+num_workers: 5
 seed: 32
 shuffle: True
 pin_memory: True
