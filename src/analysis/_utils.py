@@ -167,7 +167,7 @@ def select_important_genes_for_factor_IQR(
     return gene_names[important_genes_factor].tolist()
 
 
-def assign_U_to_celltype(
+def assign_D_to_celltype(
     cell_state_latent: pd.DataFrame,
     A: pd.DataFrame,
     cell_metadata: pd.DataFrame,
@@ -176,7 +176,7 @@ def assign_U_to_celltype(
     assignment_threshold: float = 0.8,
     strict: bool = True,
 ):
-    """Assigns U factors to known celltypes. Only U factors assigned to at least one cell-state
+    """Assigns D factors to known celltypes. Only D factors assigned to at least one cell-state
     based on `assignment_threshold` are assigned to a celltype.
 
     Parameters
@@ -186,8 +186,8 @@ def assign_U_to_celltype(
         cell_metadata (pd.DataFrame): DataFrame containing cell information, such as celltype, donor ID etc.
             Cell IDs must be the index, and they must be the same as in `cell_state_latent`.
         celltype_column (str): Column in `cell_metadata` containing celltype information.
-        top_one (bool): If True, a celltypes x U factors matrix is calculated, and each U factor is assigned
-            to the celltype (row) that has the max value for that U factor (column). Else, U factors are assigned
+        top_one (bool): If True, a celltypes x D factors matrix is calculated, and each D factor is assigned
+            to the celltype (row) that has the max value for that D factor (column). Else, D factors are assigned
             to all the cell-state factors that have values >= 0.9 (or values >= `assignment_threshold` if strict
             is False). Cell-state factor values are aggregated across cells within each cell type, and cell-
             state factors are mapped to the cell type that has the highest average value (across cells) for that
@@ -195,15 +195,15 @@ def assign_U_to_celltype(
 
     Returns
     -------
-    U_celltype (Dict): Dictionary with U factors as keys and assigned celltype as values (or None if the U
+    D_celltype (Dict): Dictionary with D factors as keys and assigned celltype as values (or None if the D
         factor was not assigned to any specific cell-state).
     """
 
-    zbase_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
-    zbase_softmax = pd.DataFrame(
-        zbase_softmax, index=cell_state_latent.index, columns=cell_state_latent.columns
+    cc_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
+    cc_softmax = pd.DataFrame(
+        cc_softmax, index=cell_state_latent.index, columns=cell_state_latent.columns
     )
-    celltypes_factors = zbase_softmax.merge(
+    celltypes_factors = cc_softmax.merge(
         cell_metadata[celltype_column], right_index=True, left_index=True, how="left"
     )
     # Average of each factor across cells belonging to the same celltype
@@ -212,41 +212,41 @@ def assign_U_to_celltype(
     ).mean()  # celltypes x C factors
 
     if not top_one and strict:
-        U_not_assigned = A.columns[A[A >= 0.9].isna().sum(axis=0) == cell_state_latent.shape[1]]
+        D_not_assigned = A.columns[A[A >= 0.9].isna().sum(axis=0) == cell_state_latent.shape[1]]
     else:
-        U_not_assigned = A.columns[
+        D_not_assigned = A.columns[
             A[A >= assignment_threshold].isna().sum(axis=0) == cell_state_latent.shape[1]
         ]
 
     if top_one:
-        celltypes_U = pd.DataFrame(
+        celltypes_D = pd.DataFrame(
             celltypes_factors.to_numpy() @ A.to_numpy(),
             index=celltypes_factors.index,
             columns=A.columns,
-        )  # celltypes x U factors
-        # Assign each U factor to the celltype with the highest value
-        U_celltype = celltypes_U.idxmax(axis=0).to_dict()
+        )  # celltypes x D factors
+        # Assign each D factor to the celltype with the highest value
+        D_celltype = celltypes_D.idxmax(axis=0).to_dict()
     else:
         threshold = 0.9 if strict else assignment_threshold
         # Assign each cell-state factor to the celltype with the highest value
         temp_dict = celltypes_factors.idxmax(axis=0).to_dict()
         # Substitute cell-state factor names with corresponding celltype names
-        A_ct = A.rename(index=temp_dict).T  # U x celltypes
-        # For each U factor pick the celltypes (cell-state factors with A values >= threshold)
-        U_celltype = (
+        A_ct = A.rename(index=temp_dict).T  # D x celltypes
+        # For each D factor pick the celltypes (cell-state factors with A values >= threshold)
+        D_celltype = (
             A_ct.apply(lambda x: x >= threshold, axis=1)
             .apply(lambda x: x.index[x].unique().tolist(), axis=1)
             .to_dict()
         )
 
-    for u in U_not_assigned:
-        U_celltype[u] = None
+    for d in D_not_assigned:
+        D_celltype[d] = None
 
-    return U_celltype
+    return D_celltype
 
 
-def calculate_GxC_effect(
-    GxC_associations: pd.DataFrame,
+def calculate_DxC_effect(
+    DxC_associations: pd.DataFrame,
     SNP_id: str,
     cell_state_latent: pd.DataFrame,
     A: pd.DataFrame,
@@ -255,50 +255,47 @@ def calculate_GxC_effect(
 
     Parameters
     ----------
-        GxC_associations (pd.DataFrame): Dataframe containing LIVI GxC effects.
+        DxC_associations (pd.DataFrame): Dataframe containing LIVI DxC effects.
         SNP_id (str): ID of the SNP, whose effect should be calculated.
         cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
         A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
 
     Returns
     -------
-        GxC_effect (pd.DataFrame): Dataframe containing the effect of the given SNP at the single-cell
+        DxC_effect (pd.DataFrame): Dataframe containing the effect of the given SNP at the single-cell
             level for cells belonging to different cell-states.
     """
 
-    snp_associations = GxC_associations.loc[GxC_associations.SNP_id == SNP_id]
+    snp_associations = DxC_associations.loc[DxC_associations.SNP_id == SNP_id]
     factor_beta = snp_associations.filter(["Factor", "effect_size"]).set_index("Factor").T
-    ## Visualise the effect as if all individuals had the assessed allele
-    # genotypes = GT_matrix.loc[SNP_id, IIDs].astype(int)
-    # genotypes = genotypes.replace({2:1})
-    # genotypes = genotypes.to_numpy().reshape(-1,1) # genotypes is now n_cells x 1  SNP
 
     A = A.filter(snp_associations.Factor)
     cell_state_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
 
-    GxC_effect = cell_state_softmax @ A.to_numpy() * factor_beta.to_numpy()  # G_effect.to_numpy()
-    GxC_effect = pd.DataFrame(
-        GxC_effect,
+    ## Visualise the effect as if all individuals had the assessed allele
+    DxC_effect = cell_state_softmax @ A.to_numpy() * factor_beta.to_numpy()  # cells x DxC effect
+    DxC_effect = pd.DataFrame(
+        DxC_effect,
         index=cell_state_latent.index,
-        columns=["GxC_" + f[1] for f in snp_associations.Factor.str.split("_")],
+        columns=["DxC_" + f[1] for f in snp_associations.Factor.str.split("_")],
     )
 
-    return GxC_effect
+    return DxC_effect
 
 
-def calculate_GxC_gene_effect(
-    GxC_associations: pd.DataFrame,
+def calculate_DxC_gene_effect(
+    DxC_associations: pd.DataFrame,
     SNP_id: str,
     cell_state_latent: pd.DataFrame,
     A: pd.DataFrame,
-    GxC_decoder: pd.DataFrame,
+    DxC_decoder: pd.DataFrame,
     factor_id: Optional[str] = None,
 ):
     """Compute effect of a given SNP on cell-states.
 
     Parameters
     ----------
-        LIVI_associations (pd.DataFrame): Dataframe containing LIVI GxC effects.
+        LIVI_associations (pd.DataFrame): Dataframe containing LIVI DxC effects.
         SNP_id (str): ID of the SNP, whose effect should be calculated.
         cell_state_latent (pd.DataFrame): DataFrame containing the cell-state latent space.
         A (pd.DataFrame): Dataframe containing LIVI factor assignment matrix.
@@ -308,29 +305,154 @@ def calculate_GxC_gene_effect(
 
     Returns
     -------
-        GxC_effect_gene (pd.DataFrame): Dataframe containing the effect of the given SNP on each gene.
+        DxC_effect_gene (pd.DataFrame): Dataframe containing the effect of the given SNP on each gene.
     """
 
-    snp_associations = GxC_associations.loc[GxC_associations.SNP_id == SNP_id]
+    snp_associations = DxC_associations.loc[DxC_associations.SNP_id == SNP_id]
     if factor_id is not None:
         snp_associations = snp_associations.loc[snp_associations.Factor == factor_id]
     factor_beta = snp_associations.filter(["Factor", "effect_size"]).set_index("Factor").T
 
     A = A.filter(snp_associations.Factor)
-    GxC_decoder = GxC_decoder.filter(
-        snp_associations.Factor.str.replace("U", "GxC")
-    ).T  # U x genes
+    DxC_decoder = DxC_decoder.filter(
+        snp_associations.Factor.str.replace("D", "DxC")
+    ).T  # D x genes
 
     cell_state_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_latent.to_numpy())).numpy()
-    GxC_effect = cell_state_softmax @ A.to_numpy() * factor_beta.to_numpy()  # cells x U
-    GxC_effect_gene = GxC_effect @ GxC_decoder.to_numpy()  # cells x genes
-    GxC_effect_gene = pd.DataFrame(
-        GxC_effect_gene,
+    DxC_effect = cell_state_softmax @ A.to_numpy() * factor_beta.to_numpy()  # cells x DxC effect
+    DxC_effect_gene = DxC_effect @ DxC_decoder.to_numpy()  # cells x genes
+    DxC_effect_gene = pd.DataFrame(
+        DxC_effect_gene,
         index=cell_state_latent.index,
-        columns=GxC_decoder.columns,
+        columns=DxC_decoder.columns,
     )
 
-    return GxC_effect_gene
+    return DxC_effect_gene
+
+
+def find_trans_fSNPs(
+    DxC_effects: pd.DataFrame,
+    DxC_decoder: pd.DataFrame,
+    gene_metadata: Optional[pd.DataFrame] = None,
+    adata: Optional["AnnData"] = None,
+) -> pd.DataFrame:
+    """Identify SNP–factor pairs whose top gene loadings map to genes **in trans** relative to the
+    SNP (i.e., on a different chromosome or >5 Mb away on the same chromosome).
+
+    Parameters
+    ----------
+    DxC_effects (pandas.DataFrame): Table with at least columns `SNP_id` (formatted like "chr:pos"),
+        `Factor`, and optionally `SNP_chrom`, `SNP_pos`.
+    DxC_decoder (pandas.DataFrame): Factor loading matrix indexed by gene IDs; columns are factors IDs.
+        The function selects the top absolute-loading gene per factor.
+    gene_metadata (pandas.DataFrame, optional): Gene annotations indexed by gene ID, containing
+        chromosome and genomic coordinates. If not provided, `adata.var` is used.
+    adata (AnnData, optional): AnnData object whose `.var` holds gene annotations if `gene_metadata`
+        is not provided.
+
+    Returns
+    -------
+    pandas.DataFrame: A dataframe with columns:
+        - `SNP_id`: The SNP identifier ("chr:pos").
+        - `Factor`: The factor associated with the SNP whose top gene is in trans.
+
+    Raises
+    ------
+    AssertionError: If neither `gene_metadata` nor `adata` is provided, or if required columns are
+        missing from the gene metadata.
+    """
+    assert (
+        gene_metadata is not None or adata is not None
+    ), "Please provide gene genomic locations either as a pandas DataFrame or in adata.var"
+
+    if gene_metadata is None and adata is not None:
+        gene_metadata = adata.var
+
+    gene_metadata.columns = gene_metadata.columns.str.replace(" ", "_", regex=False)
+    gene_metadata.columns = gene_metadata.columns.str.lower()
+    chrom_col = "gene_chromosome"
+    try:
+        gene_metadata[chrom_col]
+    except KeyError:
+        chrom_col = "gene_chrom"
+        try:
+            gene_metadata[chrom_col]
+        except KeyError:
+            chrom_col = "chromosome"
+            try:
+                gene_metadata[chrom_col]
+            except KeyError:
+                chrom_col = "chrom"
+                try:
+                    gene_metadata[chrom_col]
+                except KeyError:
+                    chrom_col = "genechrom"
+                    assert (
+                        chrom_col in gene_metadata.columns
+                    ), "`gene_chromosome` column missing from gene metadata"
+
+    start_col = "gene_start"
+    try:
+        gene_metadata[start_col]
+    except KeyError:
+        start_col = "start"
+        try:
+            gene_metadata[start_col]
+        except KeyError:
+            start_col = "genestart"
+            assert (
+                start_col in gene_metadata.columns
+            ), "`gene_start` column missing from gene metadata"
+    gene_metadata[start_col] = gene_metadata[start_col].astype(int)
+
+    end_col = "gene_end"
+    try:
+        gene_metadata[end_col]
+    except KeyError:
+        end_col = "end"
+        try:
+            gene_metadata[end_col]
+        except KeyError:
+            end_col = "geneend"
+            assert end_col in gene_metadata.columns, "`gene_end` column missing from gene metadata"
+    gene_metadata[end_col] = gene_metadata[end_col].astype(int)
+
+    if any([c not in DxC_effects.columns for c in ["SNP_chrom", "SNP_pos"]]):
+        DxC_effects[["SNP_chrom", "SNP_pos"]] = DxC_effects.SNP_id.str.split(":", expand=True)
+        DxC_effects.SNP_pos = DxC_effects.SNP_pos.astype(int)
+    DxC_effects = DxC_effects.assign(
+        upstream_5MB=DxC_effects.apply(lambda x: max(0, x.SNP_pos - 5000000), axis=1),
+        downstream_5MB=DxC_effects.apply(lambda x: x.SNP_pos + 5000000, axis=1),
+    )
+
+    trans_fsnps = []
+    factors = []
+    for _, row in DxC_effects.iterrows():
+        top_gene_factor = (
+            DxC_decoder[row["Factor"].replace("D", "DxC")].abs().nlargest(1, keep="all").index
+        )
+        gene_sub = gene_metadata.loc[top_gene_factor]
+        # Only keep genes located on different chromosome or on the same chromosome, but more than 5 Mbp away from the SNP
+        gene_sub = gene_sub.loc[
+            (
+                (
+                    (gene_sub[chrom_col] == str(row["SNP_chrom"]))
+                    & (gene_sub[start_col] > row["downstream_5MB"])
+                )
+                | (
+                    (gene_sub[chrom_col] == str(row["SNP_chrom"]))
+                    & (gene_sub[end_col] < row["upstream_5MB"])
+                )
+            )
+            | (gene_sub[chrom_col] != str(row["SNP_chrom"]))
+        ]
+        if gene_sub.shape[0] > 0:
+            trans_fsnps.append(row["SNP_id"])
+            factors.append(row["Factor"])
+
+    trans_fsnps = pd.DataFrame({"SNP_id": trans_fsnps, "Factor": factors})
+
+    return trans_fsnps
 
 
 def aggregate_cell_counts(
