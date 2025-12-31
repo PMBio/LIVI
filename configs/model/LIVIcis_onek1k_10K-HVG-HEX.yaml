@@ -1,0 +1,18 @@
+_target_: src.models.livi_experimental.LIVI_cis_gen
+
+x_dim: 14212
+y_dim: 981
+z_dim: 15
+n_dxc_factors: 700
+n_persistent_factors: 5
+covariates_dims: [75, 2]
+n_cis_snps: 2996
+encoder_hidden_dims: [5000, 2000, 500, 100]
+learning_rate: 8e-4
+warmup_epochs_vae: 60 # 90
+warmup_epochs_G: 0 # 20
+l1_weight: 1e-3
+A_weight: 1e-3
+batch_norm_decoder: True
+device: cuda
+genetics_seed: 200
