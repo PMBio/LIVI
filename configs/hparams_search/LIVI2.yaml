@@ -49,7 +49,7 @@ hydra:
     # define hyperparameter search space
     params:
       model.z_dim: range(10, 40, 5)
-      model.n_gxc_factors: range(10, 20, 5)
+      model.n_dxc_factors: range(10, 20, 5)
       model.n_persistent_factors: choice(5, 10)
       model.encoder_hidden_dims: choice([512, 512], [512, 512, 512], [512, 512, 512, 512], [512, 512, 256, 256])
       model.learning_rate: interval(1e-4, 5e-2)
@@ -57,6 +57,5 @@ hydra:
       model.adversary_hidden_dims: choice([256, 256], [512, 512], [256, 256, 256], [512, 256])
       model.adversary_learning_rate: tag(log, interval(1e-4, 1e-2))
       model.adversary_steps: choice(1,2,3,5)
-      model.adversary_weight: choice(1, 10, 50, 100, 200, 300, 500, 1000) 
+      model.adversary_weight: choice(1, 10, 50, 100, 200, 300, 500, 1000)
       model.l1_weight: range(1e-3, 1, 10)
-      
