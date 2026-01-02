@@ -24,12 +24,11 @@ from scipy.stats import mannwhitneyu, probplot, zscore
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 
-from src.analysis._utils import (
+from src.analysis._utils import (  # assign_D_to_celltype,
     add_livi_umaps_to_cell_metadata,
     aggregate_cell_counts,
-    assign_U_to_celltype,
-    calculate_GxC_effect,
-    calculate_GxC_gene_effect,
+    calculate_DxC_effect,
+    calculate_DxC_gene_effect,
     compute_umap,
 )
 
@@ -397,18 +396,16 @@ def visualise_livi_embeddings(
         "UMAP1_cell-state_latent" not in cell_metadata.columns
         and "UMAP2_cell-state_latent" not in cell_metadata.columns
     ):
-        try:
-            zbase = livi_embeddings["zbase"]
-        except KeyError:
-            zbase = livi_embeddings["cell-state_latent"]
-        if isinstance(zbase, torch.Tensor):
-            zbase = zbase.detach().cpu().numpy()
-        zbase = pd.DataFrame(
-            zbase,
+
+        cell_state = livi_embeddings["cell-state_latent"]
+        if isinstance(cell_state, torch.Tensor):
+            cell_state = cell_state.detach().cpu().numpy()
+        cell_state = pd.DataFrame(
+            cell_state,
             index=cell_metadata.index,
-            columns=[f"Cell-state_Factor{f+1}" for f in range(zbase.shape[1])],
+            columns=[f"Cell-state_Factor{f+1}" for f in range(cell_state.shape[1])],
         )
-        umap_df = compute_umap(zbase, colnames=["UMAP1", "UMAP2"], add_latent=False)
+        umap_df = compute_umap(cell_state, colnames=["UMAP1", "UMAP2"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([celltype_column, batch_column]),
             how="left",
@@ -470,21 +467,21 @@ def visualise_livi_embeddings(
     )
     plt.close()
 
-    ## U embedding
-    if "UMAP1_U" not in cell_metadata.columns and "UMAP2_U" not in cell_metadata.columns:
-        U = livi_embeddings["U_embedding"]
-        if U is None:
+    ## D embedding
+    if "UMAP1_D" not in cell_metadata.columns and "UMAP2_D" not in cell_metadata.columns:
+        D = livi_embeddings["D_embedding"]
+        if D is None:
             sys.exit(0)
         if batch_column is None and sex_column is None:
             sys.exit(0)
-        if isinstance(U, torch.Tensor):
-            U = U.detach().cpu().numpy()
-        U = pd.DataFrame(
-            U,
+        if isinstance(D, torch.Tensor):
+            D = D.detach().cpu().numpy()
+        D = pd.DataFrame(
+            D,
             index=cell_metadata[individual_column].unique(),
-            columns=[f"U_Factor{f+1}" for f in range(U.shape[1])],
+            columns=[f"D_Factor{f+1}" for f in range(D.shape[1])],
         )
-        umap_df = compute_umap(U, colnames=["UMAP1_U", "UMAP2_U"], add_latent=False)
+        umap_df = compute_umap(D, colnames=["UMAP1_D", "UMAP2_D"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([individual_column, batch_column, sex_column])
             .drop_duplicates()
@@ -499,8 +496,8 @@ def visualise_livi_embeddings(
     if batch_column:
         ax1 = fig.add_subplot(1, r, 1)
         sns.scatterplot(
-            x="UMAP1_U",
-            y="UMAP2_U",
+            x="UMAP1_D",
+            y="UMAP2_D",
             hue=batch_column,
             data=umap_df,
             ax=ax1,
@@ -520,8 +517,8 @@ def visualise_livi_embeddings(
         if sex_column:
             ax2 = fig.add_subplot(1, r, 2)
             sns.scatterplot(
-                x="UMAP1_U",
-                y="UMAP2_U",
+                x="UMAP1_D",
+                y="UMAP2_D",
                 hue=sex_column,
                 data=umap_df,
                 ax=ax2,
@@ -541,7 +538,7 @@ def visualise_livi_embeddings(
 
     plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_U-embedding_UMAP.{format}"),
+        os.path.join(output_dir, f"{of_prefix}_D-embedding_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
@@ -549,11 +546,11 @@ def visualise_livi_embeddings(
     plt.close()
 
     if batch_column or sex_column:
-        pca_U = PCA(n_components=U.shape[1] - 1, random_state=32).fit_transform(U.to_numpy())
-        pca_U = pd.DataFrame(
-            pca_U, index=U.index, columns=[f"U_PC{i+1}" for i in range(pca_U.shape[1])]
+        pca_D = PCA(n_components=D.shape[1] - 1, random_state=32).fit_transform(D.to_numpy())
+        pca_D = pd.DataFrame(
+            pca_D, index=D.index, columns=[f"D_PC{i+1}" for i in range(pca_D.shape[1])]
         )
-        pca_U = pca_U.merge(
+        pca_D = pca_D.merge(
             cell_metadata.filter([individual_column, batch_column, sex_column])
             .drop_duplicates()
             .set_index(individual_column),
@@ -568,10 +565,10 @@ def visualise_livi_embeddings(
             axs = axs.flatten()
             for p1 in range(2, 11):
                 sns.scatterplot(
-                    x="U_PC1",
-                    y=f"U_PC{p1}",
+                    x="D_PC1",
+                    y=f"D_PC{p1}",
                     hue=batch_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[p1 - 2],
                     s=6,
                     rasterized=format == "pdf",
@@ -589,10 +586,10 @@ def visualise_livi_embeddings(
             axs_idx = p1 - 1
             for p2 in range(10, 16):
                 sns.scatterplot(
-                    x="U_PC2",
-                    y=f"U_PC{p2}",
+                    x="D_PC2",
+                    y=f"D_PC{p2}",
                     hue=batch_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[axs_idx],
                     s=6,
                     rasterized=format == "pdf",
@@ -610,7 +607,7 @@ def visualise_livi_embeddings(
                 axs_idx += 1
             fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
-                os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_Batch.{format}"),
+                os.path.join(output_dir, f"{of_prefix}_D-embedding-PCA_Batch.{format}"),
                 dpi=600,
                 transparent=True,
                 bbox_inches="tight",
@@ -624,10 +621,10 @@ def visualise_livi_embeddings(
             axs = axs.flatten()
             for p1 in range(2, 11):
                 sns.scatterplot(
-                    x="U_PC1",
-                    y=f"U_PC{p1}",
+                    x="D_PC1",
+                    y=f"D_PC{p1}",
                     hue=sex_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[p1 - 2],
                     palette=["lightpink", "slategrey"],
                     s=6,
@@ -647,10 +644,10 @@ def visualise_livi_embeddings(
             axs_idx = p1 - 1
             for p2 in range(10, 16):
                 sns.scatterplot(
-                    x="U_PC2",
-                    y=f"U_PC{p2}",
+                    x="D_PC2",
+                    y=f"D_PC{p2}",
                     hue=sex_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[axs_idx],
                     palette=["lightpink", "slategrey"],
                     s=6,
@@ -669,24 +666,24 @@ def visualise_livi_embeddings(
                 axs_idx += 1
             fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
-                os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_sex.{format}"),
+                os.path.join(output_dir, f"{of_prefix}_D-embedding-PCA_sex.{format}"),
                 dpi=600,
                 transparent=True,
                 bbox_inches="tight",
             )
             plt.close()
 
-    ## GxC latent
-    if "UMAP1_GxC" not in cell_metadata.columns and "UMAP2_GxC" not in cell_metadata.columns:
-        GxC = livi_embeddings["GxC_latent"]
-        if isinstance(GxC, torch.Tensor):
-            GxC = GxC.detach().cpu().numpy()
-        GxC = pd.DataFrame(
-            GxC,
+    ## DxC latent
+    if "UMAP1_DxC" not in cell_metadata.columns and "UMAP2_DxC" not in cell_metadata.columns:
+        DxC = livi_embeddings["DxC_latent"]
+        if isinstance(DxC, torch.Tensor):
+            DxC = DxC.detach().cpu().numpy()
+        DxC = pd.DataFrame(
+            DxC,
             index=cell_metadata.index,
-            columns=[f"GxC_Factor{f+1}" for f in range(GxC.shape[1])],
+            columns=[f"DxC_Factor{f+1}" for f in range(DxC.shape[1])],
         )
-        umap_df = compute_umap(GxC, colnames=["UMAP1_GxC", "UMAP2_GxC"], add_latent=False)
+        umap_df = compute_umap(DxC, colnames=["UMAP1_DxC", "UMAP2_DxC"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([celltype_column, batch_column, sex_column]),
             how="left",
@@ -699,8 +696,8 @@ def visualise_livi_embeddings(
     fig = plt.figure(layout="constrained", figsize=(7 * r, 5), dpi=100)
     ax1 = fig.add_subplot(1, r, 1)  # UMAP cell type
     sns.scatterplot(
-        x="UMAP1_GxC",
-        y="UMAP2_GxC",
+        x="UMAP1_DxC",
+        y="UMAP2_DxC",
         hue=celltype_column,
         data=umap_df,
         ax=ax1,
@@ -721,8 +718,8 @@ def visualise_livi_embeddings(
     if batch_column:
         ax2 = fig.add_subplot(1, r, 2)
         sns.scatterplot(
-            x="UMAP1_GxC",
-            y="UMAP2_GxC",
+            x="UMAP1_DxC",
+            y="UMAP2_DxC",
             hue=batch_column,
             data=umap_df,
             ax=ax2,
@@ -742,8 +739,8 @@ def visualise_livi_embeddings(
         if sex_column:
             ax3 = fig.add_subplot(1, r, 3)
             sns.scatterplot(
-                x="UMAP1_GxC",
-                y="UMAP2_GxC",
+                x="UMAP1_DxC",
+                y="UMAP2_DxC",
                 hue=sex_column,
                 data=umap_df,
                 ax=ax3,
@@ -765,18 +762,18 @@ def visualise_livi_embeddings(
 
     plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_GxC-latent_UMAP.{format}"),
+        os.path.join(output_dir, f"{of_prefix}_DxC-latent_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
     )
     plt.close()
 
-    pca_GxC = PCA(n_components=GxC.shape[1] - 1, random_state=32).fit_transform(GxC.to_numpy())
-    pca_GxC = pd.DataFrame(
-        pca_GxC, index=GxC.index, columns=[f"GxC_PC{i+1}" for i in range(pca_GxC.shape[1])]
+    pca_DxC = PCA(n_components=DxC.shape[1] - 1, random_state=32).fit_transform(DxC.to_numpy())
+    pca_DxC = pd.DataFrame(
+        pca_DxC, index=DxC.index, columns=[f"DxC_PC{i+1}" for i in range(pca_DxC.shape[1])]
     )
-    pca_GxC = pca_GxC.merge(
+    pca_DxC = pca_DxC.merge(
         cell_metadata.filter([individual_column, batch_column, celltype_column, sex_column]),
         right_index=True,
         left_index=True,
@@ -788,10 +785,10 @@ def visualise_livi_embeddings(
     axs = axs.flatten()
     for p1 in range(2, 11):
         sns.scatterplot(
-            x="GxC_PC1",
-            y=f"GxC_PC{p1}",
+            x="DxC_PC1",
+            y=f"DxC_PC{p1}",
             hue=celltype_column,
-            data=pca_GxC,
+            data=pca_DxC,
             ax=axs[p1 - 2],
             s=4,
             palette="tab20",
@@ -810,10 +807,10 @@ def visualise_livi_embeddings(
     axs_idx = p1 - 1
     for p2 in range(10, 16):
         sns.scatterplot(
-            x="GxC_PC2",
-            y=f"GxC_PC{p2}",
+            x="DxC_PC2",
+            y=f"DxC_PC{p2}",
             hue=celltype_column,
-            data=pca_GxC,
+            data=pca_DxC,
             ax=axs[axs_idx],
             s=4,
             palette="tab20",
@@ -848,10 +845,10 @@ def visualise_livi_embeddings(
         axs = axs.flatten()
         for p1 in range(2, 11):
             sns.scatterplot(
-                x="GxC_PC1",
-                y=f"GxC_PC{p1}",
+                x="DxC_PC1",
+                y=f"DxC_PC{p1}",
                 hue=batch_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[p1 - 2],
                 s=4,
                 rasterized=format == "pdf",
@@ -869,10 +866,10 @@ def visualise_livi_embeddings(
         axs_idx = p1 - 1
         for p2 in range(10, 16):
             sns.scatterplot(
-                x="GxC_PC2",
-                y=f"GxC_PC{p2}",
+                x="DxC_PC2",
+                y=f"DxC_PC{p2}",
                 hue=batch_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[axs_idx],
                 s=4,
                 rasterized=format == "pdf",
@@ -890,7 +887,7 @@ def visualise_livi_embeddings(
             axs_idx += 1
         fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
-            os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_Batch.{format}"),
+            os.path.join(output_dir, f"{of_prefix}_DxC-latent-PCA_Batch.{format}"),
             dpi=600,
             transparent=True,
             bbox_inches="tight",
@@ -904,10 +901,10 @@ def visualise_livi_embeddings(
         axs = axs.flatten()
         for p1 in range(2, 11):
             sns.scatterplot(
-                x="GxC_PC1",
-                y=f"GxC_PC{p1}",
+                x="DxC_PC1",
+                y=f"DxC_PC{p1}",
                 hue=sex_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[p1 - 2],
                 s=4,
                 palette=["lightpink", "slategrey"],
@@ -926,10 +923,10 @@ def visualise_livi_embeddings(
         axs_idx = p1 - 1
         for p2 in range(10, 16):
             sns.scatterplot(
-                x="GxC_PC2",
-                y=f"GxC_PC{p2}",
+                x="DxC_PC2",
+                y=f"DxC_PC{p2}",
                 hue=sex_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[axs_idx],
                 s=4,
                 palette=["lightpink", "slategrey"],
@@ -948,7 +945,7 @@ def visualise_livi_embeddings(
             axs_idx += 1
         fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
-            os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_sex.{format}"),
+            os.path.join(output_dir, f"{of_prefix}_DxC-latent-PCA_sex.{format}"),
             dpi=600,
             transparent=True,
             bbox_inches="tight",
@@ -969,7 +966,7 @@ def visualise_livi_embeddings(
             index=cell_metadata[individual_column].unique(),
             columns=[f"V_Factor{f+1}" for f in range(V.shape[1])],
         )
-        umap_df = compute_umap(U, colnames=["UMAP1_V", "UMAP2_V"], add_latent=False)
+        umap_df = compute_umap(V, colnames=["UMAP1_V", "UMAP2_V"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([individual_column, batch_column, sex_column])
             .drop_duplicates()
@@ -1348,8 +1345,8 @@ def QQplot(
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
 
 
-def plot_U_factor_corr(
-    U: pd.DataFrame,
+def plot_D_factor_corr(
+    D: pd.DataFrame,
     associated_factors: list,
     A: pd.DataFrame,
     savefig: Optional[str] = None,
@@ -1359,7 +1356,7 @@ def plot_U_factor_corr(
 
     Parameters
     ----------
-        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        D (pd.DataFrame): Dataframe containing D factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
         A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
@@ -1372,8 +1369,8 @@ def plot_U_factor_corr(
     """
 
     A = A.filter(associated_factors)
-    U = U.filter(associated_factors)
-    pairwise_correlations = U.corr(method="pearson")
+    D = D.filter(associated_factors)
+    pairwise_correlations = D.corr(method="pearson")
 
     if savefig:
         prefix, ext = os.path.splitext(savefig)
@@ -1384,10 +1381,10 @@ def plot_U_factor_corr(
     # Visualize pearson cor between significant U factors
     plt.figure(figsize=(12, 10))
     sns.heatmap(pairwise_correlations, cmap="RdBu_r", center=0, rasterized=ext == ".pdf")
-    plt.title("Pearson's $\\rho$ between significant $U$ factors", fontsize=15, pad=20)
+    plt.title("Pearson's $\\rho$ between significant $D$ factors", fontsize=15, pad=20)
     if savefig:
         plt.savefig(
-            f"{prefix}_U_factor_correlations{ext}",
+            f"{prefix}_D_factor_correlations{ext}",
             dpi=400,
             transparent=True,
             bbox_inches="tight",
@@ -1395,8 +1392,8 @@ def plot_U_factor_corr(
     plt.close()
 
 
-def plot_GxC_similarity(
-    U: pd.DataFrame,
+def plot_DxC_similarity(
+    D: pd.DataFrame,
     associated_factors: list,
     A: pd.DataFrame,
     cell_state_factors: pd.DataFrame,
@@ -1411,7 +1408,7 @@ def plot_GxC_similarity(
 
     Parameters
     ----------
-        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        D (pd.DataFrame): Dataframe containing D factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
         A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
         cell_state_factors (pd.DataFrame or None): Dataframe containing LIVI cell-state latent.
@@ -1428,7 +1425,7 @@ def plot_GxC_similarity(
     """
 
     A = A.filter(associated_factors)
-    U = U.filter(associated_factors)
+    D = D.filter(associated_factors)
 
     if savefig:
         prefix, ext = os.path.splitext(savefig)
@@ -1437,18 +1434,18 @@ def plot_GxC_similarity(
         ext = "." + format if format else ".png"
 
     cc_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_factors.to_numpy())).numpy()
-    GxC = pd.DataFrame(
-        (cc_softmax @ A.to_numpy()) * U.loc[cell_metadata[donor_column]].to_numpy(),
+    DxC = pd.DataFrame(
+        (cc_softmax @ A.to_numpy()) * D.loc[cell_metadata[donor_column]].to_numpy(),
         index=cell_state_factors.index,
         columns=A.columns,
     )
-    GxC.columns = [c.replace("U_", "GxC ") for c in GxC.columns]
+    DxC.columns = [c.replace("D_", "DxC ") for c in DxC.columns]
 
-    GxC = GxC.merge(cell_metadata[celltype_column], right_index=True, left_index=True)
-    GxC = GxC.groupby(celltype_column, observed=True).apply(lambda x: x.mean())
+    DxC = DxC.merge(cell_metadata[celltype_column], right_index=True, left_index=True)
+    DxC = DxC.groupby(celltype_column, observed=True).apply(lambda x: x.mean())
 
     clm = sns.clustermap(
-        GxC,
+        DxC,
         col_cluster=True,
         row_cluster=True,
         metric="cosine",
@@ -1460,7 +1457,7 @@ def plot_GxC_similarity(
 
     if savefig:
         clm.savefig(
-            f"{prefix}_GxC-factor_celltype_clustering{ext}",
+            f"{prefix}_DxC-factor_celltype_clustering{ext}",
             dpi=400,
             transparent=True,
             bbox_inches="tight",
@@ -1469,7 +1466,7 @@ def plot_GxC_similarity(
 
 
 def plot_donor_similarity(
-    U: pd.DataFrame,
+    D: pd.DataFrame,
     associated_factors: list,
     donor_metadata: Optional[pd.DataFrame] = None,
     donor_covariate: Optional[str] = None,
@@ -1482,7 +1479,7 @@ def plot_donor_similarity(
 
         Parameters
         ----------
-        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        D (pd.DataFrame): Dataframe containing D factors (individuals x factors).
         associated_factors (list): List of factors with significant genetic associations (used to calculate the donor similarities).
         donor_metadata (pd.DataFrame or None): Dataframe containing donor metadata. Default is None.
         donor_covariate (str or None): Column name in donor metadata indicating the donor covariate to use to color the donor IDs. Default is None.
@@ -1527,10 +1524,10 @@ def plot_donor_similarity(
         row_colors = None
 
     # Cluster individuals based on significant U factor values
-    U = U.filter(associated_factors)
+    D = D.filter(associated_factors)
 
     clm = sns.clustermap(
-        U,
+        D,
         col_cluster=False,
         row_cluster=True,
         metric="cosine",
@@ -1541,7 +1538,7 @@ def plot_donor_similarity(
     )
     if savefig:
         clm.savefig(
-            f"{prefix}_IID_clustering_based_on_U_factors{ext}",
+            f"{prefix}_IID_clustering_based_on_D_factors{ext}",
             dpi=400,
             transparent=True,
             bbox_inches="tight",
@@ -1549,9 +1546,9 @@ def plot_donor_similarity(
     plt.close()
 
     iid_distances = squareform(
-        pdist(U, metric="cosine")
+        pdist(D, metric="cosine")
     )  # 0: identical, 1: unrelated, 2: opposite
-    iid_distances = pd.DataFrame(iid_distances, index=U.index, columns=U.index)
+    iid_distances = pd.DataFrame(iid_distances, index=D.index, columns=D.index)
     plt.figure(figsize=(12, 10))
     sns.heatmap(
         iid_distances, cmap="RdBu", center=1, rasterized=True, xticklabels=5, yticklabels=5
@@ -1569,11 +1566,11 @@ def plot_donor_similarity(
             tick_label.set_color(row_colors[tick_label.get_text()])
             tick_label.set_fontsize(3)
     plt.title(
-        "Cosine distance between individuals based on significant $U$ factors", fontsize=15, pad=20
+        "Cosine distance between individuals based on significant $D$ factors", fontsize=15, pad=20
     )
     if savefig:
         plt.savefig(
-            f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
+            f"{prefix}_Heatmap_IID_cosine-distance_based_on_D_factors{ext}",
             bbox_inches="tight",
             dpi=400,
             transparent=True,
@@ -2657,7 +2654,7 @@ def plot_ct_gex_vs_gt(
         return plot_df
 
 
-def visualize_GxC_effect(
+def visualize_DxC_effect(
     SNP_id: str,
     adata: AnnData,
     celltype_column: str,
@@ -2803,12 +2800,12 @@ def visualize_GxC_effect(
         assert (
             GxC_decoder is not None
         ), "To visualize effect on individual genes `GxC_decoder` cannot be `None`."
-        GxC_effect = calculate_GxC_gene_effect(
-            GxC_associations=GxC_associations,
+        GxC_effect = calculate_DxC_gene_effect(
+            DxC_associations=GxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
-            GxC_decoder=GxC_decoder,
+            DxC_decoder=GxC_decoder,
             factor_id=factor_id,
         )
         GxC_effect = GxC_effect.filter(gene)
@@ -2819,8 +2816,8 @@ def visualize_GxC_effect(
             hgnc_name = None
 
     else:
-        GxC_effect = calculate_GxC_effect(
-            GxC_associations=GxC_associations,
+        GxC_effect = calculate_DxC_effect(
+            DxC_associations=GxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
