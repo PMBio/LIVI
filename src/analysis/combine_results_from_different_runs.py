@@ -658,9 +658,9 @@ def main(args):
             os.path.join(
                 output_dir,
                 (
-                    "GxC_associations_all_seeds.tsv"
+                    "DxC_associations_all_seeds.tsv"
                     if not args.prs
-                    else "GxC_associations_all_seeds_PRS.tsv"
+                    else "DxC_associations_all_seeds_PRS.tsv"
                 ),
             ),
             sep="\t",

@@ -2225,7 +2225,7 @@ def plot_gene_loadings_for_factor(
 
 
 def plot_gene_loadings_for_associated_variable(
-    GxC_associations: pd.DataFrame,
+    DxC_associations: pd.DataFrame,
     variable: str,
     DxC_decoder: pd.DataFrame,
     adata_var: pd.DataFrame,
@@ -2246,7 +2246,7 @@ def plot_gene_loadings_for_associated_variable(
 
     Parameters:
     ----------
-        GxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
+        DxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
         variable (str): Name of the variable (e.g., SNP ID) for which factor loadings should be visualized.
         DxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each GxC factor (columns).
         adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `DxC_decoder`.
@@ -2267,13 +2267,13 @@ def plot_gene_loadings_for_associated_variable(
     -------
         None
     """
-    GxC_associations_variable = GxC_associations.loc[GxC_associations.SNP_id == variable]
+    DxC_associations_variable = DxC_associations.loc[DxC_associations.SNP_id == variable]
     if DxC_decoder.index.name is None:
         idx_name = "GeneID"
     else:
         idx_name = DxC_decoder.index.name
     gene_loadings = DxC_decoder.filter(
-        [f.replace("U", "GxC") for f in GxC_associations_variable.Factor.unique().tolist()]
+        [f.replace("U", "GxC") for f in DxC_associations_variable.Factor.unique().tolist()]
     )
     gene_loadings = pd.melt(
         gene_loadings, var_name="Factor", value_name="loadings", ignore_index=False
@@ -2290,7 +2290,7 @@ def plot_gene_loadings_for_associated_variable(
         )
     else:
         top_genes = {}
-        for f_gxc in GxC_associations_variable.Factor.unique():
+        for f_gxc in DxC_associations_variable.Factor.unique():
             f_gxc = f_gxc.replace("U", "GxC")
             top_genes[f_gxc] = DxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
@@ -2303,14 +2303,14 @@ def plot_gene_loadings_for_associated_variable(
         adata_var[gene_name_column].reset_index(), on=idx_name, how="left"
     )
 
-    if GxC_associations_variable.Factor.nunique() % 3 == 0:
-        n_rows = GxC_associations_variable.Factor.nunique() // 3
+    if DxC_associations_variable.Factor.nunique() % 3 == 0:
+        n_rows = DxC_associations_variable.Factor.nunique() // 3
     else:
-        n_rows = (GxC_associations_variable.Factor.nunique() // 3) + 1
+        n_rows = (DxC_associations_variable.Factor.nunique() // 3) + 1
     n_cols = (
         3
-        if GxC_associations_variable.Factor.nunique() > 2
-        else GxC_associations_variable.Factor.nunique()
+        if DxC_associations_variable.Factor.nunique() > 2
+        else DxC_associations_variable.Factor.nunique()
     )
 
     figure_size = ((n_cols + 0.5) * d, n_rows * d)
@@ -2385,7 +2385,7 @@ def plot_gene_loadings_for_associated_variable(
             x_previous = np.abs(row["loadings"])
             y_previous.append(y_loc)
 
-    if GxC_associations_variable.Factor.nunique() > 1:
+    if DxC_associations_variable.Factor.nunique() > 1:
         fig.suptitle(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="left")
     else:
         axis.set_title(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="center")
@@ -2405,7 +2405,7 @@ def plot_ct_gex_vs_gt(
     iid_column: str,
     GT_matrix: pd.DataFrame,
     SNP_id: str,
-    GxC_associations: pd.DataFrame,
+    DxC_associations: pd.DataFrame,
     filter_maf: bool = True,
     test_gt_groups: bool = True,
     annotation_fontsize: int = 20,
@@ -2433,7 +2433,7 @@ def plot_ct_gex_vs_gt(
             in the genotype matrix.
         GT_matrix (pd.DataFrame): Genotype matrix with SNPs as rows and individual IDs as columns.
         SNP_id (str): ID of the SNP to use.
-        GxC_associations (pd.DataFrame): DataFrame containing LIVI testing results, including the assessed allele for the SNP.
+        DxC_associations (pd.DataFrame): DataFrame containing LIVI testing results, including the assessed allele for the SNP.
             SNP IDs must be the same as in the genotype matrix.
         filter_maf (bool): Whether to omit genotypes present in less than 5% of the donors. Default is True.
         annotation_fontsize (int): Fontsize for axis (tick)labels. Ticks of the x axis (i.e. the SNP genotypes) are annotated
@@ -2508,7 +2508,7 @@ def plot_ct_gex_vs_gt(
     ).groups()
 
     if (
-        alleles[0] == GxC_associations.loc[GxC_associations.SNP_id == SNP_id].assessed_allele
+        alleles[0] == DxC_associations.loc[DxC_associations.SNP_id == SNP_id].assessed_allele
     ).all():
         allele_dict = {
             0: "/".join([alleles[1], alleles[1]]),
@@ -2664,7 +2664,7 @@ def visualize_DxC_effect(
     d: int = 10,
     model_results_dir: Optional[str] = None,
     cell_state_latent: Optional[pd.DataFrame] = None,
-    GxC_associations: Optional[pd.DataFrame] = None,
+    DxC_associations: Optional[pd.DataFrame] = None,
     assignment_matrix: Optional[pd.DataFrame] = None,
     DxC_decoder: Optional[pd.DataFrame] = None,
     gene: Optional[str] = None,
@@ -2687,11 +2687,11 @@ def visualize_DxC_effect(
         d (int): Controls figure size. Resulting figure will have a width of 2.5 x d and a height d x number of axis/plots.
             Default is 10.
         model_results_dir (str or None): Absolute path of the directory containing the inference and testing
-            results files of the LIVI model. Must be provided if `cell_state_latent`, `GxC_associations`,
+            results files of the LIVI model. Must be provided if `cell_state_latent`, `DxC_associations`,
             `assignment_matrix` are None. Default is None.
         cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead
             of `model_results_dir`. Default is None.
-        GxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC associations. Can be used instead of
+        DxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC associations. Can be used instead of
             `model_results_dir`. Default is None.
         assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead
             of `model_results_dir`. Default is None.
@@ -2718,7 +2718,7 @@ def visualize_DxC_effect(
     if all(
         [
             arg is None
-            for arg in [model_results_dir, cell_state_latent, GxC_associations, assignment_matrix]
+            for arg in [model_results_dir, cell_state_latent, DxC_associations, assignment_matrix]
         ]
     ):
         raise ValueError(
@@ -2750,16 +2750,16 @@ def visualize_DxC_effect(
                     "No cell-state latent found in `model_results_dir`. Make sure the filename ends in 'cell-state_latent.tsv'."
                 )
 
-        if GxC_associations is None:
-            GxC_associations = [
+        if DxC_associations is None:
+            DxC_associations = [
                 re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f)
                 for f in files
                 if re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f) is not None
             ]
-            if len(GxC_associations) > 0:
-                GxC_associations = GxC_associations[0].groups()[0]
-                GxC_associations = pd.read_csv(
-                    os.path.join(model_results_dir, GxC_associations), sep="\t", index_col=False
+            if len(DxC_associations) > 0:
+                DxC_associations = DxC_associations[0].groups()[0]
+                DxC_associations = pd.read_csv(
+                    os.path.join(model_results_dir, DxC_associations), sep="\t", index_col=False
                 )
             else:
                 raise FileNotFoundError(
@@ -2801,7 +2801,7 @@ def visualize_DxC_effect(
             DxC_decoder is not None
         ), "To visualize effect on individual genes `DxC_decoder` cannot be `None`."
         GxC_effect = calculate_DxC_gene_effect(
-            DxC_associations=GxC_associations,
+            DxC_associations=DxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
@@ -2817,7 +2817,7 @@ def visualize_DxC_effect(
 
     else:
         GxC_effect = calculate_DxC_effect(
-            DxC_associations=GxC_associations,
+            DxC_associations=DxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
