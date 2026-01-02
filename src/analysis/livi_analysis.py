@@ -787,7 +787,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations_GxC,
+                DxC_effects_LIVI=associations_GxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -799,7 +799,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations_GxC,
+                DxC_effects_LIVI=associations_GxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,

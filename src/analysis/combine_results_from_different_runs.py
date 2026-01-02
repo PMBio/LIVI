@@ -589,7 +589,7 @@ def main(args):
     )
 
     seeds_U_ct = {}
-    seeds_GxC_effects = []
+    seeds_DxC_effects = []
     for i in range(len(model_replicates)):
         livi_associations = associations_all_seeds.loc[
             associations_all_seeds.random_seed == gseed[i]
@@ -628,7 +628,7 @@ def main(args):
         livi_associations = livi_associations.loc[
             livi_associations.SNP_id.isin(intersect_snps_one)
         ]
-        GxC_effects_all_snps = []
+        DxC_effects_all_snps = []
         for snp in intersect_snps_one:
             GxC_effect_snp = calculate_GxC_effect(
                 LIVI_associations=livi_associations,
@@ -636,9 +636,9 @@ def main(args):
                 cell_state_latent=zbase,
                 A=seed_A,
             )
-            GxC_effects_all_snps.append(GxC_effect_snp)
-        GxC_effects_all_snps = pd.concat(GxC_effects_all_snps, axis=1, ignore_index=False)
-        seeds_GxC_effects.append(GxC_effects_all_snps)
+            DxC_effects_all_snps.append(GxC_effect_snp)
+        DxC_effects_all_snps = pd.concat(DxC_effects_all_snps, axis=1, ignore_index=False)
+        seeds_DxC_effects.append(DxC_effects_all_snps)
 
     seeds_U_ct_df = pd.DataFrame.from_dict(seeds_U_ct, orient="index")
 
@@ -860,10 +860,10 @@ def main(args):
 
     corrs_across_runs_pearson = []
     corrs_across_runs_pearson_pvals = []
-    for i, j in combinations(range(len(seeds_GxC_effects)), 2):
+    for i, j in combinations(range(len(seeds_DxC_effects)), 2):
         corrs = pearsonr(
-            x=seeds_GxC_effects[i].abs(),
-            y=seeds_GxC_effects[j].abs(),
+            x=seeds_DxC_effects[i].abs(),
+            y=seeds_DxC_effects[j].abs(),
             axis=0,
             alternative="greater",
         )
@@ -1036,7 +1036,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations,
+                DxC_effects_LIVI=associations,
                 factor_assignment_matrix=None,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,

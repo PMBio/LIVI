@@ -1711,7 +1711,7 @@ def venny4py_custom_colors(
 def overlap_with_known_eQTLs(
     known_trans_eQTLs: pd.DataFrame,
     SNP_colname_trans: str,
-    GxC_effects_LIVI: pd.DataFrame,
+    DxC_effects_LIVI: pd.DataFrame,
     factor_assignment_matrix: Optional[pd.DataFrame] = None,
     known_cis_eQTLs: Optional[pd.DataFrame] = None,
     SNP_colname_cis: Optional[str] = None,
@@ -1748,8 +1748,8 @@ def overlap_with_known_eQTLs(
             .tolist()
         )
 
-        GxC_effects_LIVI = GxC_effects_LIVI.assign(
-            is_known_eQTL=GxC_effects_LIVI.apply(
+        DxC_effects_LIVI = DxC_effects_LIVI.assign(
+            is_known_eQTL=DxC_effects_LIVI.apply(
                 lambda x: (
                     "only trans-eQTLs"
                     if x.SNP_id in only_trans_eQTLs
@@ -1765,7 +1765,7 @@ def overlap_with_known_eQTLs(
         # Overlap between SNPs
         v = venn3(
             subsets=[
-                set(GxC_effects_LIVI.SNP_id),
+                set(DxC_effects_LIVI.SNP_id),
                 set(known_trans_eQTLs[SNP_colname_trans]),
                 set(known_cis_eQTLs[SNP_colname_cis]),
             ],
@@ -1791,22 +1791,22 @@ def overlap_with_known_eQTLs(
         # Overlap between associated factors
         ssets = {
             "only cis-eQTLs": set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
                 ].Factor.unique()
             ),
             "only trans-eQTLs": set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
                 ].Factor.unique()
             ),
             "cis and trans eQTLs": set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                 ].Factor.unique()
             ),
             "only LIVI GxC": set(
-                GxC_effects_LIVI.loc[GxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
+                DxC_effects_LIVI.loc[DxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
             ),
         }
 
@@ -1823,21 +1823,21 @@ def overlap_with_known_eQTLs(
 
         cis_factors = list(
             set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
                 ].Factor.unique()
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only LIVI"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only LIVI"
                     ].Factor.unique()
                 )
             )
@@ -1845,21 +1845,21 @@ def overlap_with_known_eQTLs(
 
         trans_factors = list(
             set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
                 ].Factor.unique()
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only LIVI"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only LIVI"
                     ].Factor.unique()
                 )
             )
@@ -1867,33 +1867,33 @@ def overlap_with_known_eQTLs(
 
         LIVIonly_factors = list(
             set(
-                GxC_effects_LIVI.loc[GxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
+                DxC_effects_LIVI.loc[DxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                     ].Factor.unique()
                 )
             )
         )
 
         if factor_assignment_matrix is not None:
-            plot_df = factor_assignment_matrix.filter(GxC_effects_LIVI.Factor.unique()).T
+            plot_df = factor_assignment_matrix.filter(DxC_effects_LIVI.Factor.unique()).T
 
             plot_df = (
                 plot_df.reset_index()
@@ -1944,7 +1944,7 @@ def overlap_with_known_eQTLs(
             ssets = {
                 "known cis-eQTLs": set(known_cis_eQTLs[SNP_colname_cis].tolist()),
                 "known trans-eQTLs": set(known_trans_eQTLs[SNP_colname_trans].tolist()),
-                "LIVI GxC": set(GxC_effects_LIVI.SNP_id.tolist()),
+                "LIVI GxC": set(DxC_effects_LIVI.SNP_id.tolist()),
                 "LIVI persistent": set(persistent_effects_LIVI.SNP_id.tolist()),
             }
 
@@ -1962,7 +1962,7 @@ def overlap_with_known_eQTLs(
     else:
         # Overlap between SNPs
         v = venn2(
-            subsets=[set(GxC_effects_LIVI.SNP_id), set(known_trans_eQTLs[SNP_colname_trans])],
+            subsets=[set(DxC_effects_LIVI.SNP_id), set(known_trans_eQTLs[SNP_colname_trans])],
             set_labels=("LIVI GxC", "known $trans$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
@@ -1986,13 +1986,13 @@ def overlap_with_known_eQTLs(
         v = venn2(
             subsets=[
                 set(
-                    GxC_effects_LIVI.loc[
-                        ~GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    DxC_effects_LIVI.loc[
+                        ~DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                     ].Factor.tolist()
                 ),
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                     ].Factor.tolist()
                 ),
             ],
@@ -2019,20 +2019,20 @@ def overlap_with_known_eQTLs(
 
         LIVIonly_factors = list(
             set(
-                GxC_effects_LIVI.loc[
-                    ~GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                DxC_effects_LIVI.loc[
+                    ~DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                 ].Factor.tolist()
             ).difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                     ].Factor.tolist()
                 )
             )
         )
 
         if factor_assignment_matrix is not None:
-            plot_df = factor_assignment_matrix.filter(GxC_effects_LIVI.Factor.unique()).T
+            plot_df = factor_assignment_matrix.filter(DxC_effects_LIVI.Factor.unique()).T
             plot_df = (
                 plot_df.reset_index()
                 .assign(
@@ -2073,7 +2073,7 @@ def overlap_with_known_eQTLs(
             # Overlap between SNPs
             v = venn3(
                 subsets=[
-                    set(GxC_effects_LIVI.SNP_id),
+                    set(DxC_effects_LIVI.SNP_id),
                     set(known_trans_eQTLs[SNP_colname_trans]),
                     set(persistent_effects_LIVI.SNP_id),
                 ],
@@ -2273,7 +2273,7 @@ def plot_gene_loadings_for_associated_variable(
     else:
         idx_name = DxC_decoder.index.name
     gene_loadings = DxC_decoder.filter(
-        [f.replace("U", "GxC") for f in DxC_associations_variable.Factor.unique().tolist()]
+        [f.replace("D", "DxC") for f in DxC_associations_variable.Factor.unique().tolist()]
     )
     gene_loadings = pd.melt(
         gene_loadings, var_name="Factor", value_name="loadings", ignore_index=False
@@ -2291,7 +2291,7 @@ def plot_gene_loadings_for_associated_variable(
     else:
         top_genes = {}
         for f_gxc in DxC_associations_variable.Factor.unique():
-            f_gxc = f_gxc.replace("U", "GxC")
+            f_gxc = f_gxc.replace("D", "DxC")
             top_genes[f_gxc] = DxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes[x.Factor], axis=1)
@@ -2658,7 +2658,7 @@ def visualize_DxC_effect(
     SNP_id: str,
     adata: AnnData,
     celltype_column: str,
-    return_GxC_effect: bool = False,
+    return_DxC_effect: bool = False,
     marker_size: int = 2,
     axis_title_fontsize: int = 26,
     d: int = 10,
@@ -2712,7 +2712,7 @@ def visualize_DxC_effect(
 
     Returns:
     -------
-        GxC_effect (Optional[pd.DataFrame]): Dataframe containing the effect of the given SNP at the single-cell level for cells
+        DxC_effect (Optional[pd.DataFrame]): Dataframe containing the effect of the given SNP at the single-cell level for cells
             belonging to different cell-states.
     """
     if all(
@@ -2800,7 +2800,7 @@ def visualize_DxC_effect(
         assert (
             DxC_decoder is not None
         ), "To visualize effect on individual genes `DxC_decoder` cannot be `None`."
-        GxC_effect = calculate_DxC_gene_effect(
+        DxC_effect = calculate_DxC_gene_effect(
             DxC_associations=DxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
@@ -2808,15 +2808,15 @@ def visualize_DxC_effect(
             DxC_decoder=DxC_decoder,
             factor_id=factor_id,
         )
-        GxC_effect = GxC_effect.filter(gene)
+        DxC_effect = DxC_effect.filter(gene)
         if hgnc_column is not None:
             hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
-            # GxC_effect = GxC_effect.rename(columns=hgnc_name)
+            # DxC_effect = DxC_effect.rename(columns=hgnc_name)
         else:
             hgnc_name = None
 
     else:
-        GxC_effect = calculate_DxC_effect(
+        DxC_effect = calculate_DxC_effect(
             DxC_associations=DxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
@@ -2846,14 +2846,14 @@ def visualize_DxC_effect(
     umap_base = umap_base.merge(
         adata.obs.filter([celltype_column]), how="left", right_index=True, left_index=True
     )
-    umap_base = umap_base.merge(GxC_effect, right_index=True, left_index=True)
+    umap_base = umap_base.merge(DxC_effect, right_index=True, left_index=True)
 
     legend_fontsize = axis_title_fontsize - 6
-    # Plot the effect for each factor/gene (column in `GxC_effect`) associated with the given SNP
-    if len(GxC_effect.columns) % 2 == 0:
-        n_rows = len(GxC_effect.columns) // 2 + 1
+    # Plot the effect for each factor/gene (column in `DxC_effect`) associated with the given SNP
+    if len(DxC_effect.columns) % 2 == 0:
+        n_rows = len(DxC_effect.columns) // 2 + 1
     else:
-        n_rows = int(len(GxC_effect.columns) // 2) + 1
+        n_rows = int(len(DxC_effect.columns) // 2) + 1
 
     figure_size = (2.5 * d, n_rows * d)
     fig, axs = plt.subplots(ncols=2, nrows=n_rows, figsize=figure_size, constrained_layout=False)
@@ -2889,11 +2889,11 @@ def visualize_DxC_effect(
             axs[0].yaxis.label.set_fontsize(axis_title_fontsize - 1)
             axs[0].tick_params(labelsize=legend_fontsize)
 
-        elif 0 < i < len(GxC_effect.columns) + 1:
-            GE = GxC_effect.columns[i - 1]
-            if GxC_effect[GE].min() < 0 and GxC_effect[GE].max() < 0:
+        elif 0 < i < len(DxC_effect.columns) + 1:
+            GE = DxC_effect.columns[i - 1]
+            if DxC_effect[GE].min() < 0 and DxC_effect[GE].max() < 0:
                 comap = "Blues_r"
-            elif GxC_effect[GE].min() <= 0 and GxC_effect[GE].max() > 0:
+            elif DxC_effect[GE].min() <= 0 and DxC_effect[GE].max() > 0:
                 comap = "RdBu_r"
             else:
                 comap = "Reds"
@@ -2910,10 +2910,10 @@ def visualize_DxC_effect(
             )
             norM = (
                 colors.TwoSlopeNorm(
-                    vcenter=0.0, vmin=GxC_effect[GE].min(), vmax=GxC_effect[GE].max()
+                    vcenter=0.0, vmin=DxC_effect[GE].min(), vmax=DxC_effect[GE].max()
                 )
                 if comap == "RdBu_r"
-                else colors.Normalize(vmin=GxC_effect[GE].min(), vmax=GxC_effect[GE].max())
+                else colors.Normalize(vmin=DxC_effect[GE].min(), vmax=DxC_effect[GE].max())
             )
             sm = cm.ScalarMappable(cmap=comap, norm=norM)
             cb = plt.colorbar(sm, ax=ax)
@@ -2947,5 +2947,5 @@ def visualize_DxC_effect(
             transparent=True,
         )
 
-    if return_GxC_effect:
-        return GxC_effect
+    if return_DxC_effect:
+        return DxC_effect
