@@ -308,7 +308,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
         'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
         'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-        'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+        'DxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
         'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
         'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
         'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
@@ -526,33 +526,33 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
                 "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
             )
 
-        GxC_decoder = livi_results["GxC_decoder"].detach().numpy()
-        GxC_decoder = pd.DataFrame(
-            GxC_decoder,
+        DxC_decoder = livi_results["DxC_decoder"].detach().numpy()
+        DxC_decoder = pd.DataFrame(
+            DxC_decoder,
             index=adata.var.index,
             columns=[f"GxC_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
         )
         try:
-            GxC_decoder.to_csv(
-                os.path.join(output_dir, f"{of_prefix}_GxC_decoder.tsv"),
+            DxC_decoder.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_DxC_decoder.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
         except OSError:
-            GxC_decoder.to_csv(
-                os.path.join(output_dir, "_GxC_decoder.tsv"),
+            DxC_decoder.to_csv(
+                os.path.join(output_dir, "_DxC_decoder.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
             warnings.warn(
-                "Could not save GxC decoder dataframe under provided filename (filename too long).\nSaved as '_GxC_decoder.tsv' instead."
+                "Could not save GxC decoder dataframe under provided filename (filename too long).\nSaved as '_DxC_decoder.tsv' instead."
             )
 
     else:
         U_context = None
-        GxC_decoder = None
+        DxC_decoder = None
 
     if livi_results["V_embedding"] is not None:
         V_persistent = livi_results["V_embedding"].detach().numpy()
@@ -644,7 +644,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         cell_state_latent,
         cell_state_decoder,
         U_context,
-        GxC_decoder,
+        DxC_decoder,
         V_persistent,
         persistent_decoder,
         assignment_matrix,
@@ -673,7 +673,7 @@ def main(args):
         cell_state_latent,
         cell_state_decoder,
         U_context,
-        GxC_decoder,
+        DxC_decoder,
         V_persistent,
         persistent_decoder,
         A,

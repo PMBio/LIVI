@@ -956,19 +956,19 @@ def main(args):
         # robust_factors = aggregate_correlated_factors_across_runs(seeds_U, args.factor_correlation_theshold, factor_correlations=None)
 
         #### Calculate correlations based on GxC decoder
-        seeds_GxC_decoder = []
+        seeds_DxC_decoder = []
         for i in range(len(model_replicates)):
             seed_GxC_dec = pd.read_csv(
                 os.path.join(
-                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_GxC_decoder.tsv"
+                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_DxC_decoder.tsv"
                 ),
                 index_col=0,
                 sep="\t",
             )
             seed_GxC_dec = seed_GxC_dec.assign(random_seed=[gseed[i]] * seed_GxC_dec.shape[0])
-            seeds_GxC_decoder.append(seed_GxC_dec)
+            seeds_DxC_decoder.append(seed_GxC_dec)
 
-        factor_correlations = correlate_factors_across_runs(seeds_GxC_decoder)
+        factor_correlations = correlate_factors_across_runs(seeds_DxC_decoder)
 
         robust_factors = aggregate_correlated_factors_across_runs(
             seeds_U, args.factor_correlation_theshold, factor_correlations=factor_correlations
@@ -987,13 +987,13 @@ def main(args):
                         zip(loadings.columns, [f.replace("GxC", "U") for f in loadings.columns])
                     )
                 )
-                for loadings in seeds_GxC_decoder
+                for loadings in seeds_DxC_decoder
             ],
             args.factor_correlation_theshold,
             factor_correlations=factor_correlations,
         )
         robust_loadings.to_csv(
-            os.path.join(output_dir, "Robust_aggregated_GxC_decoder_loadings.tsv"),
+            os.path.join(output_dir, "Robust_aggregated_DxC_decoder_loadings.tsv"),
             sep="\t",
             header=True,
             index=True,

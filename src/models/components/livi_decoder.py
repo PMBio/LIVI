@@ -58,7 +58,7 @@ class LIVI_Decoder(nn.Module):
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
         if self._num_gxc_factors != 0:
-            self.GxC_decoder = create_mlp(
+            self.DxC_decoder = create_mlp(
                 input_size=self._num_gxc_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
@@ -66,7 +66,7 @@ class LIVI_Decoder(nn.Module):
                 device=self.device,
             )
             if self.genetics_generator is not None:  # Initialise weights with the given generator
-                init_mlp(self.GxC_decoder, generator=self.genetics_generator)
+                init_mlp(self.DxC_decoder, generator=self.genetics_generator)
 
         if self._num_persistent_factors != 0:
             self.persistent_decoder = create_mlp(
@@ -136,7 +136,7 @@ class LIVI_Decoder(nn.Module):
             and self.train_GxC
             and GxC is not None
         ):
-            y_gc = self.GxC_decoder(GxC)
+            y_gc = self.DxC_decoder(GxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
@@ -244,7 +244,7 @@ class LIVI_Decoder_wo_cis(LIVI_Decoder):
             and self.train_GxC
             and GxC is not None
         ):
-            y_gc = self.GxC_decoder(GxC)
+            y_gc = self.DxC_decoder(GxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
@@ -327,7 +327,7 @@ class LIVI_Decoder_GT_PCs(LIVI_Decoder):
             and self.train_GxC
             and GxC is not None
         ):
-            y_gc = self.GxC_decoder(GxC)
+            y_gc = self.DxC_decoder(GxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
@@ -389,7 +389,7 @@ class LIVI_Decoder_Normal(nn.Module):
         self.log_scale = nn.Parameter(torch.ones(1, device=self.device) * 0.1, requires_grad=True)
 
         if self._num_gxc_factors != 0:
-            self.GxC_decoder = create_mlp(
+            self.DxC_decoder = create_mlp(
                 input_size=self._num_gxc_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
@@ -397,7 +397,7 @@ class LIVI_Decoder_Normal(nn.Module):
                 device=self.device,
             )
             if self.genetics_generator is not None:  # Initialise weights with the given generator
-                init_mlp(self.GxC_decoder, generator=self.genetics_generator)
+                init_mlp(self.DxC_decoder, generator=self.genetics_generator)
 
         if self._num_persistent_factors != 0:
             self.persistent_decoder = create_mlp(
@@ -466,7 +466,7 @@ class LIVI_Decoder_Normal(nn.Module):
             and self.train_GxC
             and GxC is not None
         ):
-            y_gc = self.GxC_decoder(GxC)
+            y_gc = self.DxC_decoder(GxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)

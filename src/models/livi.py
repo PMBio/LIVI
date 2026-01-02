@@ -277,7 +277,7 @@ class LIVI(pl.LightningModule):
                 l1_loss_A = torch.zeros([1], device=self.device)
             else:
                 l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
-                    torch.cat([p for p in self.decoder.GxC_decoder.parameters()]),
+                    torch.cat([p for p in self.decoder.DxC_decoder.parameters()]),
                     ord=1,
                     dim=(0, 1),
                 )
@@ -339,7 +339,7 @@ class LIVI(pl.LightningModule):
             'cell-state_latent' (torch.Tensor): Cell state latent space.
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
             'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-            'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific individual effects decoder, if applicable.
+            'DxC_decoder' (torch.Tensor): Gene loadings for the context-specific individual effects decoder, if applicable.
             'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
             'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
             'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
@@ -353,10 +353,10 @@ class LIVI(pl.LightningModule):
 
             if self.n_gxc_factors != 0:
                 U = self.U_context(y)
-                GxC_decoder = self.decoder.GxC_decoder[0].weight
+                DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
                 U = None
-                GxC_decoder = None
+                DxC_decoder = None
             if self.n_persistent_factors != 0:
                 V = self.V_persistent(y)
                 V_decoder = self.decoder.persistent_decoder[0].weight
@@ -368,7 +368,7 @@ class LIVI(pl.LightningModule):
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
             "U_embedding": U,
-            "GxC_decoder": GxC_decoder,
+            "DxC_decoder": DxC_decoder,
             "assignment_matrix": self.A if self.n_gxc_factors != 0 else None,
             "V_embedding": V,
             "V_decoder": V_decoder,
@@ -414,13 +414,13 @@ class LIVI(pl.LightningModule):
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = True
-                self.decoder.GxC_decoder[0].weight.requires_grad = True
+                self.decoder.DxC_decoder[0].weight.requires_grad = True
                 self.A.requires_grad = True
         else:
             if self.n_gxc_factors != 0:
                 for p in self.U_context.parameters():
                     p.requires_grad = False
-                self.decoder.GxC_decoder[0].weight.requires_grad = False
+                self.decoder.DxC_decoder[0].weight.requires_grad = False
                 self.A.requires_grad = False
 
     def freeze_vae(self, mode: bool):
@@ -812,7 +812,7 @@ class LIVI_cis(pl.LightningModule):
             loss_A = torch.zeros([1], device=self.device)
         else:
             l1_loss_context = self.hparams.l1_weight * torch.linalg.vector_norm(
-                torch.cat([p for p in self.decoder.GxC_decoder.parameters()]),
+                torch.cat([p for p in self.decoder.DxC_decoder.parameters()]),
                 ord=1,
                 dim=(0, 1),
             )
@@ -860,7 +860,7 @@ class LIVI_cis(pl.LightningModule):
             'cell-state_latent' (torch.Tensor): Cell state latent space.
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
             'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-            'GxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+            'DxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
             'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
             'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
             'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
@@ -873,10 +873,10 @@ class LIVI_cis(pl.LightningModule):
             cell_state_decoder = self.decoder.mean[0].weight
             if self.n_gxc_factors != 0:
                 U = self.U_context(y)
-                GxC_decoder = self.decoder.GxC_decoder[0].weight
+                DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
                 U = None
-                GxC_decoder = None
+                DxC_decoder = None
             if self.n_persistent_factors != 0:
                 V = self.V_persistent(y)
                 V_decoder = self.decoder.persistent_decoder[0].weight
@@ -888,7 +888,7 @@ class LIVI_cis(pl.LightningModule):
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
             "U_embedding": U,
-            "GxC_decoder": GxC_decoder,
+            "DxC_decoder": DxC_decoder,
             "assignment_matrix": self.A,
             "V_embedding": V,
             "V_decoder": V_decoder,
@@ -926,14 +926,14 @@ class LIVI_cis(pl.LightningModule):
         if mode:
             if self.n_gxc_factors != 0:
                 self.U_context.requires_grad_(True)
-                self.decoder.GxC_decoder.requires_grad_(True)
+                self.decoder.DxC_decoder.requires_grad_(True)
                 self.A.requires_grad_(True)
             if self.hparams.n_cis_snps != 0:
                 self.SNP_gene_effect.requires_grad_(True)
         else:
             if self.n_gxc_factors != 0:
                 self.U_context.requires_grad_(False)
-                self.decoder.GxC_decoder.requires_grad_(False)
+                self.decoder.DxC_decoder.requires_grad_(False)
                 self.A.requires_grad_(False)
             if self.hparams.n_cis_snps != 0:
                 self.SNP_gene_effect.requires_grad_(False)
@@ -970,7 +970,7 @@ class LIVI_cis(pl.LightningModule):
         print(f"VAE frozen: {self.frozen}")
         print(f"Training V: {self.train_V_mode}")
         print(f"Training GxC: {self.train_GxC_mode}")
-        print(f"GxC decoder requires grad: {self.decoder.GxC_decoder[0].weight.requires_grad}")
+        print(f"GxC decoder requires grad: {self.decoder.DxC_decoder[0].weight.requires_grad}")
         if self.current_epoch == self.hparams.warmup_epochs_vae:
             self.set_pretrain_mode(False)
             print("VAE pretraining completed.")

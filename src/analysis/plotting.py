@@ -2099,7 +2099,7 @@ def overlap_with_known_eQTLs(
 
 
 def plot_gene_loadings_for_factor(
-    GxC_decoder: pd.DataFrame,
+    DxC_decoder: pd.DataFrame,
     factor: str,
     adata_var: pd.DataFrame,
     gene_name_column: str,
@@ -2118,9 +2118,9 @@ def plot_gene_loadings_for_factor(
 
     Parameters:
     ----------
-        GxC_decoder (pd.DataFrame): DataFrame containing gene loadings for each factor (columns).
+        DxC_decoder (pd.DataFrame): DataFrame containing gene loadings for each factor (columns).
         factor (str): Name of the factor whose gene loadings will be visualized.
-        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `DxC_decoder`.
         gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
         color (Optional[str]): Outline color for the boxplot. Default is "darkblue".
         spines_invisible (bool): If True, hides the top, right, and left spines of the plot. Default is False.
@@ -2139,18 +2139,18 @@ def plot_gene_loadings_for_factor(
         None
     """
 
-    if GxC_decoder.index.name is None:
+    if DxC_decoder.index.name is None:
         idx_name = "GeneID"
     else:
-        idx_name = GxC_decoder.index.name
-    gene_loadings = GxC_decoder[factor].reset_index()
+        idx_name = DxC_decoder.index.name
+    gene_loadings = DxC_decoder[factor].reset_index()
 
     if genes_to_annotate is not None:
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in genes_to_annotate, axis=1)
         )
     else:
-        top_genes = GxC_decoder[factor].abs().nlargest(n_top_genes).index.tolist()
+        top_genes = DxC_decoder[factor].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes, axis=1)
         )
@@ -2227,7 +2227,7 @@ def plot_gene_loadings_for_factor(
 def plot_gene_loadings_for_associated_variable(
     GxC_associations: pd.DataFrame,
     variable: str,
-    GxC_decoder: pd.DataFrame,
+    DxC_decoder: pd.DataFrame,
     adata_var: pd.DataFrame,
     gene_name_column: str,
     color: Optional[str] = None,
@@ -2248,8 +2248,8 @@ def plot_gene_loadings_for_associated_variable(
     ----------
         GxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
         variable (str): Name of the variable (e.g., SNP ID) for which factor loadings should be visualized.
-        GxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each GxC factor (columns).
-        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        DxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each GxC factor (columns).
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `DxC_decoder`.
         gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
         color (Optional[str]): Color for boxplot outlines. If None, defaults to "darkblue".
         spines_invisible (bool): Whether to hide the top, right, and left plot spines. Default is False.
@@ -2268,11 +2268,11 @@ def plot_gene_loadings_for_associated_variable(
         None
     """
     GxC_associations_variable = GxC_associations.loc[GxC_associations.SNP_id == variable]
-    if GxC_decoder.index.name is None:
+    if DxC_decoder.index.name is None:
         idx_name = "GeneID"
     else:
-        idx_name = GxC_decoder.index.name
-    gene_loadings = GxC_decoder.filter(
+        idx_name = DxC_decoder.index.name
+    gene_loadings = DxC_decoder.filter(
         [f.replace("U", "GxC") for f in GxC_associations_variable.Factor.unique().tolist()]
     )
     gene_loadings = pd.melt(
@@ -2292,7 +2292,7 @@ def plot_gene_loadings_for_associated_variable(
         top_genes = {}
         for f_gxc in GxC_associations_variable.Factor.unique():
             f_gxc = f_gxc.replace("U", "GxC")
-            top_genes[f_gxc] = GxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
+            top_genes[f_gxc] = DxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes[x.Factor], axis=1)
         )
@@ -2666,7 +2666,7 @@ def visualize_DxC_effect(
     cell_state_latent: Optional[pd.DataFrame] = None,
     GxC_associations: Optional[pd.DataFrame] = None,
     assignment_matrix: Optional[pd.DataFrame] = None,
-    GxC_decoder: Optional[pd.DataFrame] = None,
+    DxC_decoder: Optional[pd.DataFrame] = None,
     gene: Optional[str] = None,
     factor_id: Optional[str] = None,
     hgnc_column: Optional[str] = None,
@@ -2695,8 +2695,8 @@ def visualize_DxC_effect(
             `model_results_dir`. Default is None.
         assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead
             of `model_results_dir`. Default is None.
-        GxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each GxC factor (columns).
-        gene (Optional[str]): Plot the effect of the SNPs on the specific genes(s). Gene IDs must be the same as in `GxC_decoder`
+        DxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each GxC factor (columns).
+        gene (Optional[str]): Plot the effect of the SNPs on the specific genes(s). Gene IDs must be the same as in `DxC_decoder`
             and `adata.var` index.
         factor_id (Optional[str]): ID of the factor to use for reconstruction. For SNPs associated with more than one factors, it
             is recommended to specify which one to use when calculating the effect of the SNP on genes, in order to obtain
@@ -2781,31 +2781,31 @@ def visualize_DxC_effect(
                 raise FileNotFoundError(
                     "No factor assignment matrix found in `model_results_dir`. Make sure the filename ends in 'factor_assignment_matrix.tsv'."
                 )
-        if GxC_decoder is None and gene is not None:
-            GxC_decoder = [
-                re.match("(.*GxC_decoder.tsv)", f)
+        if DxC_decoder is None and gene is not None:
+            DxC_decoder = [
+                re.match("(.*DxC_decoder.tsv)", f)
                 for f in files
-                if re.match("(.*GxC_decoder.tsv)", f) is not None
+                if re.match("(.*DxC_decoder.tsv)", f) is not None
             ]
-            if len(GxC_decoder) > 0:
-                GxC_decoder = GxC_decoder[0].groups()[0]
-                GxC_decoder = pd.read_csv(
-                    os.path.join(model_results_dir, GxC_decoder), sep="\t", index_col=0
+            if len(DxC_decoder) > 0:
+                DxC_decoder = DxC_decoder[0].groups()[0]
+                DxC_decoder = pd.read_csv(
+                    os.path.join(model_results_dir, DxC_decoder), sep="\t", index_col=0
                 )
             else:
                 raise FileNotFoundError(
-                    "No GxC decoder found in `model_results_dir`. Make sure the filename ends in 'GxC_decoder.tsv'."
+                    "No GxC decoder found in `model_results_dir`. Make sure the filename ends in 'DxC_decoder.tsv'."
                 )
     if gene is not None:
         assert (
-            GxC_decoder is not None
-        ), "To visualize effect on individual genes `GxC_decoder` cannot be `None`."
+            DxC_decoder is not None
+        ), "To visualize effect on individual genes `DxC_decoder` cannot be `None`."
         GxC_effect = calculate_DxC_gene_effect(
             DxC_associations=GxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
-            DxC_decoder=GxC_decoder,
+            DxC_decoder=DxC_decoder,
             factor_id=factor_id,
         )
         GxC_effect = GxC_effect.filter(gene)
