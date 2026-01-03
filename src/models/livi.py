@@ -115,10 +115,10 @@ class LIVI(pl.LightningModule):
             self.A = nn.Parameter(
                 torch.randn(z_dim, n_gxc_factors, device=device)  # , generator=self.G_gen)
             )
-            self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+            self.D_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
             if self.hparams.genetics_seed is not None:
-                self.init_individual_embedding(self.U_context, self.hparams.genetics_seed)
-        # nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
+                self.init_individual_embedding(self.D_context, self.hparams.genetics_seed)
+        # nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
         if n_persistent_factors != 0:
             self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
@@ -214,7 +214,7 @@ class LIVI(pl.LightningModule):
 
         if self.n_gxc_factors != 0:
             A = torch.sigmoid(self.A)
-            z_interaction = (z @ A) * self.U_context(y)
+            z_interaction = (z @ A) * self.D_context(y)
         else:
             z_interaction = None
             A = None
@@ -352,7 +352,7 @@ class LIVI(pl.LightningModule):
             cell_state_decoder = self.decoder.mean[0].weight
 
             if self.n_gxc_factors != 0:
-                U = self.U_context(y)
+                U = self.D_context(y)
                 DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
                 U = None
@@ -412,13 +412,13 @@ class LIVI(pl.LightningModule):
         self.decoder.train_GxC = mode
         if mode:
             if self.n_gxc_factors != 0:
-                for p in self.U_context.parameters():
+                for p in self.D_context.parameters():
                     p.requires_grad = True
                 self.decoder.DxC_decoder[0].weight.requires_grad = True
                 self.A.requires_grad = True
         else:
             if self.n_gxc_factors != 0:
-                for p in self.U_context.parameters():
+                for p in self.D_context.parameters():
                     p.requires_grad = False
                 self.decoder.DxC_decoder[0].weight.requires_grad = False
                 self.A.requires_grad = False
@@ -505,7 +505,7 @@ class LIVI(pl.LightningModule):
         if self.covariate_effect is not None:
             params.append({"params": self.covariate_effect.parameters()})
         if self.n_gxc_factors != 0:
-            params.append({"params": self.U_context.parameters()})
+            params.append({"params": self.D_context.parameters()})
             params.append({"params": self.A})
         if self.n_persistent_factors != 0:
             params.append({"params": self.V_persistent.parameters()})
@@ -631,10 +631,10 @@ class LIVI_cis(pl.LightningModule):
         self.A = nn.Parameter(
             torch.randn(z_dim, n_gxc_factors, device=device, generator=self.G_gen)
         )
-        self.U_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+        self.D_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
         if self.hparams.genetics_seed is not None:
-            nn.init.normal_(self.U_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
-            # self.init_individual_embedding(self.U_context, self.hparams.genetics_seed)
+            nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
+            # self.init_individual_embedding(self.D_context, self.hparams.genetics_seed)
 
         if n_persistent_factors != 0:
             self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
@@ -736,7 +736,7 @@ class LIVI_cis(pl.LightningModule):
 
         if self.n_gxc_factors != 0:
             A = torch.sigmoid(self.A)
-            z_interaction = (z @ A) * self.U_context(y)
+            z_interaction = (z @ A) * self.D_context(y)
         else:
             z_interaction = None
             A = None
@@ -872,7 +872,7 @@ class LIVI_cis(pl.LightningModule):
             z = self(x).rsample()
             cell_state_decoder = self.decoder.mean[0].weight
             if self.n_gxc_factors != 0:
-                U = self.U_context(y)
+                U = self.D_context(y)
                 DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
                 U = None
@@ -925,14 +925,14 @@ class LIVI_cis(pl.LightningModule):
         self.decoder.train_GxC = mode
         if mode:
             if self.n_gxc_factors != 0:
-                self.U_context.requires_grad_(True)
+                self.D_context.requires_grad_(True)
                 self.decoder.DxC_decoder.requires_grad_(True)
                 self.A.requires_grad_(True)
             if self.hparams.n_cis_snps != 0:
                 self.SNP_gene_effect.requires_grad_(True)
         else:
             if self.n_gxc_factors != 0:
-                self.U_context.requires_grad_(False)
+                self.D_context.requires_grad_(False)
                 self.decoder.DxC_decoder.requires_grad_(False)
                 self.A.requires_grad_(False)
             if self.hparams.n_cis_snps != 0:
@@ -1013,7 +1013,7 @@ class LIVI_cis(pl.LightningModule):
         if self.covariate_effect is not None:
             params.append({"params": self.covariate_effect.parameters()})
         if self.n_gxc_factors != 0:
-            params.append({"params": self.U_context.parameters()})
+            params.append({"params": self.D_context.parameters()})
             params.append({"params": self.A})
         if self.n_persistent_factors != 0:
             params.append({"params": self.V_persistent.parameters()})

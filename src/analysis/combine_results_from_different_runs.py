@@ -1013,7 +1013,7 @@ def main(args):
             associations_ofp = associations_ofp + "_PRS"
 
         associations = run_LIVI_genetic_association_testing(
-            U_context=robust_factors,
+            D_context=robust_factors,
             V_persistent=None,
             GT_matrix=GT_matrix,
             variant_info=variant_info,

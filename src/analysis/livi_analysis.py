@@ -488,35 +488,35 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         )
 
     if livi_results["U_embedding"] is not None:
-        U_context = livi_results["U_embedding"].detach().numpy()
+        D_context = livi_results["U_embedding"].detach().numpy()
         if args.variance_threshold:
-            variable_factors = np.where(np.var(U_context, axis=0) >= args.variance_threshold)[0]
-            U_context = U_context[:, variable_factors].astype(np.float32)
+            variable_factors = np.where(np.var(D_context, axis=0) >= args.variance_threshold)[0]
+            D_context = D_context[:, variable_factors].astype(np.float32)
         else:
-            U_context = U_context.astype(np.float32)
+            D_context = D_context.astype(np.float32)
 
         colnames_context = (
             [f"U_Factor{f}" for f in variable_factors + 1]
             if args.variance_threshold
             else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
         )
-        U_context = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
-        U_context = (
-            U_context.merge(
+        D_context = pd.DataFrame(D_context, index=adata.obs.index, columns=colnames_context)
+        D_context = (
+            D_context.merge(
                 adata.obs.filter([args.individual_column]), right_index=True, left_index=True
             )
             .drop_duplicates()
             .set_index(args.individual_column)
         )
         try:
-            U_context.to_csv(
+            D_context.to_csv(
                 os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
         except OSError:
-            U_context.to_csv(
+            D_context.to_csv(
                 os.path.join(output_dir, "_U_embedding.tsv"),
                 sep="\t",
                 header=True,
@@ -551,7 +551,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             )
 
     else:
-        U_context = None
+        D_context = None
         DxC_decoder = None
 
     if livi_results["V_embedding"] is not None:
@@ -617,7 +617,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
         assignment_matrix = torch.sigmoid(livi_results["assignment_matrix"]).detach().numpy()
         assignment_matrix = pd.DataFrame(
-            assignment_matrix, index=cell_state_latent.columns, columns=U_context.columns
+            assignment_matrix, index=cell_state_latent.columns, columns=D_context.columns
         )
         try:
             assignment_matrix.to_csv(
@@ -643,7 +643,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     return (
         cell_state_latent,
         cell_state_decoder,
-        U_context,
+        D_context,
         DxC_decoder,
         V_persistent,
         persistent_decoder,
@@ -672,7 +672,7 @@ def main(args):
     (
         cell_state_latent,
         cell_state_decoder,
-        U_context,
+        D_context,
         DxC_decoder,
         V_persistent,
         persistent_decoder,
@@ -681,11 +681,11 @@ def main(args):
 
     print("\n-------- Running genetic association testing --------\n")
 
-    covariates = set_up_covariates(args, U_context)
+    covariates = set_up_covariates(args, D_context)
 
     start = datetime.now()
     associations = run_LIVI_genetic_association_testing(
-        U_context=U_context,
+        D_context=D_context,
         V_persistent=V_persistent,
         GT_matrix=GT_matrix,
         variant_info=variant_info,
@@ -716,11 +716,11 @@ def main(args):
     associations_GxC = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
 
-    if U_context is not None and associations_GxC is not None and A is not None:
+    if D_context is not None and associations_GxC is not None and A is not None:
         ## Exceptions for too-long filenames
         try:
             plot_U_factor_corr(
-                U=U_context,
+                U=D_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 savefig=os.path.join(output_dir, of_prefix),
@@ -728,7 +728,7 @@ def main(args):
             )
         except OSError:
             plot_U_factor_corr(
-                U=U_context,
+                U=D_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 savefig=os.path.join(output_dir, ""),
@@ -740,7 +740,7 @@ def main(args):
 
         try:
             plot_GxC_similarity(
-                U=U_context,
+                U=D_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 cell_state_factors=cell_state_latent,
@@ -752,7 +752,7 @@ def main(args):
             )
         except OSError:
             plot_GxC_similarity(
-                U=U_context,
+                U=D_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 A=A,
                 cell_state_factors=cell_state_latent,
@@ -767,14 +767,14 @@ def main(args):
             )
         try:
             plot_donor_similarity(
-                U=U_context,
+                U=D_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 savefig=os.path.join(output_dir, of_prefix),
                 format="png",
             )
         except OSError:
             plot_donor_similarity(
-                U=U_context,
+                U=D_context,
                 associated_factors=associations_GxC.Factor.unique(),
                 savefig=os.path.join(output_dir, ""),
                 format="png",
