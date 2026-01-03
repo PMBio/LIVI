@@ -1815,7 +1815,7 @@ def overlap_with_known_eQTLs(
             plot_title="Overlap between $U$ Factors associated with SNPs that are (not) known eQTLs",
             out=f"{prefix}_Venn_U-factor-overlap-LIVI-vs-known-eQTLs",
             asax=False,
-            ext=ext,
+            ext=ext.replace(".", ""),
             dpi=300,
             size=3.5,
         )
@@ -1953,7 +1953,7 @@ def overlap_with_known_eQTLs(
                 plot_title="Overlap between significant SNPs",
                 out=f"{prefix}_Venn_LIVI-persistent-vs-known-eQTLs",
                 asax=False,
-                ext=ext,
+                ext=ext.replace(".", ""),
                 dpi=300,
                 size=3.5,
             )
