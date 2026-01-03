@@ -258,7 +258,7 @@ def set_up_covariates(args: argparse.Namespace, D_context: pd.DataFrame) -> pd.D
     Parameters
     ----------
     args (argparse.Namespace): Parsed command-line arguments.
-    D_context (pd.DataFrame): GxC LIVI factors.
+    D_context (pd.DataFrame): DxC LIVI factors.
 
     Returns
     -------

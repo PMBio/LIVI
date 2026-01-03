@@ -39,9 +39,9 @@ from src.analysis.livi_testing import (
 from src.analysis.plotting import (
     cell_state_factors_heatmap,
     overlap_with_known_eQTLs,
+    plot_D_factor_corr,
     plot_donor_similarity,
-    plot_GxC_similarity,
-    plot_U_factor_corr,
+    plot_DxC_similarity,
     visualise_cell_state_latent,
 )
 from src.data_modules.livi_data import LIVIDataset
@@ -253,7 +253,7 @@ def validate_and_read_passed_args(
     if args.output_file_prefix:
         if args.output_file_prefix == "descriptive":
             zdim = LIVI_model.z_dim
-            n_gxc = LIVI_model.n_gxc_factors
+            n_DxC = LIVI_model.n_DxC_factors
             n_persistent = LIVI_model.n_persistent_factors
             encoder_h = "_".join([str(d) for d in LIVI_model.hparams.encoder_hidden_dims])
             batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
@@ -270,7 +270,7 @@ def validate_and_read_passed_args(
             warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
             warmup_epochs_G = LIVI_model.warmup_epochs_G
 
-            of_prefix = f"zdim{zdim}_{n_gxc}-U-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
+            of_prefix = f"zdim{zdim}_{n_DxC}-U-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
         else:
             of_prefix = args.output_file_prefix
     else:
@@ -307,7 +307,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         'cell-state_latent' (torch.Tensor): Cell state latent space.
         'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
         'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
-        'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
+        'D_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
         'DxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
         'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
         'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
@@ -487,8 +487,8 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             "Could not save cell-state decoder dataframe under provided filename (filename too long).\nSaved as '_cell-state_decoder.tsv' instead."
         )
 
-    if livi_results["U_embedding"] is not None:
-        D_context = livi_results["U_embedding"].detach().numpy()
+    if livi_results["D_embedding"] is not None:
+        D_context = livi_results["D_embedding"].detach().numpy()
         if args.variance_threshold:
             variable_factors = np.where(np.var(D_context, axis=0) >= args.variance_threshold)[0]
             D_context = D_context[:, variable_factors].astype(np.float32)
@@ -496,9 +496,9 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             D_context = D_context.astype(np.float32)
 
         colnames_context = (
-            [f"U_Factor{f}" for f in variable_factors + 1]
+            [f"D_Factor{f}" for f in variable_factors + 1]
             if args.variance_threshold
-            else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
+            else [f"D_Factor{gf}" for gf in range(1, LIVI_model.n_DxC_factors + 1)]
         )
         D_context = pd.DataFrame(D_context, index=adata.obs.index, columns=colnames_context)
         D_context = (
@@ -510,27 +510,27 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         )
         try:
             D_context.to_csv(
-                os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
+                os.path.join(output_dir, f"{of_prefix}_D_embedding.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
         except OSError:
             D_context.to_csv(
-                os.path.join(output_dir, "_U_embedding.tsv"),
+                os.path.join(output_dir, "_D_embedding.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
             warnings.warn(
-                "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
+                "Could not save D embedding dataframe under provided filename (filename too long).\nSaved as '_D_embedding.tsv' instead."
             )
 
         DxC_decoder = livi_results["DxC_decoder"].detach().numpy()
         DxC_decoder = pd.DataFrame(
             DxC_decoder,
             index=adata.var.index,
-            columns=[f"GxC_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
+            columns=[f"DxC_Factor{f}" for f in range(1, LIVI_model.n_DxC_factors + 1)],
         )
         try:
             DxC_decoder.to_csv(
@@ -547,7 +547,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
                 index=True,
             )
             warnings.warn(
-                "Could not save GxC decoder dataframe under provided filename (filename too long).\nSaved as '_DxC_decoder.tsv' instead."
+                "Could not save DxC decoder dataframe under provided filename (filename too long).\nSaved as '_DxC_decoder.tsv' instead."
             )
 
     else:
@@ -713,35 +713,35 @@ def main(args):
             f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
         )
 
-    associations_GxC = associations[0] if isinstance(associations, tuple) else associations
+    associations_DxC = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
 
-    if D_context is not None and associations_GxC is not None and A is not None:
+    if D_context is not None and associations_DxC is not None and A is not None:
         ## Exceptions for too-long filenames
         try:
-            plot_U_factor_corr(
-                U=D_context,
-                associated_factors=associations_GxC.Factor.unique(),
+            plot_D_factor_corr(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 A=A,
                 savefig=os.path.join(output_dir, of_prefix),
                 format="png",
             )
         except OSError:
-            plot_U_factor_corr(
-                U=D_context,
-                associated_factors=associations_GxC.Factor.unique(),
+            plot_D_factor_corr(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 A=A,
                 savefig=os.path.join(output_dir, ""),
                 format="png",
             )
             warnings.warn(
-                "Could not save U factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                "Could not save D factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
             )
 
         try:
-            plot_GxC_similarity(
-                U=D_context,
-                associated_factors=associations_GxC.Factor.unique(),
+            plot_DxC_similarity(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 A=A,
                 cell_state_factors=cell_state_latent,
                 cell_metadata=adata.obs,
@@ -751,9 +751,9 @@ def main(args):
                 format="png",
             )
         except OSError:
-            plot_GxC_similarity(
-                U=D_context,
-                associated_factors=associations_GxC.Factor.unique(),
+            plot_DxC_similarity(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 A=A,
                 cell_state_factors=cell_state_latent,
                 cell_metadata=adata.obs,
@@ -763,19 +763,19 @@ def main(args):
                 format="png",
             )
             warnings.warn(
-                "Could not save GxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                "Could not save DxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
             )
         try:
             plot_donor_similarity(
-                U=D_context,
-                associated_factors=associations_GxC.Factor.unique(),
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 savefig=os.path.join(output_dir, of_prefix),
                 format="png",
             )
         except OSError:
             plot_donor_similarity(
-                U=D_context,
-                associated_factors=associations_GxC.Factor.unique(),
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 savefig=os.path.join(output_dir, ""),
                 format="png",
             )
@@ -787,7 +787,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                DxC_effects_LIVI=associations_GxC,
+                DxC_effects_LIVI=associations_DxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -799,7 +799,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                DxC_effects_LIVI=associations_GxC,
+                DxC_effects_LIVI=associations_DxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,

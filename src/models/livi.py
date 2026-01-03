@@ -22,7 +22,7 @@ class LIVI(pl.LightningModule):
         x_dim: int,
         z_dim: int,
         y_dim: int,
-        n_gxc_factors: int,
+        n_DxC_factors: int,
         n_persistent_factors: int,
         encoder_hidden_dims: List[int],
         learning_rate: float,
@@ -70,13 +70,13 @@ class LIVI(pl.LightningModule):
         self.x_dim = x_dim
         self.z_dim = z_dim
         self.y_dim = y_dim
-        self.n_gxc_factors = n_gxc_factors
+        self.n_DxC_factors = n_DxC_factors
         self.n_persistent_factors = n_persistent_factors
         self.warmup_epochs_G = 0 if self.n_persistent_factors == 0 else warmup_epochs_G
         self.train_epochs_adversary = train_epochs_adversary if adversary_weight > 0 else 0
         self.pretrain_mode = True if warmup_epochs_vae > 0 else False
         self.train_V_mode = False if self.pretrain_mode or self.n_persistent_factors == 0 else True
-        self.train_GxC_mode = False if self.pretrain_mode or self.n_gxc_factors == 0 else True
+        self.train_DxC_mode = False if self.pretrain_mode or self.n_DxC_factors == 0 else True
         # Enable checkpointing after VAE + Dis training is completed and 5 epochs after U,V,A training has started
         self.checkpointing_epoch = (
             warmup_epochs_vae + self.warmup_epochs_G + self.train_epochs_adversary + 5
@@ -110,12 +110,12 @@ class LIVI(pl.LightningModule):
             device=device,
         )
 
-        if n_gxc_factors != 0:
+        if n_DxC_factors != 0:
             # learnable factor assignment matrix A; init from Normal
             self.A = nn.Parameter(
-                torch.randn(z_dim, n_gxc_factors, device=device)  # , generator=self.G_gen)
+                torch.randn(z_dim, n_DxC_factors, device=device)  # , generator=self.G_gen)
             )
-            self.D_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+            self.D_context = nn.Embedding(y_dim, n_DxC_factors, device=device)
             if self.hparams.genetics_seed is not None:
                 self.init_individual_embedding(self.D_context, self.hparams.genetics_seed)
         # nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
@@ -131,10 +131,10 @@ class LIVI(pl.LightningModule):
             x_dim=x_dim,
             decoder_hidden_dims=[],
             layer_norm=True,
-            n_gxc_factors=n_gxc_factors,
+            n_DxC_factors=n_DxC_factors,
             n_persistent_factors=n_persistent_factors,
             pretrain_VAE=self.pretrain_mode,
-            train_GxC=self.train_GxC_mode,
+            train_DxC=self.train_DxC_mode,
             train_V=self.train_V_mode,
             batch_norm=batch_norm_decoder,
             device=device,
@@ -151,7 +151,7 @@ class LIVI(pl.LightningModule):
 
         self.set_pretrain_mode(self.pretrain_mode)
         self.set_train_V_mode(self.train_V_mode)
-        self.set_train_GxC_mode(self.train_GxC_mode)
+        self.set_train_DxC_mode(self.train_DxC_mode)
 
         self.automatic_optimization = False
 
@@ -212,7 +212,7 @@ class LIVI(pl.LightningModule):
         z = nn.Softmax(dim=1)(z)
         kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
 
-        if self.n_gxc_factors != 0:
+        if self.n_DxC_factors != 0:
             A = torch.sigmoid(self.A)
             z_interaction = (z @ A) * self.D_context(y)
         else:
@@ -233,7 +233,7 @@ class LIVI(pl.LightningModule):
             self.decoder(
                 z=z,
                 size_factor=size_factor,
-                GxC=z_interaction,
+                DxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
                 covariate_effect=covariate_effect,
             )
@@ -272,7 +272,7 @@ class LIVI(pl.LightningModule):
             # train vae
             elbo, A = self.compute_elbo(z_dist, x, y, covariates, size_factor)
             logs[f"{mode}/elbo"] = elbo.item()
-            if not self.train_GxC_mode or self.n_gxc_factors == 0:
+            if not self.train_DxC_mode or self.n_DxC_factors == 0:
                 l1_loss_context = torch.zeros([1], device=self.device)
                 l1_loss_A = torch.zeros([1], device=self.device)
             else:
@@ -351,7 +351,7 @@ class LIVI(pl.LightningModule):
             z = self(x).rsample()
             cell_state_decoder = self.decoder.mean[0].weight
 
-            if self.n_gxc_factors != 0:
+            if self.n_DxC_factors != 0:
                 U = self.D_context(y)
                 DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
@@ -369,7 +369,7 @@ class LIVI(pl.LightningModule):
             "cell-state_decoder": cell_state_decoder,
             "U_embedding": U,
             "DxC_decoder": DxC_decoder,
-            "assignment_matrix": self.A if self.n_gxc_factors != 0 else None,
+            "assignment_matrix": self.A if self.n_DxC_factors != 0 else None,
             "V_embedding": V,
             "V_decoder": V_decoder,
         }
@@ -385,7 +385,7 @@ class LIVI(pl.LightningModule):
             # freeze the rest of the model parameters
             for p in self.adversary.parameters():
                 p.requires_grad = False
-            self.set_train_GxC_mode(False)
+            self.set_train_DxC_mode(False)
             self.set_train_V_mode(False)
         else:
             # unfreeze adversary
@@ -407,17 +407,17 @@ class LIVI(pl.LightningModule):
                     p.requires_grad = False
                 self.decoder.persistent_decoder[0].weight.requires_grad = False
 
-    def set_train_GxC_mode(self, mode: bool):
-        self.train_GxC_mode = mode
-        self.decoder.train_GxC = mode
+    def set_train_DxC_mode(self, mode: bool):
+        self.train_DxC_mode = mode
+        self.decoder.train_DxC = mode
         if mode:
-            if self.n_gxc_factors != 0:
+            if self.n_DxC_factors != 0:
                 for p in self.D_context.parameters():
                     p.requires_grad = True
                 self.decoder.DxC_decoder[0].weight.requires_grad = True
                 self.A.requires_grad = True
         else:
-            if self.n_gxc_factors != 0:
+            if self.n_DxC_factors != 0:
                 for p in self.D_context.parameters():
                     p.requires_grad = False
                 self.decoder.DxC_decoder[0].weight.requires_grad = False
@@ -456,7 +456,7 @@ class LIVI(pl.LightningModule):
             for p in self.adversary.parameters():
                 p.requires_grad = True
             # freeze genetic embeddings
-            self.set_train_GxC_mode(False)
+            self.set_train_DxC_mode(False)
             self.set_train_V_mode(False)
 
     def on_train_epoch_end(self):
@@ -476,7 +476,7 @@ class LIVI(pl.LightningModule):
             == self.hparams.warmup_epochs_vae + self.train_epochs_adversary + self.warmup_epochs_G
         ):
             print("Pretraining completed. Start learning CxG effects.")
-            self.set_train_GxC_mode(True)
+            self.set_train_DxC_mode(True)
 
     def on_save_checkpoint(self, checkpoint: dict):
         # Save model's pretraining and frozen state
@@ -504,7 +504,7 @@ class LIVI(pl.LightningModule):
         ]
         if self.covariate_effect is not None:
             params.append({"params": self.covariate_effect.parameters()})
-        if self.n_gxc_factors != 0:
+        if self.n_DxC_factors != 0:
             params.append({"params": self.D_context.parameters()})
             params.append({"params": self.A})
         if self.n_persistent_factors != 0:
@@ -524,7 +524,7 @@ class LIVI(pl.LightningModule):
 
 class LIVI_cis(pl.LightningModule):
     """Latent Interaction Variational Inference (LIVI) model, allows for the estimation of cell-
-    state-specific (GxC) and persistent donor effects using separate decoders.
+    state-specific (DxC) and persistent donor effects using separate decoders.
 
     Donor effects are learned after the latent cell-state factors have been estimated. In addition
     it accounts for nuisance cell/donor covariates and known cis eQTLs.
@@ -535,7 +535,7 @@ class LIVI_cis(pl.LightningModule):
         x_dim: int,
         z_dim: int,
         y_dim: int,
-        n_gxc_factors: int,
+        n_DxC_factors: int,
         n_persistent_factors: int,
         n_cis_snps: int,
         encoder_hidden_dims: List[int],
@@ -558,7 +558,7 @@ class LIVI_cis(pl.LightningModule):
             x_dim (int): Dimensionality of input data.
             z_dim (int): Dimensionality of cell-state latent space.
             y_dim (int): Number of individuals in the dataset.
-            n_gxc_factors (int): Dimensionality of GxC latent space.
+            n_DxC_factors (int): Dimensionality of DxC latent space.
             n_persistent_factors (int): Dimensionality of global donor embedding.
             n_cis_snps (int): Number of known cis-eQTLs (snp-gene pairs).
             encoder_hidden_dims (List[int]): List of hidden dimensions for each encoder layer.
@@ -574,7 +574,7 @@ class LIVI_cis(pl.LightningModule):
             l1_weight (float): Weight of the L1 penalty, which is applied on the genetic decoders.
             A_weight (float): Weight of the penalty imposed on the assignment matrix.
             batch_norm_decoder (bool): Whether to apply batch normalisation to the combined decoder output.
-            genetics_seed (int): Seed to use to initialize the assignment matrix, the GxC factors and GxC decoder weights.
+            genetics_seed (int): Seed to use to initialize the assignment matrix, the DxC factors and DxC decoder weights.
             device (str): Accelerator to use for training.
             initialise_training_mode (bool): Whether to initialize the model. Useful to preserve the frozen state of a model loaded from a checkpoint
                 (in which case `initialise_training_mode=False`)
@@ -586,12 +586,12 @@ class LIVI_cis(pl.LightningModule):
         self.x_dim = x_dim
         self.z_dim = z_dim
         self.y_dim = y_dim
-        self.n_gxc_factors = n_gxc_factors
+        self.n_DxC_factors = n_DxC_factors
         self.n_persistent_factors = n_persistent_factors
         self.warmup_epochs_G = 0 if self.n_persistent_factors == 0 else warmup_epochs_G
         self.pretrain_mode = True if warmup_epochs_vae > 0 else False
         self.train_V_mode = False if self.pretrain_mode or self.n_persistent_factors == 0 else True
-        self.train_GxC_mode = False if self.pretrain_mode or self.n_gxc_factors == 0 else True
+        self.train_DxC_mode = False if self.pretrain_mode or self.n_DxC_factors == 0 else True
         self.checkpointing_epoch = warmup_epochs_vae + self.warmup_epochs_G + 5
 
         self.frozen = False
@@ -618,20 +618,20 @@ class LIVI_cis(pl.LightningModule):
             x_dim=x_dim,
             decoder_hidden_dims=[],
             layer_norm=True,
-            n_gxc_factors=n_gxc_factors,
+            n_DxC_factors=n_DxC_factors,
             n_persistent_factors=n_persistent_factors,
             pretrain_VAE=self.pretrain_mode,
             train_V=self.train_V_mode,
-            train_GxC=self.train_GxC_mode,
+            train_DxC=self.train_DxC_mode,
             batch_norm=batch_norm_decoder,
             device=device,
             genetics_generator=self.G_gen,
         )
 
         self.A = nn.Parameter(
-            torch.randn(z_dim, n_gxc_factors, device=device, generator=self.G_gen)
+            torch.randn(z_dim, n_DxC_factors, device=device, generator=self.G_gen)
         )
-        self.D_context = nn.Embedding(y_dim, n_gxc_factors, device=device)
+        self.D_context = nn.Embedding(y_dim, n_DxC_factors, device=device)
         if self.hparams.genetics_seed is not None:
             nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
             # self.init_individual_embedding(self.D_context, self.hparams.genetics_seed)
@@ -670,7 +670,7 @@ class LIVI_cis(pl.LightningModule):
     def initialise_model(self):
         self.set_pretrain_mode(self.pretrain_mode)
         self.set_train_V_mode(self.train_V_mode)
-        self.set_train_GxC_mode(self.train_GxC_mode)
+        self.set_train_DxC_mode(self.train_DxC_mode)
 
     # def init_individual_embedding(self, embedding, seed):
     #     # Save the current random state
@@ -734,7 +734,7 @@ class LIVI_cis(pl.LightningModule):
 
         kl_div = tdist.kl_divergence(z_dist, self.get_prior()).mean()
 
-        if self.n_gxc_factors != 0:
+        if self.n_DxC_factors != 0:
             A = torch.sigmoid(self.A)
             z_interaction = (z @ A) * self.D_context(y)
         else:
@@ -784,7 +784,7 @@ class LIVI_cis(pl.LightningModule):
         log_lik = (
             self.decoder(
                 z=z,
-                GxC=z_interaction,
+                DxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
                 size_factor=size_factor,
                 covariate_effect=covariate_effect,
@@ -807,7 +807,7 @@ class LIVI_cis(pl.LightningModule):
             z_dist, x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask
         )
         logs = {f"{mode}/elbo": elbo.item()}
-        if not self.train_GxC_mode or self.n_gxc_factors == 0:
+        if not self.train_DxC_mode or self.n_DxC_factors == 0:
             l1_loss_context = torch.zeros([1], device=self.device)
             loss_A = torch.zeros([1], device=self.device)
         else:
@@ -871,7 +871,7 @@ class LIVI_cis(pl.LightningModule):
 
             z = self(x).rsample()
             cell_state_decoder = self.decoder.mean[0].weight
-            if self.n_gxc_factors != 0:
+            if self.n_DxC_factors != 0:
                 U = self.D_context(y)
                 DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
@@ -904,7 +904,7 @@ class LIVI_cis(pl.LightningModule):
         self.decoder.pretrain_VAE = mode
         if mode:
             # freeze parameters
-            self.set_train_GxC_mode(False)
+            self.set_train_DxC_mode(False)
             self.set_train_V_mode(False)
 
     def set_train_V_mode(self, mode: bool):
@@ -920,18 +920,18 @@ class LIVI_cis(pl.LightningModule):
                 self.V_persistent.requires_grad_(False)
                 self.decoder.persistent_decoder.requires_grad_(False)
 
-    def set_train_GxC_mode(self, mode: bool):
-        self.train_GxC_mode = mode
-        self.decoder.train_GxC = mode
+    def set_train_DxC_mode(self, mode: bool):
+        self.train_DxC_mode = mode
+        self.decoder.train_DxC = mode
         if mode:
-            if self.n_gxc_factors != 0:
+            if self.n_DxC_factors != 0:
                 self.D_context.requires_grad_(True)
                 self.decoder.DxC_decoder.requires_grad_(True)
                 self.A.requires_grad_(True)
             if self.hparams.n_cis_snps != 0:
                 self.SNP_gene_effect.requires_grad_(True)
         else:
-            if self.n_gxc_factors != 0:
+            if self.n_DxC_factors != 0:
                 self.D_context.requires_grad_(False)
                 self.decoder.DxC_decoder.requires_grad_(False)
                 self.A.requires_grad_(False)
@@ -961,7 +961,7 @@ class LIVI_cis(pl.LightningModule):
             if self.covariate_effect is not None:
                 self.covariate_effect.requires_grad_(True)
             # freeze genetic embeddings
-            self.set_train_GxC_mode(False)
+            self.set_train_DxC_mode(False)
             self.set_train_V_mode(False)
 
     def on_train_epoch_end(self):
@@ -969,8 +969,8 @@ class LIVI_cis(pl.LightningModule):
         and persistent G has been reached."""
         print(f"VAE frozen: {self.frozen}")
         print(f"Training V: {self.train_V_mode}")
-        print(f"Training GxC: {self.train_GxC_mode}")
-        print(f"GxC decoder requires grad: {self.decoder.DxC_decoder[0].weight.requires_grad}")
+        print(f"Training DxC: {self.train_DxC_mode}")
+        print(f"DxC decoder requires grad: {self.decoder.DxC_decoder[0].weight.requires_grad}")
         if self.current_epoch == self.hparams.warmup_epochs_vae:
             self.set_pretrain_mode(False)
             print("VAE pretraining completed.")
@@ -983,8 +983,8 @@ class LIVI_cis(pl.LightningModule):
             # self.freeze_vae(True) # Freeze VAE after starting training V
             # self.set_train_V_mode(False) # Freeze V
             print("Pretraining completed.")
-            print("Start learning GxC effects.")
-            self.set_train_GxC_mode(True)
+            print("Start learning DxC effects.")
+            self.set_train_DxC_mode(True)
 
     def on_save_checkpoint(self, checkpoint: dict):
         # Save model's pretraining and frozen state
@@ -1012,7 +1012,7 @@ class LIVI_cis(pl.LightningModule):
         ]
         if self.covariate_effect is not None:
             params.append({"params": self.covariate_effect.parameters()})
-        if self.n_gxc_factors != 0:
+        if self.n_DxC_factors != 0:
             params.append({"params": self.D_context.parameters()})
             params.append({"params": self.A})
         if self.n_persistent_factors != 0:

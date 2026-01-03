@@ -831,7 +831,7 @@ def visualise_livi_embeddings(
     fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.tight_layout()
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_celltype.{format}"),
+        os.path.join(output_dir, f"{of_prefix}_DxC-latent-PCA_celltype.{format}"),
         dpi=600,
         transparent=True,
         bbox_inches="tight",
@@ -1403,7 +1403,7 @@ def plot_DxC_similarity(
     savefig: str,
     format: str,
 ) -> None:
-    """Creates a clustermap of the cosine similarity between GxC factors and their assigned cell
+    """Creates a clustermap of the cosine similarity between DxC factors and their assigned cell
     types.
 
     Parameters
@@ -1769,7 +1769,7 @@ def overlap_with_known_eQTLs(
                 set(known_trans_eQTLs[SNP_colname_trans]),
                 set(known_cis_eQTLs[SNP_colname_cis]),
             ],
-            set_labels=("LIVI GxC", "known $trans$-eQTLs", "known $cis$-eQTLs"),
+            set_labels=("LIVI DxC", "known $trans$-eQTLs", "known $cis$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
         for lbl in v.subset_labels:
@@ -1782,7 +1782,7 @@ def overlap_with_known_eQTLs(
         )
         plt.tight_layout()
         plt.savefig(
-            f"{prefix}_Venn_LIVI-GxC-vs-known-eQTLs{ext}",
+            f"{prefix}_Venn_LIVI-DxC-vs-known-eQTLs{ext}",
             transparent=True,
             dpi=300,
             bbox_inches="tight",
@@ -1805,7 +1805,7 @@ def overlap_with_known_eQTLs(
                     DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                 ].Factor.unique()
             ),
-            "only LIVI GxC": set(
+            "only LIVI DxC": set(
                 DxC_effects_LIVI.loc[DxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
             ),
         }
@@ -1900,15 +1900,15 @@ def overlap_with_known_eQTLs(
                 .assign(
                     Group=plot_df.reset_index().apply(
                         lambda x: (
-                            "only LIVI GxC"
+                            "only LIVI DxC"
                             if x["index"] in LIVIonly_factors
                             else (
-                                "LIVI GxC and $trans$-eQTL"
+                                "LIVI DxC and $trans$-eQTL"
                                 if x["index"] in trans_factors
                                 else (
-                                    "LIVI GxC and $cis$-eQTL"
+                                    "LIVI DxC and $cis$-eQTL"
                                     if x["index"] in cis_factors
-                                    else "LIVI GxC and both $cis$ and $trans$ eQTL"
+                                    else "LIVI DxC and both $cis$ and $trans$ eQTL"
                                 )
                             )
                         ),
@@ -1944,7 +1944,7 @@ def overlap_with_known_eQTLs(
             ssets = {
                 "known cis-eQTLs": set(known_cis_eQTLs[SNP_colname_cis].tolist()),
                 "known trans-eQTLs": set(known_trans_eQTLs[SNP_colname_trans].tolist()),
-                "LIVI GxC": set(DxC_effects_LIVI.SNP_id.tolist()),
+                "LIVI DxC": set(DxC_effects_LIVI.SNP_id.tolist()),
                 "LIVI persistent": set(persistent_effects_LIVI.SNP_id.tolist()),
             }
 
@@ -1963,7 +1963,7 @@ def overlap_with_known_eQTLs(
         # Overlap between SNPs
         v = venn2(
             subsets=[set(DxC_effects_LIVI.SNP_id), set(known_trans_eQTLs[SNP_colname_trans])],
-            set_labels=("LIVI GxC", "known $trans$-eQTLs"),
+            set_labels=("LIVI DxC", "known $trans$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
         for lbl in v.subset_labels:
@@ -1996,7 +1996,7 @@ def overlap_with_known_eQTLs(
                     ].Factor.tolist()
                 ),
             ],
-            set_labels=("only LIVI GxC", "known $trans$-eQTLs"),
+            set_labels=("only LIVI DxC", "known $trans$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
         for lbl in v.subset_labels:
@@ -2038,7 +2038,7 @@ def overlap_with_known_eQTLs(
                 .assign(
                     Group=plot_df.reset_index().apply(
                         lambda x: (
-                            "only LIVI GxC"
+                            "only LIVI DxC"
                             if x["index"] in LIVIonly_factors
                             else "LIVI and $trans$-eQTL"
                         ),
@@ -2077,7 +2077,7 @@ def overlap_with_known_eQTLs(
                     set(known_trans_eQTLs[SNP_colname_trans]),
                     set(persistent_effects_LIVI.SNP_id),
                 ],
-                set_labels=("LIVI GxC", "known $trans$-eQTLs", "LIVI persistent"),
+                set_labels=("LIVI DxC", "known $trans$-eQTLs", "LIVI persistent"),
             )
             [lbl.set_fontsize(15) for lbl in v.set_labels]
             for lbl in v.subset_labels:
@@ -2248,7 +2248,7 @@ def plot_gene_loadings_for_associated_variable(
     ----------
         DxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
         variable (str): Name of the variable (e.g., SNP ID) for which factor loadings should be visualized.
-        DxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each GxC factor (columns).
+        DxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each DxC factor (columns).
         adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `DxC_decoder`.
         gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
         color (Optional[str]): Color for boxplot outlines. If None, defaults to "darkblue".
@@ -2290,9 +2290,9 @@ def plot_gene_loadings_for_associated_variable(
         )
     else:
         top_genes = {}
-        for f_gxc in DxC_associations_variable.Factor.unique():
-            f_gxc = f_gxc.replace("D", "DxC")
-            top_genes[f_gxc] = DxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
+        for f_DxC in DxC_associations_variable.Factor.unique():
+            f_DxC = f_DxC.replace("D", "DxC")
+            top_genes[f_DxC] = DxC_decoder[f_DxC].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes[x.Factor], axis=1)
         )
@@ -2320,22 +2320,22 @@ def plot_gene_loadings_for_associated_variable(
     if n_rows > 1:
         axs = axs.flatten()
 
-    for f_idx, f_gxc in enumerate(gene_loadings.Factor.unique()):
-        f_gxc_loadings = gene_loadings.loc[gene_loadings.Factor == f_gxc]
+    for f_idx, f_DxC in enumerate(gene_loadings.Factor.unique()):
+        f_DxC_loadings = gene_loadings.loc[gene_loadings.Factor == f_DxC]
         if n_rows > 1 or n_cols > 1:
             axis = axs[f_idx]
         else:
             axis = axs
 
         sns.boxplot(
-            data=f_gxc_loadings,
+            data=f_DxC_loadings,
             x="loadings",
             fill=False,
             color="darkblue" if color is None else color,
             ax=axis,
         )
         axis.legend().remove()
-        axis.set_title(f_gxc.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize)
+        axis.set_title(f_DxC.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize)
         axis.set_yticks([])
         axis.set_xlabel("Loadings", fontsize=annotation_fontsize + 2)
         axis.tick_params(axis="x", which="major", labelsize=annotation_fontsize - 3)
@@ -2345,15 +2345,15 @@ def plot_gene_loadings_for_associated_variable(
             axis.spines["left"].set_visible(False)
         # axis.spines["bottom"].set_visible(False)
 
-        f_gxc_loadings_anno = f_gxc_loadings.loc[f_gxc_loadings["annotate_gene"]]
-        f_gxc_loadings_anno = f_gxc_loadings_anno.sort_values(
+        f_DxC_loadings_anno = f_DxC_loadings.loc[f_DxC_loadings["annotate_gene"]]
+        f_DxC_loadings_anno = f_DxC_loadings_anno.sort_values(
             by="loadings",
-            ascending=f_gxc_loadings.loadings.max() != f_gxc_loadings.loadings.abs().max(),
+            ascending=f_DxC_loadings.loadings.max() != f_DxC_loadings.loadings.abs().max(),
         ).reset_index(drop=True)
         x_previous = 0
         y_previous = []
         offset = offset
-        for idx, row in f_gxc_loadings_anno.iterrows():
+        for idx, row in f_DxC_loadings_anno.iterrows():
             y_loc = 0.05 if idx % 2 == 0 else -0.05
             if np.abs(np.abs(row["loadings"]) - x_previous) < x_distance:
                 if y_loc > 0:
@@ -2681,7 +2681,7 @@ def visualize_DxC_effect(
         SNP_id (str): ID of the SNP, whose effect should be calculated.
         adata (AnnData): AnnData object containing the cell metadata in adata.obs.
         celltype_column (str): Column name in adata.obs indicating the celltype.
-        return_GxC_effect (bool): If True, returns the quantified SNP effect at the single-cell level.
+        return_DxC_effect (bool): If True, returns the quantified SNP effect at the single-cell level.
         marker_size (int): Scatterplot marker size. Default is 2.
         axis_title_fontsize (int): Fontsize of the title for each axis/plot.
         d (int): Controls figure size. Resulting figure will have a width of 2.5 x d and a height d x number of axis/plots.
@@ -2691,11 +2691,11 @@ def visualize_DxC_effect(
             `assignment_matrix` are None. Default is None.
         cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead
             of `model_results_dir`. Default is None.
-        DxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC associations. Can be used instead of
+        DxC_associations (pd.DataFrame or None): Dataframe containing LIVI DxC associations. Can be used instead of
             `model_results_dir`. Default is None.
         assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead
             of `model_results_dir`. Default is None.
-        DxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each GxC factor (columns).
+        DxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each DxC factor (columns).
         gene (Optional[str]): Plot the effect of the SNPs on the specific genes(s). Gene IDs must be the same as in `DxC_decoder`
             and `adata.var` index.
         factor_id (Optional[str]): ID of the factor to use for reconstruction. For SNPs associated with more than one factors, it
@@ -2794,7 +2794,7 @@ def visualize_DxC_effect(
                 )
             else:
                 raise FileNotFoundError(
-                    "No GxC decoder found in `model_results_dir`. Make sure the filename ends in 'DxC_decoder.tsv'."
+                    "No DxC decoder found in `model_results_dir`. Make sure the filename ends in 'DxC_decoder.tsv'."
                 )
     if gene is not None:
         assert (

@@ -52,7 +52,7 @@ def test_association(
         X: Other covariates / fixed effects.
         E: Group covariates / random effects.
         fast: Use fast (``True``) or regular testing. Defaults to ``False``.
-            Re-uses parameter estimates from null model when fitting alternative
+            Reuses parameter estimates from null model when fitting alternative
             models.
         show_progress Show progress bar.
     Returns:
@@ -116,8 +116,8 @@ def eval_checkpoint(checkpoint, show_progress=False):
     y, y_index = pd.factorize(adata.obs["individual"])
 
     # identify simulated effects
-    causal_snps = adata.uns["simulation"]["B_gxc"].any(1)
-    causal_factors = adata.uns["simulation"]["B_gxc"].any(0)
+    causal_snps = adata.uns["simulation"]["B_DxC"].any(1)
+    causal_factors = adata.uns["simulation"]["B_DxC"].any(0)
 
     # load model parameters
     model = LIVI.load_from_checkpoint(checkpoint)
@@ -165,7 +165,7 @@ def eval_checkpoint(checkpoint, show_progress=False):
 
 def run_pca(adata_path, show_progress=False):
     adata = sc.read_h5ad(adata_path)
-    causals = adata.uns["simulation"]["B_gxc"].any(1)
+    causals = adata.uns["simulation"]["B_DxC"].any(1)
 
     # params
     pattern = r"adata_(\w+)-([\d.]+)\.h5ad"

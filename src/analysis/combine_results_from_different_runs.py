@@ -32,7 +32,7 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.stats import multitest
 from tensorqtl import pgen, trans
 
-from src.analysis._utils import assign_U_to_celltype, calculate_GxC_effect
+from src.analysis._utils import assign_U_to_celltype, calculate_DxC_effect
 
 # import src.analysis.livi_testing as testing
 from src.analysis.livi_testing import (
@@ -454,7 +454,7 @@ def main(args):
         if len(U_associations) > 0:
             if len(U_associations) > 1:
                 warnings.warn(
-                    f"Found more than one file with GxC associations for {model_replicates[i]}. Using file: {U_associations[0].groups()[0]}."
+                    f"Found more than one file with DxC associations for {model_replicates[i]}. Using file: {U_associations[0].groups()[0]}."
                 )
             U_associations = U_associations[0].groups()[0]
             seed_associations = pd.read_csv(
@@ -465,7 +465,7 @@ def main(args):
             )
             seeds_associations.append(seed_associations)
         else:
-            warnings.warn(f"No GxC associations found for {model_replicates[i]}.")
+            warnings.warn(f"No DxC associations found for {model_replicates[i]}.")
 
     associations_all_seeds = pd.concat(seeds_associations, ignore_index=True)
 
@@ -564,7 +564,7 @@ def main(args):
     intersect_snps_one = intersect_snps.copy()
     for gs in gseed:
         livi_associations = associations_all_seeds.loc[associations_all_seeds.random_seed == gs]
-        median_N_GxC_snp = (
+        median_N_DxC_snp = (
             livi_associations.loc[livi_associations.SNP_id.isin(intersect_snps)]
             .groupby("SNP_id", observed=True)
             .apply(lambda x: x.Factor.nunique(), include_groups=False)
@@ -630,13 +630,13 @@ def main(args):
         ]
         DxC_effects_all_snps = []
         for snp in intersect_snps_one:
-            GxC_effect_snp = calculate_GxC_effect(
+            DxC_effect_snp = calculate_DxC_effect(
                 LIVI_associations=livi_associations,
                 SNP_id=snp,
                 cell_state_latent=zbase,
                 A=seed_A,
             )
-            DxC_effects_all_snps.append(GxC_effect_snp)
+            DxC_effects_all_snps.append(DxC_effect_snp)
         DxC_effects_all_snps = pd.concat(DxC_effects_all_snps, axis=1, ignore_index=False)
         seeds_DxC_effects.append(DxC_effects_all_snps)
 
@@ -955,18 +955,18 @@ def main(args):
 
         # robust_factors = aggregate_correlated_factors_across_runs(seeds_U, args.factor_correlation_theshold, factor_correlations=None)
 
-        #### Calculate correlations based on GxC decoder
+        #### Calculate correlations based on DxC decoder
         seeds_DxC_decoder = []
         for i in range(len(model_replicates)):
-            seed_GxC_dec = pd.read_csv(
+            seed_DxC_dec = pd.read_csv(
                 os.path.join(
                     args.results_dir, model_replicates[i], f"{model_replicates[i]}_DxC_decoder.tsv"
                 ),
                 index_col=0,
                 sep="\t",
             )
-            seed_GxC_dec = seed_GxC_dec.assign(random_seed=[gseed[i]] * seed_GxC_dec.shape[0])
-            seeds_DxC_decoder.append(seed_GxC_dec)
+            seed_DxC_dec = seed_DxC_dec.assign(random_seed=[gseed[i]] * seed_DxC_dec.shape[0])
+            seeds_DxC_decoder.append(seed_DxC_dec)
 
         factor_correlations = correlate_factors_across_runs(seeds_DxC_decoder)
 
@@ -984,7 +984,7 @@ def main(args):
             [
                 loadings.rename(
                     columns=dict(
-                        zip(loadings.columns, [f.replace("GxC", "U") for f in loadings.columns])
+                        zip(loadings.columns, [f.replace("DxC", "U") for f in loadings.columns])
                     )
                 )
                 for loadings in seeds_DxC_decoder

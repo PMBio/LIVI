@@ -23,11 +23,11 @@ class LIVI_Decoder(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
-        n_gxc_factors: int,
+        n_DxC_factors: int,
         n_persistent_factors: int,
         pretrain_VAE: bool = True,
         train_V: bool = False,
-        train_GxC: bool = False,
+        train_DxC: bool = False,
         batch_norm: bool = True,
         device: str = "cuda",
         genetics_generator: Optional[torch.Generator] = None,
@@ -36,11 +36,11 @@ class LIVI_Decoder(nn.Module):
 
         self._x_dim = x_dim
         self._z_dim = z_dim
-        self._num_gxc_factors = n_gxc_factors
+        self._num_DxC_factors = n_DxC_factors
         self._num_persistent_factors = n_persistent_factors
         self._pretrain_vae = pretrain_VAE
         self._train_V = train_V
-        self._train_GxC = train_GxC
+        self._train_DxC = train_DxC
         self.batch_norm = batch_norm
         self.device = device
         self.genetics_generator = genetics_generator
@@ -57,9 +57,9 @@ class LIVI_Decoder(nn.Module):
         # init_mlp(self.mean, generator=self.vae_gen)
         self.log_total_count = torch.nn.Parameter(torch.ones(x_dim, device=self.device))
 
-        if self._num_gxc_factors != 0:
+        if self._num_DxC_factors != 0:
             self.DxC_decoder = create_mlp(
-                input_size=self._num_gxc_factors,
+                input_size=self._num_DxC_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
                 layer_norm=layer_norm,
@@ -100,18 +100,18 @@ class LIVI_Decoder(nn.Module):
         self._train_V = mode
 
     @property
-    def train_GxC(self):
-        return self._train_GxC
+    def train_DxC(self):
+        return self._train_DxC
 
-    @train_GxC.setter
-    def train_GxC(self, mode: bool):
-        self._train_GxC = mode
+    @train_DxC.setter
+    def train_DxC(self, mode: bool):
+        self._train_DxC = mode
 
     def forward(
         self,
         z: torch.Tensor,
         size_factor: torch.Tensor,
-        GxC: Optional[torch.Tensor] = None,
+        DxC: Optional[torch.Tensor] = None,
         persistent_G: Optional[torch.Tensor] = None,
         covariate_effect: Optional[torch.Tensor] = None,
         known_cis_effect: Optional[torch.Tensor] = None,
@@ -120,7 +120,7 @@ class LIVI_Decoder(nn.Module):
         decoder_out = self.mean(z)
         if covariate_effect is not None:
             decoder_out = decoder_out + covariate_effect
-        if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
+        if not self.pretrain_VAE and self.train_DxC and known_cis_effect is not None:
             decoder_out = decoder_out + known_cis_effect
         if (
             not self.pretrain_VAE
@@ -132,11 +132,11 @@ class LIVI_Decoder(nn.Module):
             decoder_out = decoder_out + y_add
         if (
             not self.pretrain_VAE
-            and self._num_gxc_factors != 0
-            and self.train_GxC
-            and GxC is not None
+            and self._num_DxC_factors != 0
+            and self.train_DxC
+            and DxC is not None
         ):
-            y_gc = self.DxC_decoder(GxC)
+            y_gc = self.DxC_decoder(DxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
@@ -162,10 +162,10 @@ class LIVI_Decoder_wo_cis(LIVI_Decoder):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
-        n_gxc_factors: int,
+        n_DxC_factors: int,
         n_persistent_factors: int,
         pretrain_VAE: bool = True,
-        train_GxC: bool = False,
+        train_DxC: bool = False,
         train_V: bool = False,
         batch_norm: bool = True,
         device: str = "cuda",
@@ -184,11 +184,11 @@ class LIVI_Decoder_wo_cis(LIVI_Decoder):
             x_dim=x_dim,
             decoder_hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
-            n_gxc_factors=n_gxc_factors,
+            n_DxC_factors=n_DxC_factors,
             n_persistent_factors=n_persistent_factors,
             pretrain_VAE=pretrain_VAE,
             train_V=train_V,
-            train_GxC=train_GxC,
+            train_DxC=train_DxC,
             batch_norm=batch_norm,
             device=device,
             genetics_generator=genetics_generator,
@@ -211,18 +211,18 @@ class LIVI_Decoder_wo_cis(LIVI_Decoder):
         self._train_V = mode
 
     @property
-    def train_GxC(self):
-        return self._train_GxC
+    def train_DxC(self):
+        return self._train_DxC
 
-    @train_GxC.setter
-    def train_GxC(self, mode: bool):
-        self._train_GxC = mode
+    @train_DxC.setter
+    def train_DxC(self, mode: bool):
+        self._train_DxC = mode
 
     def forward(
         self,
         z: torch.Tensor,
         size_factor: torch.Tensor,
-        GxC: Optional[torch.Tensor] = None,
+        DxC: Optional[torch.Tensor] = None,
         persistent_G: Optional[torch.Tensor] = None,
         covariate_effect: Optional[torch.Tensor] = None,
     ) -> tdist.Distribution:
@@ -240,11 +240,11 @@ class LIVI_Decoder_wo_cis(LIVI_Decoder):
             decoder_out = decoder_out + y_g
         if (
             not self.pretrain_VAE
-            and self._num_gxc_factors != 0
-            and self.train_GxC
-            and GxC is not None
+            and self._num_DxC_factors != 0
+            and self.train_DxC
+            and DxC is not None
         ):
-            y_gc = self.DxC_decoder(GxC)
+            y_gc = self.DxC_decoder(DxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
@@ -271,11 +271,11 @@ class LIVI_Decoder_GT_PCs(LIVI_Decoder):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
-        n_gxc_factors: int,
+        n_DxC_factors: int,
         n_persistent_factors: int,
         pretrain_VAE: bool = True,
         train_V: bool = False,
-        train_GxC: bool = False,
+        train_DxC: bool = False,
         batch_norm: bool = True,
         device: str = "cuda",
         genetics_generator: Optional[torch.Generator] = None,
@@ -285,11 +285,11 @@ class LIVI_Decoder_GT_PCs(LIVI_Decoder):
             x_dim=x_dim,
             decoder_hidden_dims=decoder_hidden_dims,
             layer_norm=layer_norm,
-            n_gxc_factors=n_gxc_factors,
+            n_DxC_factors=n_DxC_factors,
             n_persistent_factors=n_persistent_factors,
             pretrain_VAE=pretrain_VAE,
             train_V=train_V,
-            train_GxC=train_GxC,
+            train_DxC=train_DxC,
             batch_norm=batch_norm,
             device=device,
             genetics_generator=genetics_generator,
@@ -299,7 +299,7 @@ class LIVI_Decoder_GT_PCs(LIVI_Decoder):
         self,
         z: torch.Tensor,
         size_factor: torch.Tensor,
-        GxC: Optional[torch.Tensor] = None,
+        DxC: Optional[torch.Tensor] = None,
         persistent_G: Optional[torch.Tensor] = None,
         covariate_effect: Optional[torch.Tensor] = None,
         known_cis_effect: Optional[torch.Tensor] = None,
@@ -309,9 +309,9 @@ class LIVI_Decoder_GT_PCs(LIVI_Decoder):
         decoder_out = self.mean(z)
         if covariate_effect is not None:
             decoder_out = decoder_out + covariate_effect
-        if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
+        if not self.pretrain_VAE and self.train_DxC and known_cis_effect is not None:
             decoder_out = decoder_out + known_cis_effect
-        if not self.pretrain_VAE and self.train_GxC and gt_pcs_effect is not None:
+        if not self.pretrain_VAE and self.train_DxC and gt_pcs_effect is not None:
             decoder_out = decoder_out + gt_pcs_effect
         if (
             not self.pretrain_VAE
@@ -323,11 +323,11 @@ class LIVI_Decoder_GT_PCs(LIVI_Decoder):
             decoder_out = decoder_out + y_add
         if (
             not self.pretrain_VAE
-            and self._num_gxc_factors != 0
-            and self.train_GxC
-            and GxC is not None
+            and self._num_DxC_factors != 0
+            and self.train_DxC
+            and DxC is not None
         ):
-            y_gc = self.DxC_decoder(GxC)
+            y_gc = self.DxC_decoder(DxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
@@ -348,10 +348,10 @@ class LIVI_Decoder_Normal(nn.Module):
         x_dim: int,
         decoder_hidden_dims: List[int],
         layer_norm: bool,
-        n_gxc_factors: int,
+        n_DxC_factors: int,
         n_persistent_factors: int,
         pretrain_VAE: bool = True,
-        train_GxC: bool = False,
+        train_DxC: bool = False,
         train_V: bool = False,
         batch_norm: bool = True,
         device: str = "cuda",
@@ -369,11 +369,11 @@ class LIVI_Decoder_Normal(nn.Module):
 
         self._x_dim = x_dim
         self._z_dim = z_dim
-        self._num_gxc_factors = n_gxc_factors
+        self._num_DxC_factors = n_DxC_factors
         self._num_persistent_factors = n_persistent_factors
         self._pretrain_vae = pretrain_VAE
         self._train_V = train_V
-        self._train_GxC = train_GxC
+        self._train_DxC = train_DxC
         self.batch_norm = batch_norm
         self.device = device
         self.genetics_generator = genetics_generator
@@ -388,9 +388,9 @@ class LIVI_Decoder_Normal(nn.Module):
 
         self.log_scale = nn.Parameter(torch.ones(1, device=self.device) * 0.1, requires_grad=True)
 
-        if self._num_gxc_factors != 0:
+        if self._num_DxC_factors != 0:
             self.DxC_decoder = create_mlp(
-                input_size=self._num_gxc_factors,
+                input_size=self._num_DxC_factors,
                 output_size=self._x_dim,
                 hidden_dims=[],
                 layer_norm=layer_norm,
@@ -431,18 +431,18 @@ class LIVI_Decoder_Normal(nn.Module):
         self._train_V = mode
 
     @property
-    def train_GxC(self):
-        return self._train_GxC
+    def train_DxC(self):
+        return self._train_DxC
 
-    @train_GxC.setter
-    def train_GxC(self, mode: bool):
-        self._train_GxC = mode
+    @train_DxC.setter
+    def train_DxC(self, mode: bool):
+        self._train_DxC = mode
 
     def forward(
         self,
         z: torch.Tensor,
         size_factor: torch.Tensor,
-        GxC: Optional[torch.Tensor] = None,
+        DxC: Optional[torch.Tensor] = None,
         persistent_G: Optional[torch.Tensor] = None,
         covariate_effect: Optional[torch.Tensor] = None,
         known_cis_effect: Optional[torch.Tensor] = None,
@@ -450,7 +450,7 @@ class LIVI_Decoder_Normal(nn.Module):
         decoder_out = self.mean(z)
         if covariate_effect is not None:
             decoder_out = decoder_out + covariate_effect
-        if not self.pretrain_VAE and self.train_GxC and known_cis_effect is not None:
+        if not self.pretrain_VAE and self.train_DxC and known_cis_effect is not None:
             decoder_out = decoder_out + known_cis_effect
         if (
             not self.pretrain_VAE
@@ -462,11 +462,11 @@ class LIVI_Decoder_Normal(nn.Module):
             decoder_out = decoder_out + y_add
         if (
             not self.pretrain_VAE
-            and self._num_gxc_factors != 0
-            and self.train_GxC
-            and GxC is not None
+            and self._num_DxC_factors != 0
+            and self.train_DxC
+            and DxC is not None
         ):
-            y_gc = self.DxC_decoder(GxC)
+            y_gc = self.DxC_decoder(DxC)
             decoder_out = decoder_out + y_gc
         if self.batch_norm:
             decoder_out = self.BN_decoder(decoder_out)
