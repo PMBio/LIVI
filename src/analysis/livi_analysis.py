@@ -245,7 +245,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI_cis.load_from_checkpoint(
+    LIVI_model = LIVI_cis_with_adversary.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -327,10 +327,12 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         eqtl_genotypes=None,
         strict=False,
     )
-
-    nbatches = adata.shape[0] // int(5e5)  ### batch_size TO BE ADDED AS A USER-SPECIFIED ARG
+    bs_inference = int(args.batch_size_inference)
+    nbatches = (
+        adata.shape[0] // bs_inference
+    )  # int(5e5)  ### batch_size TO BE ADDED AS A USER-SPECIFIED ARG
     batch_indices = [
-        (int((current_batch - 1) * 5e5), int(current_batch * 5e5))
+        (int((current_batch - 1) * bs_inference), int(current_batch * bs_inference))
         for current_batch in range(1, nbatches + 1)
     ]
     # add last cells if any:
@@ -854,6 +856,13 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
+    )
+    parser.add_argument(
+        "--batch_size_inference",
+        "-bs",
+        type=float,
+        default=5e5,
+        help="Number of samples (cells) to use per batch when performing inference. Larger numbers are recommended when memory resources are not limited.",
     )
     parser.add_argument(
         "--covariates",
