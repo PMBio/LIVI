@@ -2752,9 +2752,10 @@ def visualize_DxC_effect(
 
         if DxC_associations is None:
             DxC_associations = [
-                re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f)
+                re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_D-embedding.tsv)", f)
                 for f in files
-                if re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f) is not None
+                if re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_D-embedding.tsv)", f)
+                is not None
             ]
             if len(DxC_associations) > 0:
                 DxC_associations = DxC_associations[0].groups()[0]
@@ -2763,7 +2764,7 @@ def visualize_DxC_effect(
                 )
             else:
                 raise FileNotFoundError(
-                    "No genetic associations found in `model_results_dir`. Make sure the filename ends in 'LMM_results_StoreyQ<alpha-threshold>_Ucontext.tsv'."
+                    "No genetic associations found in `model_results_dir`. Make sure the filename ends in 'LMM_results_StoreyQ<alpha-threshold>_D-embedding.tsv'."
                 )
 
         if assignment_matrix is None:

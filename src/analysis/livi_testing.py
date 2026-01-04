@@ -371,7 +371,7 @@ def run_LIVI_genetic_association_testing(
         else:
             D_context = D_context
 
-        print("\n ----- Running genetic association testing for D_context ----- \n")
+        print("\n ----- Running genetic association testing for D embedding ----- \n")
 
         if method in ["limix", "LIMIX", "LMM"]:
             method_prefix = "LMM"
@@ -420,20 +420,20 @@ def run_LIVI_genetic_association_testing(
 
         try:
             filename = (
-                f"{output_file_prefix}_{method_prefix}_results_Ucontext_variable-factors.tsv"
+                f"{output_file_prefix}_{method_prefix}_results_D-embedding_variable-factors.tsv"
                 if variable_factors or variance_threshold
-                else f"{output_file_prefix}_{method_prefix}_results_Ucontext.tsv"
+                else f"{output_file_prefix}_{method_prefix}_results_D-embedding.tsv"
             )
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         except OSError:
             filename = (
-                f"_{method_prefix}_results_Ucontext_variable-factors.tsv"
+                f"_{method_prefix}_results_D-embedding_variable-factors.tsv"
                 if variable_factors or variance_threshold
-                else f"_{method_prefix}_results_Ucontext.tsv"
+                else f"_{method_prefix}_results_D-embedding.tsv"
             )
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
             warnings.warn(
-                f"Could not save testing results for U under provided filename (filename too long).\nSaved as '{filename}' instead."
+                f"Could not save testing results for D under provided filename (filename too long).\nSaved as '{filename}' instead."
             )
         try:
             qqplot_filename = (
@@ -480,18 +480,18 @@ def run_LIVI_genetic_association_testing(
             )
             try:
                 filename_sign = (
-                    f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext_variable-factors.tsv"
+                    f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext.tsv"
+                    else f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
                 filename_sign = (
-                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext_variable-factors.tsv"
+                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext.tsv"
+                    else f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
@@ -503,7 +503,7 @@ def run_LIVI_genetic_association_testing(
         print("----- Done ----- \n")
 
     if V_persistent is not None:
-        print("\n\n ----- Running genetic association testing for V_persistent ----- \n")
+        print("\n\n ----- Running genetic association testing for V embedding ----- \n")
 
         if method in ["limix", "LIMIX", "LMM"]:
             results = pd.DataFrame(
@@ -549,10 +549,10 @@ def run_LIVI_genetic_association_testing(
             )
 
         try:
-            filename = f"{output_file_prefix}_{method_prefix}_results_Vpersistent.tsv"
+            filename = f"{output_file_prefix}_{method_prefix}_results_V-embedding.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         except OSError:
-            filename = f"_{method_prefix}_results_Vpersistent.tsv"
+            filename = f"_{method_prefix}_results_V-embedding.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
             warnings.warn(
                 f"Could not save testing results for V under provided filename (filename too long).\nSaved as '{filename}' instead."
@@ -602,13 +602,13 @@ def run_LIVI_genetic_association_testing(
                 results, cut_off=fdr_threshold, method=fdr_method
             )
             try:
-                filename_sign = f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Vpersistent.tsv"
+                filename_sign = f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_V-embedding.tsv"
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
                 filename_sign = (
-                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Vpersistent.tsv"
+                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_V-embedding.tsv"
                 )
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False

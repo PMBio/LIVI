@@ -435,10 +435,11 @@ def main(args):
                 ]
             U_associations = [
                 re.match(
-                    f"(.*PRS_LMM_results_{args.fdr_method}*_Ucontext.tsv)", f
+                    f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f
                 )  # assumes same fdr method was used for individual run associations
                 for f in files_i
-                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_Ucontext.tsv)", f) is not None
+                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f)
+                is not None
             ]
         else:
             path2file = os.path.join(args.results_dir, model_replicates[i])
@@ -446,9 +447,9 @@ def main(args):
                 f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
             ]
             U_associations = [
-                re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f)
+                re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f)
                 for f in files_i
-                if re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f) is not None
+                if re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f) is not None
                 and "PRS" not in f
             ]
         if len(U_associations) > 0:
