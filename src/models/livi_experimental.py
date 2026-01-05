@@ -11,7 +11,6 @@ from src.models.components.livi_decoder import (
     LIVI_Decoder,
     LIVI_Decoder_GT_PCs,
     LIVI_Decoder_Normal,
-    LIVI_Decoder_wo_cis,
 )
 from src.models.components.mlp import create_mlp, init_mlp
 from src.models.livi import LIVI, LIVI_cis
@@ -427,7 +426,7 @@ class LIVI_wo_cis_with_adversary(pl.LightningModule):
         self.register_buffer("z_prior_loc", torch.zeros(self.z_dim))
         self.register_buffer("z_prior_scale", torch.ones(self.z_dim))
 
-        self.decoder = LIVI_Decoder_wo_cis(
+        self.decoder = LIVI_Decoder(
             z_dim=z_dim,
             x_dim=x_dim,
             decoder_hidden_dims=[],
@@ -565,6 +564,7 @@ class LIVI_wo_cis_with_adversary(pl.LightningModule):
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
                 size_factor=size_factor,
                 covariate_effect=covariate_effect,
+                known_cis_effect=None,
             )
             .log_prob(x)
             .mean()
@@ -747,8 +747,9 @@ class LIVI_wo_cis_with_adversary(pl.LightningModule):
             for p in self.encoder.parameters():
                 p.requires_grad = False
             self.decoder.mean[0].weight.requires_grad = False
-            # # Retrain total_count
-            self.decoder.log_total_count.requires_grad = False
+            self.decoder.log_total_count.requires_grad = (
+                False  # set to true to retrain total_count
+            )
             # freeze covariate embeddings, if applicable
             if self.covariate_effect is not None:
                 for p in self.covariate_effect.parameters():
@@ -1415,7 +1416,11 @@ class LIVI_cis_with_adversary(pl.LightningModule):
         self.n_DxC_factors = n_DxC_factors
         self.n_persistent_factors = n_persistent_factors
         self.warmup_epochs_G = 0 if self.n_persistent_factors == 0 else warmup_epochs_G
+
         self.train_epochs_adversary = train_epochs_adversary if adversary_weight > 0 else 0
+        self.adversary_steps = adversary_steps if adversary_weight > 0 else 0
+        self.adversary_learning_rate = adversary_learning_rate
+
         self.pretrain_mode = True if warmup_epochs_vae > 0 else False
         self.train_V_mode = False if self.pretrain_mode or self.n_persistent_factors == 0 else True
         self.train_DxC_mode = False if self.pretrain_mode or self.n_DxC_factors == 0 else True
@@ -1458,9 +1463,6 @@ class LIVI_cis_with_adversary(pl.LightningModule):
             genetics_generator=self.G_gen,
         )
 
-        self.adversary_learning_rate = adversary_learning_rate
-        self.adversary_steps = adversary_steps
-        # Set up adversary
         self.adversary = create_mlp(
             input_size=z_dim,
             output_size=y_dim,
@@ -1643,9 +1645,12 @@ class LIVI_cis_with_adversary(pl.LightningModule):
         x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask = self.prepare_batch(batch)
         optim_vae, optim_adversary = self.optimizers()
 
-        train_adversary = batch_idx % self.adversary_steps == 0
-        train_adversary = train_adversary & (not self.pretrain_mode) & (not self.frozen_dis)
-        train_adversary = train_adversary * (mode == "train")
+        if self.adversary_steps > 0:
+            train_adversary = batch_idx % self.adversary_steps == 0
+            train_adversary = train_adversary & (not self.pretrain_mode) & (not self.frozen_dis)
+            train_adversary = train_adversary * (mode == "train")
+        else:
+            train_adversary = False
 
         z_dist = self(x)
 
@@ -1798,17 +1803,17 @@ class LIVI_cis_with_adversary(pl.LightningModule):
                 for p in self.D_context.parameters():
                     p.requires_grad = True
                 self.decoder.DxC_decoder[0].weight.requires_grad = True
-                self.A.requires_grad = True
+                self.A.requires_grad_(True)
             if self.hparams.n_cis_snps != 0:
-                self.SNP_gene_effect.requires_grad = True
+                self.SNP_gene_effect.requires_grad_(True)
         else:
             if self.n_DxC_factors != 0:
                 for p in self.D_context.parameters():
                     p.requires_grad = False
                 self.decoder.DxC_decoder[0].weight.requires_grad = False
-                self.A.requires_grad = False
+                self.A.requires_grad_(False)
             if self.hparams.n_cis_snps != 0:
-                self.SNP_gene_effect.requires_grad = False
+                self.SNP_gene_effect.requires_grad_(False)
 
     def freeze_vae(self, mode: bool):
         """Freezes VAE and covariate embeddings parameters, after the number of VAE and
@@ -1820,8 +1825,9 @@ class LIVI_cis_with_adversary(pl.LightningModule):
             for p in self.encoder.parameters():
                 p.requires_grad = False
             self.decoder.mean[0].weight.requires_grad = False
-            # # Retrain total_count
-            self.decoder.log_total_count.requires_grad = False
+            self.decoder.log_total_count.requires_grad = (
+                False  # set to true to retrain total_count
+            )
             # freeze covariate embeddings, if applicable
             if self.covariate_effect is not None:
                 for p in self.covariate_effect.parameters():
@@ -1838,8 +1844,6 @@ class LIVI_cis_with_adversary(pl.LightningModule):
                     p.requires_grad = True
             # freeze genetic embeddings
             self.set_train_DxC_mode(False)
-            if self.hparams.n_cis_snps != 0:
-                self.SNP_gene_effect.requires_grad = False
             self.set_train_V_mode(False)
 
     def freeze_adversary(self, mode: bool):
