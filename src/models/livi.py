@@ -632,9 +632,9 @@ class LIVI_cis(pl.LightningModule):
             torch.randn(z_dim, n_DxC_factors, device=device, generator=self.G_gen)
         )
         self.D_context = nn.Embedding(y_dim, n_DxC_factors, device=device)
-        if self.hparams.genetics_seed is not None:
-            nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
-            # self.init_individual_embedding(self.D_context, self.hparams.genetics_seed)
+        # if self.hparams.genetics_seed is not None:
+        #     self.init_individual_embedding(self.D_context, self.hparams.genetics_seed)
+        nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
         if n_persistent_factors != 0:
             self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
@@ -652,7 +652,7 @@ class LIVI_cis(pl.LightningModule):
             self.covariate_effect = None
 
         if n_cis_snps != 0:
-            if self.hparams.cell_state_cis:
+            if cell_state_cis:
                 # Learn SNP-gene effect for each cell-state
                 self.SNP_gene_effect = nn.Parameter(
                     torch.randn(z_dim, n_cis_snps, x_dim, device=device, generator=self.G_gen)
@@ -859,9 +859,9 @@ class LIVI_cis(pl.LightningModule):
         Inference results (Dict[str,torch.Tensor])
             'cell-state_latent' (torch.Tensor): Cell state latent space.
             'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
-            'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
+            'D_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
             'DxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
-            'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
+            'assignment_matrix' (torch.Tensor): Learned assignment matrix of D factors to cell-state factors.
             'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
             'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
         """
@@ -872,10 +872,10 @@ class LIVI_cis(pl.LightningModule):
             z = self(x).rsample()
             cell_state_decoder = self.decoder.mean[0].weight
             if self.n_DxC_factors != 0:
-                U = self.D_context(y)
+                D = self.D_context(y)
                 DxC_decoder = self.decoder.DxC_decoder[0].weight
             else:
-                U = None
+                D = None
                 DxC_decoder = None
             if self.n_persistent_factors != 0:
                 V = self.V_persistent(y)
@@ -887,7 +887,7 @@ class LIVI_cis(pl.LightningModule):
         return {
             "cell-state_latent": z,
             "cell-state_decoder": cell_state_decoder,
-            "U_embedding": U,
+            "D_embedding": D,
             "DxC_decoder": DxC_decoder,
             "assignment_matrix": self.A,
             "V_embedding": V,
