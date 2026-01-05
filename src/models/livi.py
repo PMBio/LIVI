@@ -759,8 +759,7 @@ class LIVI_cis(pl.LightningModule):
             if self.hparams.cell_state_cis:
                 # Cis-effect per cell-state
                 known_cis_effect = (
-                    snp_gene_mask.resize(1, self.hparams.n_cis_snps, self.x_dim)
-                    * self.SNP_gene_effect
+                    snp_gene_mask.unsqueeze(0) * self.SNP_gene_effect
                 )  # z x SNPs x genes
                 celltype_known_cis_effect = torch.einsum(
                     "ij,kjl->kil", cell_snp_mask, known_cis_effect
