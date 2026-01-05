@@ -19,8 +19,8 @@ tensorboard==2.16.2
 
 # --------- others --------- #
 pyrootutils     # standardizing the project root setup
-pre-commit>=3.7.0      # hooks for applying linters on commit
-rich            # beautiful text formatting in terminal
+pre-commit>=3.7.0     # hooks for applying linters on commit
+rich==13.9.4     # beautiful text formatting in terminal
 pytest          # tests
 #  sh            # for running bash commaneds in some tests (linux/macos only)
 
