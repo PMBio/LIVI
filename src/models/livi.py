@@ -7,7 +7,7 @@ import torch.distributions as tdist
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.components.livi_decoder import LIVI_Decoder, LIVI_Decoder_wo_cis
+from src.models.components.livi_decoder import LIVI_Decoder
 from src.models.components.mlp import create_mlp
 from src.models.vae import Encoder
 
@@ -126,7 +126,7 @@ class LIVI(pl.LightningModule):
                 self.init_individual_embedding(self.V_persistent, self.hparams.genetics_seed)
             # nn.init.normal_(self.V_persistent.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
-        self.decoder = LIVI_Decoder_wo_cis(
+        self.decoder = LIVI_Decoder(
             z_dim=z_dim,
             x_dim=x_dim,
             decoder_hidden_dims=[],
@@ -236,6 +236,7 @@ class LIVI(pl.LightningModule):
                 DxC=z_interaction,
                 persistent_G=self.V_persistent(y) if self.n_persistent_factors != 0 else None,
                 covariate_effect=covariate_effect,
+                known_cis_effect=None,
             )
             .log_prob(x)
             .mean()
