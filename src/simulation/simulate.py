@@ -61,14 +61,14 @@ def column_standardize(X: np.ndarray, center: bool = True) -> np.ndarray:
         return X / X.std(0, ddof=1)
 
 
-def compute_sample_var(U: np.ndarray) -> float:
+def compute_sample_var(D: np.ndarray) -> float:
     """Computes the sum of column variances of U.
 
     Equivalent to the expected sample variance of UU^T. Slightly faster than np.var(U, 0,
     ddof=1).sum().
     """
-    n = U.shape[0]
-    g = (U**2).sum() - 1 / n * (U.sum(0) ** 2).sum()
+    n = D.shape[0]
+    g = (D**2).sum() - 1 / n * (D.sum(0) ** 2).sum()
     return g / (n - 1)
 
 
