@@ -61,14 +61,14 @@ def column_standardize(X: np.ndarray, center: bool = True) -> np.ndarray:
         return X / X.std(0, ddof=1)
 
 
-def compute_sample_var(U: np.ndarray) -> float:
+def compute_sample_var(D: np.ndarray) -> float:
     """Computes the sum of column variances of U.
 
     Equivalent to the expected sample variance of UU^T. Slightly faster than np.var(U, 0,
     ddof=1).sum().
     """
-    n = U.shape[0]
-    g = (U**2).sum() - 1 / n * (U.sum(0) ** 2).sum()
+    n = D.shape[0]
+    g = (D**2).sum() - 1 / n * (D.sum(0) ** 2).sum()
     return g / (n - 1)
 
 
@@ -154,17 +154,17 @@ def simulate(
     n_cells: int,
     n_factors: int,
     n_factors_g: int,
-    n_factors_gxc: int,
+    n_factors_DxC: int,
     n_individuals: int,
     n_genes: int,
     n_snps: int,
     maf_min: float,
     maf_max: float,
     causals_g: List[int],
-    causals_gxc: List[int],
+    causals_DxC: List[int],
     loading_sparsity: float,
     frac_var_genetics: float,
-    frac_gxc: float,
+    frac_DxC: float,
     size_factors: Optional[np.ndarray] = None,
     n_celltypes: int = 1,
     frac_var_celltypes: float = 0.0,
@@ -177,19 +177,19 @@ def simulate(
         c ~ N(0, aK + (1-a)I)
 
     where K is a block-diagonal matrix (celltype kernel) and a is the fraction
-    of latent variance driven by cell-type differences. Let W, W_g, W_gxc be
+    of latent variance driven by cell-type differences. Let W, W_g, W_DxC be
     loading matrices for context effects, persistent and dynamic genetic effects,
     respectively. The expected expression is modeled as
 
-        E[X] = Softmax(X_base + X_g + X_gxc),
+        E[X] = Softmax(X_base + X_g + X_DxC),
 
     where
 
         X_base = C @ W
         X_g = (G @ B_g) @ W_g
-        X_gxc = ((C @ A) o (G @ B_gxc)) @ W_gxc
+        X_DxC = ((C @ A) o (G @ B_DxC)) @ W_DxC
 
-    Here, o denotes the element-wise (Hadamard) product, B_g, B_gxc are the
+    Here, o denotes the element-wise (Hadamard) product, B_g, B_DxC are the
     genetic effect size matrices and A is a design matrix assigning exactly one
     cell state factor to each genetic effect factor. Observed counts are sampled
     from a Poisson model at the gene level.
@@ -198,17 +198,17 @@ def simulate(
         n_cells: Number of cells to simulate.
         n_factors: Number of base factors to simulate.
         n_factors_g: Number of persistent genetic effect factors to simulate.
-        n_factors_gxc: Number of GxC effect factors to simulate.
+        n_factors_DxC: Number of DxC effect factors to simulate.
         n_individuals: Number of individuals to simulate.
         n_genes: Number of genes to simulate.
         n_snps: Number of SNPs to simulate.
         maf_min: Minimum minor allele frequency.
         maf_max: Maximum minor allele frequency.
         causals_g: Indices for SNPs with persistent effect.
-        causals_gxc: Indices for SNPs with dynamic effect.
+        causals_DxC: Indices for SNPs with dynamic effect.
         loading_sparsity: Prior for sparsity mask on factor loadings.
         frac_var_genetics: Fraction of total variance explained by genetics.
-        frac_gxc: Fraction of genetic variance explained by GxC.
+        frac_DxC: Fraction of genetic variance explained by DxC.
         size_factors: Optional cell size factors. If not given, samples size
             factors randomly from [10**4, 10**5).
         n_celltypes: Number of cell types (clusters in latent space) to
@@ -226,7 +226,7 @@ def simulate(
     # check values
     if loading_sparsity < 0 or loading_sparsity > 1.0:
         raise ValueError("Loading sparsity has to be from [0, 1]")
-    all_causals = causals_g + causals_gxc
+    all_causals = causals_g + causals_DxC
     c_min, cmax = min(all_causals), max(all_causals)
     if c_min < 0 or cmax > n_snps:
         raise ValueError("Causal indices have to be positive and smaller than n_snps")
@@ -253,27 +253,27 @@ def simulate(
     loadings_kwargs = dict(n_genes=n_genes, loading_sparsity=loading_sparsity, rng=rng)
     loadings["W"] = sample_loadings(**loadings_kwargs, n_factors=n_factors)
     loadings["W_g"] = sample_loadings(**loadings_kwargs, n_factors=n_factors_g)
-    loadings["W_gxc"] = sample_loadings(**loadings_kwargs, n_factors=n_factors_gxc)
+    loadings["W_DxC"] = sample_loadings(**loadings_kwargs, n_factors=n_factors_DxC)
 
-    # sample design matrix A of shape (n_factors x n_factors_gxc)
-    A = np.zeros((n_factors, n_factors_gxc))
+    # sample design matrix A of shape (n_factors x n_factors_DxC)
+    A = np.zeros((n_factors, n_factors_DxC))
     # choose one context factor for each genetic effect factor
-    A[rng.choice(n_factors, size=n_factors_gxc), np.arange(n_factors_gxc)] = 1
+    A[rng.choice(n_factors, size=n_factors_DxC), np.arange(n_factors_DxC)] = 1
 
     X_base = C @ loadings["W"].T
     total_var_base = compute_sample_var(X_base)
     total_var_genetics = total_var_base * frac_var_genetics / (1 - frac_var_genetics)
 
     # compute target sample variances
-    var_gxc = total_var_genetics * frac_gxc
-    var_g = total_var_genetics * (1 - frac_gxc)
+    var_DxC = total_var_genetics * frac_DxC
+    var_g = total_var_genetics * (1 - frac_DxC)
 
     # compute effect sizes
     B_g = sample_effect_sizes(
         W=loadings["W_g"], n_snps=n_snps, causals=causals_g, var=var_g, rng=rng
     )
-    B_gxc = sample_effect_sizes(
-        W=loadings["W_gxc"], n_snps=n_snps, causals=causals_gxc, var=var_gxc, rng=rng
+    B_DxC = sample_effect_sizes(
+        W=loadings["W_DxC"], n_snps=n_snps, causals=causals_DxC, var=var_DxC, rng=rng
     )
 
     # compute gene-level effects
@@ -283,14 +283,14 @@ def simulate(
         W=loadings["W_g"],
         B=B_g,
     )
-    X_gxc = compute_genetic_effects(G=G, C=C @ A, W=loadings["W_gxc"], B=B_gxc)
+    X_DxC = compute_genetic_effects(G=G, C=C @ A, W=loadings["W_DxC"], B=B_DxC)
 
-    X = X_base + X_gxc + X_g
+    X = X_base + X_DxC + X_g
 
     # compute actual sample variances for each component
     total_var = compute_sample_var(X)
     total_var_g = compute_sample_var(X_g)
-    total_var_gxc = compute_sample_var(X_gxc)
+    total_var_DxC = compute_sample_var(X_DxC)
 
     # compute expression mean and sample gene counts
     if size_factors is None:
@@ -316,12 +316,12 @@ def simulate(
     uns = {
         "simulation": {
             "target_var_g": var_g,
-            "target_var_gxc": var_gxc,
+            "target_var_DxC": var_DxC,
             "total_var": total_var,
             "total_var_g": total_var_g,
-            "total_var_gxc": total_var_gxc,
+            "total_var_DxC": total_var_DxC,
             "B_g": B_g,
-            "B_gxc": B_gxc,
+            "B_DxC": B_DxC,
             "A": A,
         }
     }
@@ -340,17 +340,17 @@ def main():
         n_cells=1000,
         n_factors=10,
         n_factors_g=20,
-        n_factors_gxc=20,
+        n_factors_DxC=20,
         n_individuals=25,
         n_genes=100,
         n_snps=5,
         maf_min=0.3,
         maf_max=0.5,
         causals_g=[0, 1],
-        causals_gxc=[1, 2, 3],
+        causals_DxC=[1, 2, 3],
         loading_sparsity=0.5,
         frac_var_genetics=0.05,
-        frac_gxc=0.2,
+        frac_DxC=0.2,
     )
     print(adata)
     for k, v in adata.uns["simulation"].items():

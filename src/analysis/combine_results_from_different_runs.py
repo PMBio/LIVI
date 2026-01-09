@@ -32,7 +32,7 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.stats import multitest
 from tensorqtl import pgen, trans
 
-from src.analysis._utils import assign_U_to_celltype, calculate_GxC_effect
+from src.analysis._utils import assign_U_to_celltype, calculate_DxC_effect
 
 # import src.analysis.livi_testing as testing
 from src.analysis.livi_testing import (
@@ -435,10 +435,11 @@ def main(args):
                 ]
             U_associations = [
                 re.match(
-                    f"(.*PRS_LMM_results_{args.fdr_method}*_Ucontext.tsv)", f
+                    f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f
                 )  # assumes same fdr method was used for individual run associations
                 for f in files_i
-                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_Ucontext.tsv)", f) is not None
+                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f)
+                is not None
             ]
         else:
             path2file = os.path.join(args.results_dir, model_replicates[i])
@@ -446,15 +447,15 @@ def main(args):
                 f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
             ]
             U_associations = [
-                re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f)
+                re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f)
                 for f in files_i
-                if re.match(f"(.*LMM_results_{args.fdr_method}.*_Ucontext.tsv)", f) is not None
+                if re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f) is not None
                 and "PRS" not in f
             ]
         if len(U_associations) > 0:
             if len(U_associations) > 1:
                 warnings.warn(
-                    f"Found more than one file with GxC associations for {model_replicates[i]}. Using file: {U_associations[0].groups()[0]}."
+                    f"Found more than one file with DxC associations for {model_replicates[i]}. Using file: {U_associations[0].groups()[0]}."
                 )
             U_associations = U_associations[0].groups()[0]
             seed_associations = pd.read_csv(
@@ -465,7 +466,7 @@ def main(args):
             )
             seeds_associations.append(seed_associations)
         else:
-            warnings.warn(f"No GxC associations found for {model_replicates[i]}.")
+            warnings.warn(f"No DxC associations found for {model_replicates[i]}.")
 
     associations_all_seeds = pd.concat(seeds_associations, ignore_index=True)
 
@@ -564,7 +565,7 @@ def main(args):
     intersect_snps_one = intersect_snps.copy()
     for gs in gseed:
         livi_associations = associations_all_seeds.loc[associations_all_seeds.random_seed == gs]
-        median_N_GxC_snp = (
+        median_N_DxC_snp = (
             livi_associations.loc[livi_associations.SNP_id.isin(intersect_snps)]
             .groupby("SNP_id", observed=True)
             .apply(lambda x: x.Factor.nunique(), include_groups=False)
@@ -589,7 +590,7 @@ def main(args):
     )
 
     seeds_U_ct = {}
-    seeds_GxC_effects = []
+    seeds_DxC_effects = []
     for i in range(len(model_replicates)):
         livi_associations = associations_all_seeds.loc[
             associations_all_seeds.random_seed == gseed[i]
@@ -628,17 +629,17 @@ def main(args):
         livi_associations = livi_associations.loc[
             livi_associations.SNP_id.isin(intersect_snps_one)
         ]
-        GxC_effects_all_snps = []
+        DxC_effects_all_snps = []
         for snp in intersect_snps_one:
-            GxC_effect_snp = calculate_GxC_effect(
+            DxC_effect_snp = calculate_DxC_effect(
                 LIVI_associations=livi_associations,
                 SNP_id=snp,
                 cell_state_latent=zbase,
                 A=seed_A,
             )
-            GxC_effects_all_snps.append(GxC_effect_snp)
-        GxC_effects_all_snps = pd.concat(GxC_effects_all_snps, axis=1, ignore_index=False)
-        seeds_GxC_effects.append(GxC_effects_all_snps)
+            DxC_effects_all_snps.append(DxC_effect_snp)
+        DxC_effects_all_snps = pd.concat(DxC_effects_all_snps, axis=1, ignore_index=False)
+        seeds_DxC_effects.append(DxC_effects_all_snps)
 
     seeds_U_ct_df = pd.DataFrame.from_dict(seeds_U_ct, orient="index")
 
@@ -658,9 +659,9 @@ def main(args):
             os.path.join(
                 output_dir,
                 (
-                    "GxC_associations_all_seeds.tsv"
+                    "DxC_associations_all_seeds.tsv"
                     if not args.prs
-                    else "GxC_associations_all_seeds_PRS.tsv"
+                    else "DxC_associations_all_seeds_PRS.tsv"
                 ),
             ),
             sep="\t",
@@ -860,10 +861,10 @@ def main(args):
 
     corrs_across_runs_pearson = []
     corrs_across_runs_pearson_pvals = []
-    for i, j in combinations(range(len(seeds_GxC_effects)), 2):
+    for i, j in combinations(range(len(seeds_DxC_effects)), 2):
         corrs = pearsonr(
-            x=seeds_GxC_effects[i].abs(),
-            y=seeds_GxC_effects[j].abs(),
+            x=seeds_DxC_effects[i].abs(),
+            y=seeds_DxC_effects[j].abs(),
             axis=0,
             alternative="greater",
         )
@@ -955,20 +956,20 @@ def main(args):
 
         # robust_factors = aggregate_correlated_factors_across_runs(seeds_U, args.factor_correlation_theshold, factor_correlations=None)
 
-        #### Calculate correlations based on GxC decoder
-        seeds_GxC_decoder = []
+        #### Calculate correlations based on DxC decoder
+        seeds_DxC_decoder = []
         for i in range(len(model_replicates)):
-            seed_GxC_dec = pd.read_csv(
+            seed_DxC_dec = pd.read_csv(
                 os.path.join(
-                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_GxC_decoder.tsv"
+                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_DxC_decoder.tsv"
                 ),
                 index_col=0,
                 sep="\t",
             )
-            seed_GxC_dec = seed_GxC_dec.assign(random_seed=[gseed[i]] * seed_GxC_dec.shape[0])
-            seeds_GxC_decoder.append(seed_GxC_dec)
+            seed_DxC_dec = seed_DxC_dec.assign(random_seed=[gseed[i]] * seed_DxC_dec.shape[0])
+            seeds_DxC_decoder.append(seed_DxC_dec)
 
-        factor_correlations = correlate_factors_across_runs(seeds_GxC_decoder)
+        factor_correlations = correlate_factors_across_runs(seeds_DxC_decoder)
 
         robust_factors = aggregate_correlated_factors_across_runs(
             seeds_U, args.factor_correlation_theshold, factor_correlations=factor_correlations
@@ -984,16 +985,16 @@ def main(args):
             [
                 loadings.rename(
                     columns=dict(
-                        zip(loadings.columns, [f.replace("GxC", "U") for f in loadings.columns])
+                        zip(loadings.columns, [f.replace("DxC", "U") for f in loadings.columns])
                     )
                 )
-                for loadings in seeds_GxC_decoder
+                for loadings in seeds_DxC_decoder
             ],
             args.factor_correlation_theshold,
             factor_correlations=factor_correlations,
         )
         robust_loadings.to_csv(
-            os.path.join(output_dir, "Robust_aggregated_GxC_decoder_loadings.tsv"),
+            os.path.join(output_dir, "Robust_aggregated_DxC_decoder_loadings.tsv"),
             sep="\t",
             header=True,
             index=True,
@@ -1013,7 +1014,7 @@ def main(args):
             associations_ofp = associations_ofp + "_PRS"
 
         associations = run_LIVI_genetic_association_testing(
-            U_context=robust_factors,
+            D_context=robust_factors,
             V_persistent=None,
             GT_matrix=GT_matrix,
             variant_info=variant_info,
@@ -1036,7 +1037,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations,
+                DxC_effects_LIVI=associations,
                 factor_assignment_matrix=None,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,

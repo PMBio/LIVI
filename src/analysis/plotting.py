@@ -13,6 +13,7 @@ import plotnine as pn
 import scanpy as sc
 import seaborn as sns
 import torch
+import torch.nn as nn
 from anndata import AnnData
 from matplotlib import cm, colormaps, colors
 from matplotlib.lines import Line2D
@@ -23,11 +24,11 @@ from scipy.stats import mannwhitneyu, probplot, zscore
 from sklearn.decomposition import PCA
 from tqdm import tqdm
 
-from src.analysis._utils import (
+from src.analysis._utils import (  # assign_D_to_celltype,
     add_livi_umaps_to_cell_metadata,
     aggregate_cell_counts,
-    calculate_GxC_effect,
-    calculate_GxC_gene_effect,
+    calculate_DxC_effect,
+    calculate_DxC_gene_effect,
     compute_umap,
 )
 
@@ -274,7 +275,7 @@ def visualise_cell_state_latent(
         cell_metadata (pd.DataFrame): DataFrame containing cell metadata.
         output_dir (str): Directory to save the figure.
         of_prefix (str): Prefix for the output figure.
-        format (str): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to.
+        format (str): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to.
         args (argparse.Namespace): Parsed command-line arguments; must include the name
         of cell-type and batch columns in cell_metadata.
 
@@ -312,7 +313,7 @@ def visualise_cell_state_latent(
         ax=axs[0],
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     axs[0].legend(
         title="Cell type",
@@ -332,7 +333,7 @@ def visualise_cell_state_latent(
         ax=axs[1],
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     axs[1].legend(
         title="Batch",
@@ -372,7 +373,7 @@ def visualise_livi_embeddings(
         cell_metadata (pd.DataFrame): DataFrame containing cell information.
         output_dir (str): Directory to save the figures.
         of_prefix (str): Prefix for the output figures.
-        format (str): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to.
+        format (str): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to.
         plot_title (str): Title for the plots.
         celltype_column (str): Column containing cell type information.
         batch_column (str, optional): Column containing batch information.
@@ -395,18 +396,16 @@ def visualise_livi_embeddings(
         "UMAP1_cell-state_latent" not in cell_metadata.columns
         and "UMAP2_cell-state_latent" not in cell_metadata.columns
     ):
-        try:
-            zbase = livi_embeddings["zbase"]
-        except KeyError:
-            zbase = livi_embeddings["cell-state_latent"]
-        if isinstance(zbase, torch.Tensor):
-            zbase = zbase.detach().cpu().numpy()
-        zbase = pd.DataFrame(
-            zbase,
+
+        cell_state = livi_embeddings["cell-state_latent"]
+        if isinstance(cell_state, torch.Tensor):
+            cell_state = cell_state.detach().cpu().numpy()
+        cell_state = pd.DataFrame(
+            cell_state,
             index=cell_metadata.index,
-            columns=[f"Cell-state_Factor{f+1}" for f in range(zbase.shape[1])],
+            columns=[f"Cell-state_Factor{f+1}" for f in range(cell_state.shape[1])],
         )
-        umap_df = compute_umap(zbase, colnames=["UMAP1", "UMAP2"], add_latent=False)
+        umap_df = compute_umap(cell_state, colnames=["UMAP1", "UMAP2"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([celltype_column, batch_column]),
             how="left",
@@ -426,7 +425,7 @@ def visualise_livi_embeddings(
         ax=ax1,
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     ax1.legend(
         title="Cell type",
@@ -448,7 +447,7 @@ def visualise_livi_embeddings(
             ax=ax2,
             s=3,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax2.legend(
             title="Batch",
@@ -468,21 +467,21 @@ def visualise_livi_embeddings(
     )
     plt.close()
 
-    ## U embedding
-    if "UMAP1_U" not in cell_metadata.columns and "UMAP2_U" not in cell_metadata.columns:
-        U = livi_embeddings["U_embedding"]
-        if U is None:
+    ## D embedding
+    if "UMAP1_D" not in cell_metadata.columns and "UMAP2_D" not in cell_metadata.columns:
+        D = livi_embeddings["D_embedding"]
+        if D is None:
             sys.exit(0)
         if batch_column is None and sex_column is None:
             sys.exit(0)
-        if isinstance(U, torch.Tensor):
-            U = U.detach().cpu().numpy()
-        U = pd.DataFrame(
-            U,
+        if isinstance(D, torch.Tensor):
+            D = D.detach().cpu().numpy()
+        D = pd.DataFrame(
+            D,
             index=cell_metadata[individual_column].unique(),
-            columns=[f"U_Factor{f+1}" for f in range(U.shape[1])],
+            columns=[f"D_Factor{f+1}" for f in range(D.shape[1])],
         )
-        umap_df = compute_umap(U, colnames=["UMAP1_U", "UMAP2_U"], add_latent=False)
+        umap_df = compute_umap(D, colnames=["UMAP1_D", "UMAP2_D"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([individual_column, batch_column, sex_column])
             .drop_duplicates()
@@ -497,14 +496,14 @@ def visualise_livi_embeddings(
     if batch_column:
         ax1 = fig.add_subplot(1, r, 1)
         sns.scatterplot(
-            x="UMAP1_U",
-            y="UMAP2_U",
+            x="UMAP1_D",
+            y="UMAP2_D",
             hue=batch_column,
             data=umap_df,
             ax=ax1,
             s=6,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax1.legend(
             title="Batch",
@@ -518,14 +517,14 @@ def visualise_livi_embeddings(
         if sex_column:
             ax2 = fig.add_subplot(1, r, 2)
             sns.scatterplot(
-                x="UMAP1_U",
-                y="UMAP2_U",
+                x="UMAP1_D",
+                y="UMAP2_D",
                 hue=sex_column,
                 data=umap_df,
                 ax=ax2,
                 s=6,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             ax2.legend(
                 title="Sex",
@@ -539,7 +538,7 @@ def visualise_livi_embeddings(
 
     plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_U-embedding_UMAP.{format}"),
+        os.path.join(output_dir, f"{of_prefix}_D-embedding_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
@@ -547,11 +546,11 @@ def visualise_livi_embeddings(
     plt.close()
 
     if batch_column or sex_column:
-        pca_U = PCA(n_components=U.shape[1] - 1, random_state=32).fit_transform(U.to_numpy())
-        pca_U = pd.DataFrame(
-            pca_U, index=U.index, columns=[f"U_PC{i+1}" for i in range(pca_U.shape[1])]
+        pca_D = PCA(n_components=D.shape[1] - 1, random_state=32).fit_transform(D.to_numpy())
+        pca_D = pd.DataFrame(
+            pca_D, index=D.index, columns=[f"D_PC{i+1}" for i in range(pca_D.shape[1])]
         )
-        pca_U = pca_U.merge(
+        pca_D = pca_D.merge(
             cell_metadata.filter([individual_column, batch_column, sex_column])
             .drop_duplicates()
             .set_index(individual_column),
@@ -566,13 +565,13 @@ def visualise_livi_embeddings(
             axs = axs.flatten()
             for p1 in range(2, 11):
                 sns.scatterplot(
-                    x="U_PC1",
-                    y=f"U_PC{p1}",
+                    x="D_PC1",
+                    y=f"D_PC{p1}",
                     hue=batch_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[p1 - 2],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[p1 - 2].legend(
                     title="Batch",
@@ -587,13 +586,13 @@ def visualise_livi_embeddings(
             axs_idx = p1 - 1
             for p2 in range(10, 16):
                 sns.scatterplot(
-                    x="U_PC2",
-                    y=f"U_PC{p2}",
+                    x="D_PC2",
+                    y=f"D_PC{p2}",
                     hue=batch_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[axs_idx],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[axs_idx].legend(
                     title="Batch",
@@ -608,7 +607,7 @@ def visualise_livi_embeddings(
                 axs_idx += 1
             fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
-                os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_Batch.{format}"),
+                os.path.join(output_dir, f"{of_prefix}_D-embedding-PCA_Batch.{format}"),
                 dpi=600,
                 transparent=True,
                 bbox_inches="tight",
@@ -622,14 +621,14 @@ def visualise_livi_embeddings(
             axs = axs.flatten()
             for p1 in range(2, 11):
                 sns.scatterplot(
-                    x="U_PC1",
-                    y=f"U_PC{p1}",
+                    x="D_PC1",
+                    y=f"D_PC{p1}",
                     hue=sex_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[p1 - 2],
                     palette=["lightpink", "slategrey"],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[p1 - 2].legend(
                     title="Sex",
@@ -645,14 +644,14 @@ def visualise_livi_embeddings(
             axs_idx = p1 - 1
             for p2 in range(10, 16):
                 sns.scatterplot(
-                    x="U_PC2",
-                    y=f"U_PC{p2}",
+                    x="D_PC2",
+                    y=f"D_PC{p2}",
                     hue=sex_column,
-                    data=pca_U,
+                    data=pca_D,
                     ax=axs[axs_idx],
                     palette=["lightpink", "slategrey"],
                     s=6,
-                    rasterized=format == "svg",
+                    rasterized=format == "pdf",
                 )
                 axs[axs_idx].legend(
                     title="Sex",
@@ -667,24 +666,24 @@ def visualise_livi_embeddings(
                 axs_idx += 1
             fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
             plt.savefig(
-                os.path.join(output_dir, f"{of_prefix}_U-embedding-PCA_sex.{format}"),
+                os.path.join(output_dir, f"{of_prefix}_D-embedding-PCA_sex.{format}"),
                 dpi=600,
                 transparent=True,
                 bbox_inches="tight",
             )
             plt.close()
 
-    ## GxC latent
-    if "UMAP1_GxC" not in cell_metadata.columns and "UMAP2_GxC" not in cell_metadata.columns:
-        GxC = livi_embeddings["GxC_latent"]
-        if isinstance(GxC, torch.Tensor):
-            GxC = GxC.detach().cpu().numpy()
-        GxC = pd.DataFrame(
-            GxC,
+    ## DxC latent
+    if "UMAP1_DxC" not in cell_metadata.columns and "UMAP2_DxC" not in cell_metadata.columns:
+        DxC = livi_embeddings["DxC_latent"]
+        if isinstance(DxC, torch.Tensor):
+            DxC = DxC.detach().cpu().numpy()
+        DxC = pd.DataFrame(
+            DxC,
             index=cell_metadata.index,
-            columns=[f"GxC_Factor{f+1}" for f in range(GxC.shape[1])],
+            columns=[f"DxC_Factor{f+1}" for f in range(DxC.shape[1])],
         )
-        umap_df = compute_umap(GxC, colnames=["UMAP1_GxC", "UMAP2_GxC"], add_latent=False)
+        umap_df = compute_umap(DxC, colnames=["UMAP1_DxC", "UMAP2_DxC"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([celltype_column, batch_column, sex_column]),
             how="left",
@@ -697,14 +696,14 @@ def visualise_livi_embeddings(
     fig = plt.figure(layout="constrained", figsize=(7 * r, 5), dpi=100)
     ax1 = fig.add_subplot(1, r, 1)  # UMAP cell type
     sns.scatterplot(
-        x="UMAP1_GxC",
-        y="UMAP2_GxC",
+        x="UMAP1_DxC",
+        y="UMAP2_DxC",
         hue=celltype_column,
         data=umap_df,
         ax=ax1,
         s=3,
         palette="tab20",
-        rasterized=format == "svg",
+        rasterized=format == "pdf",
     )
     ax1.legend(
         title="Cell type",
@@ -719,14 +718,14 @@ def visualise_livi_embeddings(
     if batch_column:
         ax2 = fig.add_subplot(1, r, 2)
         sns.scatterplot(
-            x="UMAP1_GxC",
-            y="UMAP2_GxC",
+            x="UMAP1_DxC",
+            y="UMAP2_DxC",
             hue=batch_column,
             data=umap_df,
             ax=ax2,
             s=3,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax2.legend(
             title="Batch",
@@ -740,14 +739,14 @@ def visualise_livi_embeddings(
         if sex_column:
             ax3 = fig.add_subplot(1, r, 3)
             sns.scatterplot(
-                x="UMAP1_GxC",
-                y="UMAP2_GxC",
+                x="UMAP1_DxC",
+                y="UMAP2_DxC",
                 hue=sex_column,
                 data=umap_df,
                 ax=ax3,
                 s=6,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             ax3.legend(
                 title="Sex",
@@ -763,18 +762,18 @@ def visualise_livi_embeddings(
 
     plt.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_GxC-latent_UMAP.{format}"),
+        os.path.join(output_dir, f"{of_prefix}_DxC-latent_UMAP.{format}"),
         bbox_inches="tight",
         dpi=300,
         transparent=True,
     )
     plt.close()
 
-    pca_GxC = PCA(n_components=GxC.shape[1] - 1, random_state=32).fit_transform(GxC.to_numpy())
-    pca_GxC = pd.DataFrame(
-        pca_GxC, index=GxC.index, columns=[f"GxC_PC{i+1}" for i in range(pca_GxC.shape[1])]
+    pca_DxC = PCA(n_components=DxC.shape[1] - 1, random_state=32).fit_transform(DxC.to_numpy())
+    pca_DxC = pd.DataFrame(
+        pca_DxC, index=DxC.index, columns=[f"DxC_PC{i+1}" for i in range(pca_DxC.shape[1])]
     )
-    pca_GxC = pca_GxC.merge(
+    pca_DxC = pca_DxC.merge(
         cell_metadata.filter([individual_column, batch_column, celltype_column, sex_column]),
         right_index=True,
         left_index=True,
@@ -786,14 +785,14 @@ def visualise_livi_embeddings(
     axs = axs.flatten()
     for p1 in range(2, 11):
         sns.scatterplot(
-            x="GxC_PC1",
-            y=f"GxC_PC{p1}",
+            x="DxC_PC1",
+            y=f"DxC_PC{p1}",
             hue=celltype_column,
-            data=pca_GxC,
+            data=pca_DxC,
             ax=axs[p1 - 2],
             s=4,
             palette="tab20",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         axs[p1 - 2].legend(
             title="Cell type",
@@ -808,14 +807,14 @@ def visualise_livi_embeddings(
     axs_idx = p1 - 1
     for p2 in range(10, 16):
         sns.scatterplot(
-            x="GxC_PC2",
-            y=f"GxC_PC{p2}",
+            x="DxC_PC2",
+            y=f"DxC_PC{p2}",
             hue=celltype_column,
-            data=pca_GxC,
+            data=pca_DxC,
             ax=axs[axs_idx],
             s=4,
             palette="tab20",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         axs[axs_idx].legend(
             title="Cell type",
@@ -832,7 +831,7 @@ def visualise_livi_embeddings(
     fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
     plt.tight_layout()
     plt.savefig(
-        os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_celltype.{format}"),
+        os.path.join(output_dir, f"{of_prefix}_DxC-latent-PCA_celltype.{format}"),
         dpi=600,
         transparent=True,
         bbox_inches="tight",
@@ -846,13 +845,13 @@ def visualise_livi_embeddings(
         axs = axs.flatten()
         for p1 in range(2, 11):
             sns.scatterplot(
-                x="GxC_PC1",
-                y=f"GxC_PC{p1}",
+                x="DxC_PC1",
+                y=f"DxC_PC{p1}",
                 hue=batch_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[p1 - 2],
                 s=4,
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[p1 - 2].legend(
                 title="Batch",
@@ -867,13 +866,13 @@ def visualise_livi_embeddings(
         axs_idx = p1 - 1
         for p2 in range(10, 16):
             sns.scatterplot(
-                x="GxC_PC2",
-                y=f"GxC_PC{p2}",
+                x="DxC_PC2",
+                y=f"DxC_PC{p2}",
                 hue=batch_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[axs_idx],
                 s=4,
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[axs_idx].legend(
                 title="Batch",
@@ -888,7 +887,7 @@ def visualise_livi_embeddings(
             axs_idx += 1
         fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
-            os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_Batch.{format}"),
+            os.path.join(output_dir, f"{of_prefix}_DxC-latent-PCA_Batch.{format}"),
             dpi=600,
             transparent=True,
             bbox_inches="tight",
@@ -902,14 +901,14 @@ def visualise_livi_embeddings(
         axs = axs.flatten()
         for p1 in range(2, 11):
             sns.scatterplot(
-                x="GxC_PC1",
-                y=f"GxC_PC{p1}",
+                x="DxC_PC1",
+                y=f"DxC_PC{p1}",
                 hue=sex_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[p1 - 2],
                 s=4,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[p1 - 2].legend(
                 title="Sex",
@@ -924,14 +923,14 @@ def visualise_livi_embeddings(
         axs_idx = p1 - 1
         for p2 in range(10, 16):
             sns.scatterplot(
-                x="GxC_PC2",
-                y=f"GxC_PC{p2}",
+                x="DxC_PC2",
+                y=f"DxC_PC{p2}",
                 hue=sex_column,
-                data=pca_GxC,
+                data=pca_DxC,
                 ax=axs[axs_idx],
                 s=4,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             axs[axs_idx].legend(
                 title="Sex",
@@ -946,7 +945,7 @@ def visualise_livi_embeddings(
             axs_idx += 1
         fig.suptitle("\n".join(textwrap.wrap(plot_title, 60)))
         plt.savefig(
-            os.path.join(output_dir, f"{of_prefix}_GxC-latent-PCA_sex.{format}"),
+            os.path.join(output_dir, f"{of_prefix}_DxC-latent-PCA_sex.{format}"),
             dpi=600,
             transparent=True,
             bbox_inches="tight",
@@ -967,7 +966,7 @@ def visualise_livi_embeddings(
             index=cell_metadata[individual_column].unique(),
             columns=[f"V_Factor{f+1}" for f in range(V.shape[1])],
         )
-        umap_df = compute_umap(U, colnames=["UMAP1_V", "UMAP2_V"], add_latent=False)
+        umap_df = compute_umap(V, colnames=["UMAP1_V", "UMAP2_V"], add_latent=False)
         umap_df = umap_df.merge(
             cell_metadata.filter([individual_column, batch_column, sex_column])
             .drop_duplicates()
@@ -989,7 +988,7 @@ def visualise_livi_embeddings(
             ax=ax1,
             s=6,
             palette="tab10",
-            rasterized=format == "svg",
+            rasterized=format == "pdf",
         )
         ax1.legend(
             title="Batch",
@@ -1010,7 +1009,7 @@ def visualise_livi_embeddings(
                 ax=ax2,
                 s=6,
                 palette=["lightpink", "slategrey"],
-                rasterized=format == "svg",
+                rasterized=format == "pdf",
             )
             ax2.legend(
                 title="Sex",
@@ -1062,7 +1061,7 @@ def cell_state_factors_heatmap(
         zscore (int, optional): Whether to z-score the data row- (0) or column-wise (1). Default is None.
         color_map (str, optional): Name of `matplotlib` colormap to use.
         savefig (str, optional): Absolute filepath to save the figure. If None, the figure is not saved. Default is None.
-        format (str, optional): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str, optional): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
     """
 
@@ -1101,7 +1100,7 @@ def cell_state_factors_heatmap(
             center=0.0,
             figsize=(10, 10),
             annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
-            rasterized=ext == ".svg",
+            rasterized=ext == ".pdf",
         )
     else:
         sns.clustermap(
@@ -1113,7 +1112,7 @@ def cell_state_factors_heatmap(
             cmap=color_map,
             figsize=(10, 10),
             annot_kws={"size": label_fontsize} if label_fontsize is not None else label_fontsize,
-            rasterized=ext == ".svg",
+            rasterized=ext == ".pdf",
         )
     if savefig:
         plt.savefig(
@@ -1156,7 +1155,7 @@ def plot_celltype_factors(
         zscore (bool, optional): Whether to z-score the factor values across factors for a given celltype. Default is False.
         return_celltype_factors (bool, optional): Whether to return the characteristic celltype factors. Default is False.
         savefig (str, optional): Absolute filepath to save the figure. If None, the figure is not saved. Default is None.
-        format (str, optional): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str, optional): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
 
     Returns
@@ -1223,7 +1222,7 @@ def plot_celltype_factors(
                 ax=axs[0],
                 s=3,
                 palette="tab20",
-                rasterized=ext == ".svg",
+                rasterized=ext == ".pdf",
             )
             axs[0].legend(
                 title="Cell type",
@@ -1253,7 +1252,7 @@ def plot_celltype_factors(
                 s=marker_size,
                 palette="vlag",
                 legend=False,
-                rasterized=ext == ".svg",
+                rasterized=ext == ".pdf",
             )
             sm = cm.ScalarMappable(
                 cmap="vlag",
@@ -1335,7 +1334,7 @@ def QQplot(
             linestyles=":",
             linewidth=4,
             color=color,
-            label="Data not shown",
+            label="Truncated",
         )
     ax.legend(loc="upper left", fontsize=14, frameon=False)
     ax.set(xlabel=r"Expected $-\log_{10} P$", ylabel=r"Observed $-\log_{10} P$")
@@ -1346,31 +1345,22 @@ def QQplot(
         plt.savefig(savefig, transparent=True, dpi=200, bbox_inches="tight")
 
 
-def plot_U_factor_similarity(  ### REVIEW - UPDATE
-    U: pd.DataFrame,
+def plot_D_factor_corr(
+    D: pd.DataFrame,
     associated_factors: list,
     A: pd.DataFrame,
-    assign_to_celltypes: bool = False,
-    cell_state_factors: Optional[pd.DataFrame] = None,
-    cell_metadata: Optional[pd.DataFrame] = None,
-    celltype_column: Optional[str] = None,
     savefig: Optional[str] = None,
     format: Optional[str] = None,
 ) -> None:
-    """Plot the pairwise correlations of SNP-associated CxG factors and clustering of the
-    individuals based on those.
+    """Creates a heatmap of the pairwise Pearson correlations of SNP-associated U factors.
 
     Parameters
     ----------
-        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        D (pd.DataFrame): Dataframe containing D factors (individuals x factors).
         associated_factors (list): List of associated factors to filter and plot.
         A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
-        assign_to_celltypes (bool): Whether to assign U factors to cell-types by z-scoring the cell-state factor loadings across cells.
-        cell_state_factors (pd.DataFrame or None): Dataframe containing LIVI cell-state latent.
-        cell_metadata (pd.DataFrame or None): Dataframe containing cell metadata.
-        celltype_column (str or None): Column name in cell metadata indicating the celltype.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
 
     Returns
@@ -1379,8 +1369,8 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
     """
 
     A = A.filter(associated_factors)
-    U = U.filter(associated_factors)
-    pairwise_correlations = U.corr(method="pearson")
+    D = D.filter(associated_factors)
+    pairwise_correlations = D.corr(method="pearson")
 
     if savefig:
         prefix, ext = os.path.splitext(savefig)
@@ -1390,86 +1380,93 @@ def plot_U_factor_similarity(  ### REVIEW - UPDATE
 
     # Visualize pearson cor between significant U factors
     plt.figure(figsize=(12, 10))
-    sns.heatmap(pairwise_correlations, cmap="vlag", center=0, rasterized=ext == ".svg")
-    plt.title("Pearson's $\\rho$ between significant $U$ factors", fontsize=15, pad=20)
+    sns.heatmap(pairwise_correlations, cmap="RdBu_r", center=0, rasterized=ext == ".pdf")
+    plt.title("Pearson's $\\rho$ between significant $D$ factors", fontsize=15, pad=20)
     if savefig:
         plt.savefig(
-            f"{prefix}_CxG_factor_correlations{ext}",
-            dpi=200,
+            f"{prefix}_D_factor_correlations{ext}",
+            dpi=400,
             transparent=True,
             bbox_inches="tight",
         )
     plt.close()
-    # Assign cell-state factors to known cell types
-    if assign_to_celltypes:
-        assert (
-            cell_state_factors is not None
-            and cell_metadata is not None
-            and celltype_column is not None
-        ), "To assign cell-state factors to celltypes, the `cell_state_factors`, `cell_metadata` and `celltype_column` arguments are required."
-        df_celltype = cell_state_factors.copy()
-        df_celltype["Cell type"] = cell_metadata[celltype_column].values
-        # Average of each factor across cells belonging to the same celltype
-        df_celltype = (
-            df_celltype.groupby(by="Cell type", observed=True)
-            .mean()
-            .reset_index()
-            .set_index("Cell type")
-        )
-        # zscore factor values across celltypes
-        df_celltype = pd.DataFrame(
-            zscore(df_celltype.to_numpy(), axis=0),
-            index=df_celltype.index,
-            columns=df_celltype.columns,
-        )
-        # Assign each factor to the celltype with the highest value
-        temp_dict = df_celltype.idxmax(axis=0).to_dict()
-        A = A.rename(index=temp_dict)
 
-    # Cluster cell-state factors based on the U factors that are assigned to them
+
+def plot_DxC_similarity(
+    D: pd.DataFrame,
+    associated_factors: list,
+    A: pd.DataFrame,
+    cell_state_factors: pd.DataFrame,
+    cell_metadata: pd.DataFrame,
+    celltype_column: str,
+    donor_column: str,
+    savefig: str,
+    format: str,
+) -> None:
+    """Creates a clustermap of the cosine similarity between DxC factors and their assigned cell
+    types.
+
+    Parameters
+    ----------
+        D (pd.DataFrame): Dataframe containing D factors (individuals x factors).
+        associated_factors (list): List of associated factors to filter and plot.
+        A (pd.DataFrame): Dataframe containing the factor assignment matrix, A.
+        cell_state_factors (pd.DataFrame or None): Dataframe containing LIVI cell-state latent.
+        cell_metadata (pd.DataFrame or None): Dataframe containing cell metadata.
+        celltype_column (str or None): Column name in cell metadata indicating the cell type.
+        donor_column (str or None): Column name in cell metadata indicating the donor.
+        savefig (str or None): If provided, the path to save the generated plots. Default is None.
+        format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
+            extension of savefig, if savefig is not None.
+
+    Returns
+    -------
+        None
+    """
+
+    A = A.filter(associated_factors)
+    D = D.filter(associated_factors)
+
+    if savefig:
+        prefix, ext = os.path.splitext(savefig)
+        ext = "." + format if format else ".png" if ext == "" else ext
+    else:
+        ext = "." + format if format else ".png"
+
+    cc_softmax = nn.Softmax(dim=1)(torch.from_numpy(cell_state_factors.to_numpy())).numpy()
+    DxC = pd.DataFrame(
+        (cc_softmax @ A.to_numpy()) * D.loc[cell_metadata[donor_column]].to_numpy(),
+        index=cell_state_factors.index,
+        columns=A.columns,
+    )
+    DxC.columns = [c.replace("D_", "DxC ") for c in DxC.columns]
+
+    DxC = DxC.merge(cell_metadata[celltype_column], right_index=True, left_index=True)
+    DxC = DxC.groupby(celltype_column, observed=True).apply(lambda x: x.mean())
+
     clm = sns.clustermap(
-        A,
-        col_cluster=False,
+        DxC,
+        col_cluster=True,
         row_cluster=True,
         metric="cosine",
-        cmap="RdBu",
+        cmap="RdBu_r",
+        center=0,
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
-        center=1,
-        rasterized=ext == ".svg",
+        rasterized=ext == ".pdf",
     )
-    # clm.fig.suptitle("", fontsize=16, y=1.05)
-    if savefig:
-        clm.savefig(
-            f"{prefix}_cell-state-factor_clustering_based_on_U-factors{ext}",
-            dpi=200,
-            transparent=True,
-            bbox_inches="tight",
-        )
-    plt.close()
 
-    # Cluster U factors based on the cell-state factors in which they are active
-    clm = sns.clustermap(
-        A,
-        col_cluster=True,
-        row_cluster=False,
-        metric="cosine",
-        cmap="RdBu",
-        cbar_pos=(0.99, 0.14, 0.022, 0.2),
-        center=1,
-        rasterized=ext == ".svg",
-    )
     if savefig:
         clm.savefig(
-            f"{prefix}_U-factor_clustering_based_on_cell-state-factors{ext}",
-            dpi=200,
+            f"{prefix}_DxC-factor_celltype_clustering{ext}",
+            dpi=400,
             transparent=True,
             bbox_inches="tight",
         )
     plt.close()
 
 
-def plot_ID_similarity(  ### REVIEW - UPDATE
-    U: pd.DataFrame,
+def plot_donor_similarity(
+    D: pd.DataFrame,
     associated_factors: list,
     donor_metadata: Optional[pd.DataFrame] = None,
     donor_covariate: Optional[str] = None,
@@ -1478,17 +1475,17 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
     format: Optional[str] = None,
 ):
     """Cluster donors and draw a heatmap of donor similarity based on LIVI's U embedding.
-    Optionally color the donor IDs after a donor covariate of interest.
+    Optionally color the donor IDs according to a donor covariate of interest.
 
         Parameters
         ----------
-        U (pd.DataFrame): Dataframe containing U factors (individuals x factors).
+        D (pd.DataFrame): Dataframe containing D factors (individuals x factors).
         associated_factors (list): List of factors with significant genetic associations (used to calculate the donor similarities).
         donor_metadata (pd.DataFrame or None): Dataframe containing donor metadata. Default is None.
         donor_covariate (str or None): Column name in donor metadata indicating the donor covariate to use to color the donor IDs. Default is None.
         covariate_colors (list or None): If provided, each donor category will be colored with the corresponding color from the list (as indicated by the color order), otherwise colors will be chosen randomly. Default is None, i.e. use random colors.
         savefig (str or None): If provided, the path to save the generated plots. Default is None.
-        format (str or None): The file format, e.g. 'png', 'pdf', 'svg', ..., to save the figure to. If None, then the file format is inferred from the
+        format (str or None): The file format, e.g. 'png', 'pdf', 'eps', ..., to save the figure to. If None, then the file format is inferred from the
             extension of savefig, if savefig is not None.
 
     Returns
@@ -1527,31 +1524,31 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
         row_colors = None
 
     # Cluster individuals based on significant U factor values
-    U = U.filter(associated_factors)
+    D = D.filter(associated_factors)
 
     clm = sns.clustermap(
-        U,
+        D,
         col_cluster=False,
         row_cluster=True,
         metric="cosine",
-        # cmap="RdBu",
-        center=1,
+        cmap="RdBu_r",
+        center=0,
         cbar_pos=(0.99, 0.14, 0.022, 0.2),
-        rasterized=ext == ".svg",
+        rasterized=ext == ".pdf",
     )
     if savefig:
         clm.savefig(
-            f"{prefix}_IID_clustering_based_on_U_factors{ext}",
-            dpi=200,
+            f"{prefix}_IID_clustering_based_on_D_factors{ext}",
+            dpi=400,
             transparent=True,
             bbox_inches="tight",
         )
     plt.close()
 
     iid_distances = squareform(
-        pdist(U, metric="cosine")
+        pdist(D, metric="cosine")
     )  # 0: identical, 1: unrelated, 2: opposite
-    iid_distances = pd.DataFrame(iid_distances, index=U.index, columns=U.index)
+    iid_distances = pd.DataFrame(iid_distances, index=D.index, columns=D.index)
     plt.figure(figsize=(12, 10))
     sns.heatmap(
         iid_distances, cmap="RdBu", center=1, rasterized=True, xticklabels=5, yticklabels=5
@@ -1569,13 +1566,13 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
             tick_label.set_color(row_colors[tick_label.get_text()])
             tick_label.set_fontsize(3)
     plt.title(
-        "Cosine distance between individuals based on significant $U$ factors", fontsize=15, pad=20
+        "Cosine distance between individuals based on significant $D$ factors", fontsize=15, pad=20
     )
     if savefig:
         plt.savefig(
-            f"{prefix}_Heatmap_IID_cosine-distance_based_on_U_factors{ext}",
+            f"{prefix}_Heatmap_IID_cosine-distance_based_on_D_factors{ext}",
             bbox_inches="tight",
-            dpi=300,
+            dpi=400,
             transparent=True,
         )
     plt.close()
@@ -1583,7 +1580,16 @@ def plot_ID_similarity(  ### REVIEW - UPDATE
 
 ### Edited from venny4py package ###
 def venny4py_custom_colors(
-    sets, plot_title, custom_colors=None, out="./", asax=False, ext="png", dpi=300, size=3.5
+    sets,
+    plot_title,
+    custom_colors=None,
+    out="./",
+    asax=False,
+    ext="png",
+    dpi=300,
+    size=3.5,
+    alpha=0.4,
+    fontsize=None,
 ):
     from itertools import combinations
 
@@ -1597,7 +1603,7 @@ def venny4py_custom_colors(
     if custom_colors is None:
         custom_colors = ["green", "darkorange", "maroon", "royalblue"]  # colors
     lw = size * 0.12  # line width
-    fs = size * 2  # font size
+    fs = fontsize if fontsize is not None else size * 2  # font size
     nc = 2  # legend cols
     cs = 4  # columnspacing
 
@@ -1629,7 +1635,7 @@ def venny4py_custom_colors(
                     height=eh,
                     fc=custom_colors[i],
                     angle=ae[i],
-                    alpha=0.3,
+                    alpha=alpha,
                 )
             )
             ax.add_artist(
@@ -1673,14 +1679,15 @@ def venny4py_custom_colors(
 
         # legend
         handles = [
-            mpatches.Patch(color=custom_colors[i], label=l, alpha=0.3) for i, l in enumerate(sets)
+            mpatches.Patch(color=custom_colors[i], label=l, alpha=alpha)
+            for i, l in enumerate(sets)
         ]
         ax.legend(
             labels=sets,
             handles=handles,
             fontsize=fs * 1.1,
             frameon=False,
-            bbox_to_anchor=(0.5, 0.99),
+            bbox_to_anchor=(0.5, 1.05),
             bbox_transform=ax.transAxes,
             loc=9,
             handlelength=1.5,
@@ -1690,11 +1697,11 @@ def venny4py_custom_colors(
         )
         plt.title(
             label=plot_title,
-            fontdict={"weight": "bold", "fontsize": 8},
+            fontdict={"weight": "bold", "fontsize": fs},
         )
         if asax is False:
             fig.savefig(
-                f"{out}{ext}",
+                f"{out}.{ext}",
                 dpi=dpi,
                 bbox_inches="tight",
                 transparent=True,
@@ -1704,7 +1711,7 @@ def venny4py_custom_colors(
 def overlap_with_known_eQTLs(
     known_trans_eQTLs: pd.DataFrame,
     SNP_colname_trans: str,
-    GxC_effects_LIVI: pd.DataFrame,
+    DxC_effects_LIVI: pd.DataFrame,
     factor_assignment_matrix: Optional[pd.DataFrame] = None,
     known_cis_eQTLs: Optional[pd.DataFrame] = None,
     SNP_colname_cis: Optional[str] = None,
@@ -1741,8 +1748,8 @@ def overlap_with_known_eQTLs(
             .tolist()
         )
 
-        GxC_effects_LIVI = GxC_effects_LIVI.assign(
-            is_known_eQTL=GxC_effects_LIVI.apply(
+        DxC_effects_LIVI = DxC_effects_LIVI.assign(
+            is_known_eQTL=DxC_effects_LIVI.apply(
                 lambda x: (
                     "only trans-eQTLs"
                     if x.SNP_id in only_trans_eQTLs
@@ -1758,11 +1765,11 @@ def overlap_with_known_eQTLs(
         # Overlap between SNPs
         v = venn3(
             subsets=[
-                set(GxC_effects_LIVI.SNP_id),
+                set(DxC_effects_LIVI.SNP_id),
                 set(known_trans_eQTLs[SNP_colname_trans]),
                 set(known_cis_eQTLs[SNP_colname_cis]),
             ],
-            set_labels=("LIVI GxC", "known $trans$-eQTLs", "known $cis$-eQTLs"),
+            set_labels=("LIVI DxC", "known $trans$-eQTLs", "known $cis$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
         for lbl in v.subset_labels:
@@ -1775,7 +1782,7 @@ def overlap_with_known_eQTLs(
         )
         plt.tight_layout()
         plt.savefig(
-            f"{prefix}_Venn_LIVI-GxC-vs-known-eQTLs{ext}",
+            f"{prefix}_Venn_LIVI-DxC-vs-known-eQTLs{ext}",
             transparent=True,
             dpi=300,
             bbox_inches="tight",
@@ -1784,22 +1791,22 @@ def overlap_with_known_eQTLs(
         # Overlap between associated factors
         ssets = {
             "only cis-eQTLs": set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
                 ].Factor.unique()
             ),
             "only trans-eQTLs": set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
                 ].Factor.unique()
             ),
             "cis and trans eQTLs": set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                 ].Factor.unique()
             ),
-            "only LIVI GxC": set(
-                GxC_effects_LIVI.loc[GxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
+            "only LIVI DxC": set(
+                DxC_effects_LIVI.loc[DxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
             ),
         }
 
@@ -1808,7 +1815,7 @@ def overlap_with_known_eQTLs(
             plot_title="Overlap between $U$ Factors associated with SNPs that are (not) known eQTLs",
             out=f"{prefix}_Venn_U-factor-overlap-LIVI-vs-known-eQTLs",
             asax=False,
-            ext=ext,
+            ext=ext.replace(".", ""),
             dpi=300,
             size=3.5,
         )
@@ -1816,21 +1823,21 @@ def overlap_with_known_eQTLs(
 
         cis_factors = list(
             set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
                 ].Factor.unique()
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only LIVI"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only LIVI"
                     ].Factor.unique()
                 )
             )
@@ -1838,21 +1845,21 @@ def overlap_with_known_eQTLs(
 
         trans_factors = list(
             set(
-                GxC_effects_LIVI.loc[
-                    GxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                DxC_effects_LIVI.loc[
+                    DxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
                 ].Factor.unique()
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only LIVI"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only LIVI"
                     ].Factor.unique()
                 )
             )
@@ -1860,48 +1867,48 @@ def overlap_with_known_eQTLs(
 
         LIVIonly_factors = list(
             set(
-                GxC_effects_LIVI.loc[GxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
+                DxC_effects_LIVI.loc[DxC_effects_LIVI.is_known_eQTL == "only LIVI"].Factor.unique()
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only cis-eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "only trans-eQTLs"
                     ].Factor.unique()
                 )
             )
             .difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.is_known_eQTL == "cis and trans eQTLs"
                     ].Factor.unique()
                 )
             )
         )
 
         if factor_assignment_matrix is not None:
-            plot_df = factor_assignment_matrix.filter(GxC_effects_LIVI.Factor.unique()).T
+            plot_df = factor_assignment_matrix.filter(DxC_effects_LIVI.Factor.unique()).T
 
             plot_df = (
                 plot_df.reset_index()
                 .assign(
                     Group=plot_df.reset_index().apply(
                         lambda x: (
-                            "only LIVI GxC"
+                            "only LIVI DxC"
                             if x["index"] in LIVIonly_factors
                             else (
-                                "LIVI GxC and $trans$-eQTL"
+                                "LIVI DxC and $trans$-eQTL"
                                 if x["index"] in trans_factors
                                 else (
-                                    "LIVI GxC and $cis$-eQTL"
+                                    "LIVI DxC and $cis$-eQTL"
                                     if x["index"] in cis_factors
-                                    else "LIVI GxC and both $cis$ and $trans$ eQTL"
+                                    else "LIVI DxC and both $cis$ and $trans$ eQTL"
                                 )
                             )
                         ),
@@ -1937,7 +1944,7 @@ def overlap_with_known_eQTLs(
             ssets = {
                 "known cis-eQTLs": set(known_cis_eQTLs[SNP_colname_cis].tolist()),
                 "known trans-eQTLs": set(known_trans_eQTLs[SNP_colname_trans].tolist()),
-                "LIVI GxC": set(GxC_effects_LIVI.SNP_id.tolist()),
+                "LIVI DxC": set(DxC_effects_LIVI.SNP_id.tolist()),
                 "LIVI persistent": set(persistent_effects_LIVI.SNP_id.tolist()),
             }
 
@@ -1946,7 +1953,7 @@ def overlap_with_known_eQTLs(
                 plot_title="Overlap between significant SNPs",
                 out=f"{prefix}_Venn_LIVI-persistent-vs-known-eQTLs",
                 asax=False,
-                ext=ext,
+                ext=ext.replace(".", ""),
                 dpi=300,
                 size=3.5,
             )
@@ -1955,8 +1962,8 @@ def overlap_with_known_eQTLs(
     else:
         # Overlap between SNPs
         v = venn2(
-            subsets=[set(GxC_effects_LIVI.SNP_id), set(known_trans_eQTLs[SNP_colname_trans])],
-            set_labels=("LIVI GxC", "known $trans$-eQTLs"),
+            subsets=[set(DxC_effects_LIVI.SNP_id), set(known_trans_eQTLs[SNP_colname_trans])],
+            set_labels=("LIVI DxC", "known $trans$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
         for lbl in v.subset_labels:
@@ -1979,17 +1986,17 @@ def overlap_with_known_eQTLs(
         v = venn2(
             subsets=[
                 set(
-                    GxC_effects_LIVI.loc[
-                        ~GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    DxC_effects_LIVI.loc[
+                        ~DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                     ].Factor.tolist()
                 ),
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                     ].Factor.tolist()
                 ),
             ],
-            set_labels=("only LIVI GxC", "known $trans$-eQTLs"),
+            set_labels=("only LIVI DxC", "known $trans$-eQTLs"),
         )
         [lbl.set_fontsize(15) for lbl in v.set_labels]
         for lbl in v.subset_labels:
@@ -2012,26 +2019,26 @@ def overlap_with_known_eQTLs(
 
         LIVIonly_factors = list(
             set(
-                GxC_effects_LIVI.loc[
-                    ~GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                DxC_effects_LIVI.loc[
+                    ~DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                 ].Factor.tolist()
             ).difference(
                 set(
-                    GxC_effects_LIVI.loc[
-                        GxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
+                    DxC_effects_LIVI.loc[
+                        DxC_effects_LIVI.SNP_id.isin(known_trans_eQTLs[SNP_colname_trans])
                     ].Factor.tolist()
                 )
             )
         )
 
         if factor_assignment_matrix is not None:
-            plot_df = factor_assignment_matrix.filter(GxC_effects_LIVI.Factor.unique()).T
+            plot_df = factor_assignment_matrix.filter(DxC_effects_LIVI.Factor.unique()).T
             plot_df = (
                 plot_df.reset_index()
                 .assign(
                     Group=plot_df.reset_index().apply(
                         lambda x: (
-                            "only LIVI GxC"
+                            "only LIVI DxC"
                             if x["index"] in LIVIonly_factors
                             else "LIVI and $trans$-eQTL"
                         ),
@@ -2066,11 +2073,11 @@ def overlap_with_known_eQTLs(
             # Overlap between SNPs
             v = venn3(
                 subsets=[
-                    set(GxC_effects_LIVI.SNP_id),
+                    set(DxC_effects_LIVI.SNP_id),
                     set(known_trans_eQTLs[SNP_colname_trans]),
                     set(persistent_effects_LIVI.SNP_id),
                 ],
-                set_labels=("LIVI GxC", "known $trans$-eQTLs", "LIVI persistent"),
+                set_labels=("LIVI DxC", "known $trans$-eQTLs", "LIVI persistent"),
             )
             [lbl.set_fontsize(15) for lbl in v.set_labels]
             for lbl in v.subset_labels:
@@ -2092,7 +2099,7 @@ def overlap_with_known_eQTLs(
 
 
 def plot_gene_loadings_for_factor(
-    GxC_decoder: pd.DataFrame,
+    DxC_decoder: pd.DataFrame,
     factor: str,
     adata_var: pd.DataFrame,
     gene_name_column: str,
@@ -2111,9 +2118,9 @@ def plot_gene_loadings_for_factor(
 
     Parameters:
     ----------
-        GxC_decoder (pd.DataFrame): DataFrame containing gene loadings for each factor (columns).
+        DxC_decoder (pd.DataFrame): DataFrame containing gene loadings for each factor (columns).
         factor (str): Name of the factor whose gene loadings will be visualized.
-        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `DxC_decoder`.
         gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
         color (Optional[str]): Outline color for the boxplot. Default is "darkblue".
         spines_invisible (bool): If True, hides the top, right, and left spines of the plot. Default is False.
@@ -2132,18 +2139,18 @@ def plot_gene_loadings_for_factor(
         None
     """
 
-    if GxC_decoder.index.name is None:
+    if DxC_decoder.index.name is None:
         idx_name = "GeneID"
     else:
-        idx_name = GxC_decoder.index.name
-    gene_loadings = GxC_decoder[factor].reset_index()
+        idx_name = DxC_decoder.index.name
+    gene_loadings = DxC_decoder[factor].reset_index()
 
     if genes_to_annotate is not None:
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in genes_to_annotate, axis=1)
         )
     else:
-        top_genes = GxC_decoder[factor].abs().nlargest(n_top_genes).index.tolist()
+        top_genes = DxC_decoder[factor].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes, axis=1)
         )
@@ -2218,9 +2225,9 @@ def plot_gene_loadings_for_factor(
 
 
 def plot_gene_loadings_for_associated_variable(
-    GxC_associations: pd.DataFrame,
+    DxC_associations: pd.DataFrame,
     variable: str,
-    GxC_decoder: pd.DataFrame,
+    DxC_decoder: pd.DataFrame,
     adata_var: pd.DataFrame,
     gene_name_column: str,
     color: Optional[str] = None,
@@ -2239,10 +2246,10 @@ def plot_gene_loadings_for_associated_variable(
 
     Parameters:
     ----------
-        GxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
+        DxC_associations (pd.DataFrame): DataFrame containing variable–factor associations, obtained using LIVI's testing pipeline.
         variable (str): Name of the variable (e.g., SNP ID) for which factor loadings should be visualized.
-        GxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each GxC factor (columns).
-        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `GxC_decoder`.
+        DxC_decoder (pd.DataFrame): DataFrame with gene loadings (row) for each DxC factor (columns).
+        adata_var (pd.DataFrame): DataFrame equivalent to `adata.var` containing gene metadata with same index as `DxC_decoder`.
         gene_name_column (str): Column in `adata_var` containing the gene names (those will be annotated on the plot).
         color (Optional[str]): Color for boxplot outlines. If None, defaults to "darkblue".
         spines_invisible (bool): Whether to hide the top, right, and left plot spines. Default is False.
@@ -2260,13 +2267,13 @@ def plot_gene_loadings_for_associated_variable(
     -------
         None
     """
-    GxC_associations_variable = GxC_associations.loc[GxC_associations.SNP_id == variable]
-    if GxC_decoder.index.name is None:
+    DxC_associations_variable = DxC_associations.loc[DxC_associations.SNP_id == variable]
+    if DxC_decoder.index.name is None:
         idx_name = "GeneID"
     else:
-        idx_name = GxC_decoder.index.name
-    gene_loadings = GxC_decoder.filter(
-        [f.replace("U", "GxC") for f in GxC_associations_variable.Factor.unique().tolist()]
+        idx_name = DxC_decoder.index.name
+    gene_loadings = DxC_decoder.filter(
+        [f.replace("D", "DxC") for f in DxC_associations_variable.Factor.unique().tolist()]
     )
     gene_loadings = pd.melt(
         gene_loadings, var_name="Factor", value_name="loadings", ignore_index=False
@@ -2283,9 +2290,9 @@ def plot_gene_loadings_for_associated_variable(
         )
     else:
         top_genes = {}
-        for f_gxc in GxC_associations_variable.Factor.unique():
-            f_gxc = f_gxc.replace("U", "GxC")
-            top_genes[f_gxc] = GxC_decoder[f_gxc].abs().nlargest(n_top_genes).index.tolist()
+        for f_DxC in DxC_associations_variable.Factor.unique():
+            f_DxC = f_DxC.replace("D", "DxC")
+            top_genes[f_DxC] = DxC_decoder[f_DxC].abs().nlargest(n_top_genes).index.tolist()
         gene_loadings = gene_loadings.assign(
             annotate_gene=gene_loadings.apply(lambda x: x[idx_name] in top_genes[x.Factor], axis=1)
         )
@@ -2296,14 +2303,14 @@ def plot_gene_loadings_for_associated_variable(
         adata_var[gene_name_column].reset_index(), on=idx_name, how="left"
     )
 
-    if GxC_associations_variable.Factor.nunique() % 3 == 0:
-        n_rows = GxC_associations_variable.Factor.nunique() // 3
+    if DxC_associations_variable.Factor.nunique() % 3 == 0:
+        n_rows = DxC_associations_variable.Factor.nunique() // 3
     else:
-        n_rows = (GxC_associations_variable.Factor.nunique() // 3) + 1
+        n_rows = (DxC_associations_variable.Factor.nunique() // 3) + 1
     n_cols = (
         3
-        if GxC_associations_variable.Factor.nunique() > 2
-        else GxC_associations_variable.Factor.nunique()
+        if DxC_associations_variable.Factor.nunique() > 2
+        else DxC_associations_variable.Factor.nunique()
     )
 
     figure_size = ((n_cols + 0.5) * d, n_rows * d)
@@ -2313,22 +2320,22 @@ def plot_gene_loadings_for_associated_variable(
     if n_rows > 1:
         axs = axs.flatten()
 
-    for f_idx, f_gxc in enumerate(gene_loadings.Factor.unique()):
-        f_gxc_loadings = gene_loadings.loc[gene_loadings.Factor == f_gxc]
+    for f_idx, f_DxC in enumerate(gene_loadings.Factor.unique()):
+        f_DxC_loadings = gene_loadings.loc[gene_loadings.Factor == f_DxC]
         if n_rows > 1 or n_cols > 1:
             axis = axs[f_idx]
         else:
             axis = axs
 
         sns.boxplot(
-            data=f_gxc_loadings,
+            data=f_DxC_loadings,
             x="loadings",
             fill=False,
             color="darkblue" if color is None else color,
             ax=axis,
         )
         axis.legend().remove()
-        axis.set_title(f_gxc.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize)
+        axis.set_title(f_DxC.replace("_", " ").replace("or", "or "), fontsize=annotation_fontsize)
         axis.set_yticks([])
         axis.set_xlabel("Loadings", fontsize=annotation_fontsize + 2)
         axis.tick_params(axis="x", which="major", labelsize=annotation_fontsize - 3)
@@ -2338,15 +2345,15 @@ def plot_gene_loadings_for_associated_variable(
             axis.spines["left"].set_visible(False)
         # axis.spines["bottom"].set_visible(False)
 
-        f_gxc_loadings_anno = f_gxc_loadings.loc[f_gxc_loadings["annotate_gene"]]
-        f_gxc_loadings_anno = f_gxc_loadings_anno.sort_values(
+        f_DxC_loadings_anno = f_DxC_loadings.loc[f_DxC_loadings["annotate_gene"]]
+        f_DxC_loadings_anno = f_DxC_loadings_anno.sort_values(
             by="loadings",
-            ascending=f_gxc_loadings.loadings.max() != f_gxc_loadings.loadings.abs().max(),
+            ascending=f_DxC_loadings.loadings.max() != f_DxC_loadings.loadings.abs().max(),
         ).reset_index(drop=True)
         x_previous = 0
         y_previous = []
         offset = offset
-        for idx, row in f_gxc_loadings_anno.iterrows():
+        for idx, row in f_DxC_loadings_anno.iterrows():
             y_loc = 0.05 if idx % 2 == 0 else -0.05
             if np.abs(np.abs(row["loadings"]) - x_previous) < x_distance:
                 if y_loc > 0:
@@ -2378,7 +2385,7 @@ def plot_gene_loadings_for_associated_variable(
             x_previous = np.abs(row["loadings"])
             y_previous.append(y_loc)
 
-    if GxC_associations_variable.Factor.nunique() > 1:
+    if DxC_associations_variable.Factor.nunique() > 1:
         fig.suptitle(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="left")
     else:
         axis.set_title(variable.replace("_", " "), fontsize=annotation_fontsize + 4, ha="center")
@@ -2398,7 +2405,7 @@ def plot_ct_gex_vs_gt(
     iid_column: str,
     GT_matrix: pd.DataFrame,
     SNP_id: str,
-    GxC_associations: pd.DataFrame,
+    DxC_associations: pd.DataFrame,
     filter_maf: bool = True,
     test_gt_groups: bool = True,
     annotation_fontsize: int = 20,
@@ -2406,6 +2413,7 @@ def plot_ct_gex_vs_gt(
     celltype_column: Optional[str] = None,
     cell_indices: Optional[List[int]] = None,
     hgnc_column: Optional[str] = None,
+    violin_colors: Optional[List[str]] = None,
     savefig: bool = True,
     output_dir: Optional[str] = None,
     output_prefix: Optional[str] = None,
@@ -2425,7 +2433,7 @@ def plot_ct_gex_vs_gt(
             in the genotype matrix.
         GT_matrix (pd.DataFrame): Genotype matrix with SNPs as rows and individual IDs as columns.
         SNP_id (str): ID of the SNP to use.
-        GxC_associations (pd.DataFrame): DataFrame containing LIVI testing results, including the assessed allele for the SNP.
+        DxC_associations (pd.DataFrame): DataFrame containing LIVI testing results, including the assessed allele for the SNP.
             SNP IDs must be the same as in the genotype matrix.
         filter_maf (bool): Whether to omit genotypes present in less than 5% of the donors. Default is True.
         annotation_fontsize (int): Fontsize for axis (tick)labels. Ticks of the x axis (i.e. the SNP genotypes) are annotated
@@ -2436,6 +2444,8 @@ def plot_ct_gex_vs_gt(
         cell_indices (Optional[List[int]]): Aggregate expression values only across these specific cells.
             `cell_indices` must be present in `adata.obs`. Default is None.
         hgnc_column (Optional[str]): Column in `adata.var` with gene symbols. Used for labeling. Default is None.
+        violin_colors (Optional[List[str]]): List of colors to use for the distributions of the different genotypes.
+            Must be of the same length as the number of the different possible genotype groups.
         savefig (bool): Whether to save the figure to a file. Default is True.
         output_dir (Optional[str]): Absolute path of the directory to save the plot if `savefig=True`. If not specified,
             the current working directory is used.
@@ -2494,11 +2504,11 @@ def plot_ct_gex_vs_gt(
     )
 
     alleles = re.search(
-        re.compile(".*[0-9]+_([A-Z]+)_([A-Z]+)"), GT_matrix.loc[SNP_id].T.name
+        re.compile(".*[0-9]+.{1}([A-Z]+).{1}([A-Z]+)"), GT_matrix.loc[SNP_id].T.name
     ).groups()
 
     if (
-        alleles[0] == GxC_associations.loc[GxC_associations.SNP_id == SNP_id].assessed_allele
+        alleles[0] == DxC_associations.loc[DxC_associations.SNP_id == SNP_id].assessed_allele
     ).all():
         allele_dict = {
             0: "/".join([alleles[1], alleles[1]]),
@@ -2543,17 +2553,33 @@ def plot_ct_gex_vs_gt(
         gene_hgnc = " and ".join(gene_hgnc)
         gene_hgnc = textwrap.fill(gene_hgnc, width=30)
         gene = "__".join(gene)
+
+    gt_group_median = (
+        plot_df.filter([gene, SNP_id]).groupby(by=SNP_id, observed=True)[gene].median()
+    )
+    if violin_colors is None:
+        if len(plot_df[SNP_id].cat.categories) == 3:
+            violin_colors = (
+                ["lightsteelblue", "cornflowerblue", "blue"]
+                if gt_group_median.iloc[0] > gt_group_median.iloc[-1]
+                else ["mistyrose", "indianred", "brown"]
+            )
+        else:
+            violin_colors = (
+                ["lightsteelblue", "blue"]
+                if gt_group_median.iloc[0] > gt_group_median.iloc[-1]
+                else ["mistyrose", "brown"]
+            )
+    else:
+        violin_colors = violin_colors
+
     fig, axs = plt.subplots(ncols=1, nrows=1, figsize=(8, 7), constrained_layout=False)
     sns.violinplot(
         plot_df,
         y=gene,
         x=SNP_id,
         hue=SNP_id,
-        palette=(
-            ["lightblue", "royalblue", "blue"]
-            if len(plot_df[SNP_id].cat.categories) == 3
-            else ["lightblue", "blue"]
-        ),
+        palette=violin_colors,
         ax=axs,
         legend=False,
         rasterized=True,
@@ -2561,7 +2587,7 @@ def plot_ct_gex_vs_gt(
     axs.set_ylabel(
         gene_hgnc, fontdict={"fontsize": annotation_fontsize + 2, "fontstyle": "italic"}
     )
-    axs.xaxis.get_ticklabels()[0].set_color("lightblue")
+    axs.xaxis.get_ticklabels()[0].set_color(violin_colors[0])
     axs.xaxis.get_label().set_fontsize(22)
     [t.set_fontsize(annotation_fontsize) for t in axs.xaxis.get_ticklabels()]
     [t.set_fontsize(annotation_fontsize - 3) for t in axs.yaxis.get_ticklabels()]
@@ -2585,15 +2611,17 @@ def plot_ct_gex_vs_gt(
                 f"Mann-Whitney \n$p$-value = {pval2:.2e}",
                 fontdict={"color": "black", "fontsize": "large", "ma": "right"},
             )
-        axs.xaxis.get_ticklabels()[1].set_color("royalblue")
-        axs.xaxis.get_ticklabels()[2].set_color("blue")
+        axs.xaxis.get_ticklabels()[1].set_color(violin_colors[1])
+        axs.xaxis.get_ticklabels()[2].set_color(violin_colors[2])
     else:
-        axs.xaxis.get_ticklabels()[1].set_color("blue")
-    gt_group_median = (
-        plot_df.filter([gene, SNP_id]).groupby(by=SNP_id, observed=True)[gene].median()
-    )
+        axs.xaxis.get_ticklabels()[1].set_color(violin_colors[-1])
+
     axs.plot(
-        gt_group_median.index, gt_group_median.values, marker="o", linestyle="-", color="maroon"
+        gt_group_median.index,
+        gt_group_median.values,
+        marker="o",
+        linestyle="-",
+        color="midnightblue" if "blue" in violin_colors else "maroon",
     )
     if celltype is not None:
         CT = " and ".join(celltype) if len(celltype) > 1 else celltype[0]
@@ -2626,19 +2654,19 @@ def plot_ct_gex_vs_gt(
         return plot_df
 
 
-def visualize_GxC_effect(
+def visualize_DxC_effect(
     SNP_id: str,
     adata: AnnData,
     celltype_column: str,
-    return_GxC_effect: bool = False,
+    return_DxC_effect: bool = False,
     marker_size: int = 2,
     axis_title_fontsize: int = 26,
     d: int = 10,
     model_results_dir: Optional[str] = None,
     cell_state_latent: Optional[pd.DataFrame] = None,
-    GxC_associations: Optional[pd.DataFrame] = None,
+    DxC_associations: Optional[pd.DataFrame] = None,
     assignment_matrix: Optional[pd.DataFrame] = None,
-    GxC_decoder: Optional[pd.DataFrame] = None,
+    DxC_decoder: Optional[pd.DataFrame] = None,
     gene: Optional[str] = None,
     factor_id: Optional[str] = None,
     hgnc_column: Optional[str] = None,
@@ -2653,22 +2681,22 @@ def visualize_GxC_effect(
         SNP_id (str): ID of the SNP, whose effect should be calculated.
         adata (AnnData): AnnData object containing the cell metadata in adata.obs.
         celltype_column (str): Column name in adata.obs indicating the celltype.
-        return_GxC_effect (bool): If True, returns the quantified SNP effect at the single-cell level.
+        return_DxC_effect (bool): If True, returns the quantified SNP effect at the single-cell level.
         marker_size (int): Scatterplot marker size. Default is 2.
         axis_title_fontsize (int): Fontsize of the title for each axis/plot.
         d (int): Controls figure size. Resulting figure will have a width of 2.5 x d and a height d x number of axis/plots.
             Default is 10.
         model_results_dir (str or None): Absolute path of the directory containing the inference and testing
-            results files of the LIVI model. Must be provided if `cell_state_latent`, `GxC_associations`,
+            results files of the LIVI model. Must be provided if `cell_state_latent`, `DxC_associations`,
             `assignment_matrix` are None. Default is None.
         cell_state_latent (pd.DataFrame or None): DataFrame containing the cell-state latent space. Can be used instead
             of `model_results_dir`. Default is None.
-        GxC_associations (pd.DataFrame or None): Dataframe containing LIVI GxC associations. Can be used instead of
+        DxC_associations (pd.DataFrame or None): Dataframe containing LIVI DxC associations. Can be used instead of
             `model_results_dir`. Default is None.
         assignment_matrix (pd.DataFrame or None): Dataframe containing LIVI factor assignment matrix. Can be used instead
             of `model_results_dir`. Default is None.
-        GxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each GxC factor (columns).
-        gene (Optional[str]): Plot the effect of the SNPs on the specific genes(s). Gene IDs must be the same as in `GxC_decoder`
+        DxC_decoder (Optional[pd.DataFrame]): DataFrame with gene loadings (row) for each DxC factor (columns).
+        gene (Optional[str]): Plot the effect of the SNPs on the specific genes(s). Gene IDs must be the same as in `DxC_decoder`
             and `adata.var` index.
         factor_id (Optional[str]): ID of the factor to use for reconstruction. For SNPs associated with more than one factors, it
             is recommended to specify which one to use when calculating the effect of the SNP on genes, in order to obtain
@@ -2684,13 +2712,13 @@ def visualize_GxC_effect(
 
     Returns:
     -------
-        GxC_effect (Optional[pd.DataFrame]): Dataframe containing the effect of the given SNP at the single-cell level for cells
+        DxC_effect (Optional[pd.DataFrame]): Dataframe containing the effect of the given SNP at the single-cell level for cells
             belonging to different cell-states.
     """
     if all(
         [
             arg is None
-            for arg in [model_results_dir, cell_state_latent, GxC_associations, assignment_matrix]
+            for arg in [model_results_dir, cell_state_latent, DxC_associations, assignment_matrix]
         ]
     ):
         raise ValueError(
@@ -2722,20 +2750,21 @@ def visualize_GxC_effect(
                     "No cell-state latent found in `model_results_dir`. Make sure the filename ends in 'cell-state_latent.tsv'."
                 )
 
-        if GxC_associations is None:
-            GxC_associations = [
-                re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f)
+        if DxC_associations is None:
+            DxC_associations = [
+                re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_D-embedding.tsv)", f)
                 for f in files
-                if re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_Ucontext.tsv)", f) is not None
+                if re.match("(.*_LMM_results_StoreyQ[0-9].[0-9]{1,3}_D-embedding.tsv)", f)
+                is not None
             ]
-            if len(GxC_associations) > 0:
-                GxC_associations = GxC_associations[0].groups()[0]
-                GxC_associations = pd.read_csv(
-                    os.path.join(model_results_dir, GxC_associations), sep="\t", index_col=False
+            if len(DxC_associations) > 0:
+                DxC_associations = DxC_associations[0].groups()[0]
+                DxC_associations = pd.read_csv(
+                    os.path.join(model_results_dir, DxC_associations), sep="\t", index_col=False
                 )
             else:
                 raise FileNotFoundError(
-                    "No genetic associations found in `model_results_dir`. Make sure the filename ends in 'LMM_results_StoreyQ<alpha-threshold>_Ucontext.tsv'."
+                    "No genetic associations found in `model_results_dir`. Make sure the filename ends in 'LMM_results_StoreyQ<alpha-threshold>_D-embedding.tsv'."
                 )
 
         if assignment_matrix is None:
@@ -2753,43 +2782,43 @@ def visualize_GxC_effect(
                 raise FileNotFoundError(
                     "No factor assignment matrix found in `model_results_dir`. Make sure the filename ends in 'factor_assignment_matrix.tsv'."
                 )
-        if GxC_decoder is None and gene is not None:
-            GxC_decoder = [
-                re.match("(.*GxC_decoder.tsv)", f)
+        if DxC_decoder is None and gene is not None:
+            DxC_decoder = [
+                re.match("(.*DxC_decoder.tsv)", f)
                 for f in files
-                if re.match("(.*GxC_decoder.tsv)", f) is not None
+                if re.match("(.*DxC_decoder.tsv)", f) is not None
             ]
-            if len(GxC_decoder) > 0:
-                GxC_decoder = GxC_decoder[0].groups()[0]
-                GxC_decoder = pd.read_csv(
-                    os.path.join(model_results_dir, GxC_decoder), sep="\t", index_col=0
+            if len(DxC_decoder) > 0:
+                DxC_decoder = DxC_decoder[0].groups()[0]
+                DxC_decoder = pd.read_csv(
+                    os.path.join(model_results_dir, DxC_decoder), sep="\t", index_col=0
                 )
             else:
                 raise FileNotFoundError(
-                    "No GxC decoder found in `model_results_dir`. Make sure the filename ends in 'GxC_decoder.tsv'."
+                    "No DxC decoder found in `model_results_dir`. Make sure the filename ends in 'DxC_decoder.tsv'."
                 )
     if gene is not None:
         assert (
-            GxC_decoder is not None
-        ), "To visualize effect on individual genes `GxC_decoder` cannot be `None`."
-        GxC_effect = calculate_GxC_gene_effect(
-            LIVI_associations=GxC_associations,
+            DxC_decoder is not None
+        ), "To visualize effect on individual genes `DxC_decoder` cannot be `None`."
+        DxC_effect = calculate_DxC_gene_effect(
+            DxC_associations=DxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
-            GxC_decoder=GxC_decoder,
+            DxC_decoder=DxC_decoder,
             factor_id=factor_id,
         )
-        GxC_effect = GxC_effect.filter(gene)
+        DxC_effect = DxC_effect.filter(gene)
         if hgnc_column is not None:
             hgnc_name = adata.var.loc[gene, hgnc_column].to_dict()
-            # GxC_effect = GxC_effect.rename(columns=hgnc_name)
+            # DxC_effect = DxC_effect.rename(columns=hgnc_name)
         else:
             hgnc_name = None
 
     else:
-        GxC_effect = calculate_GxC_effect(
-            LIVI_associations=GxC_associations,
+        DxC_effect = calculate_DxC_effect(
+            DxC_associations=DxC_associations,
             SNP_id=SNP_id,
             cell_state_latent=cell_state_latent,
             A=assignment_matrix,
@@ -2818,14 +2847,14 @@ def visualize_GxC_effect(
     umap_base = umap_base.merge(
         adata.obs.filter([celltype_column]), how="left", right_index=True, left_index=True
     )
-    umap_base = umap_base.merge(GxC_effect, right_index=True, left_index=True)
+    umap_base = umap_base.merge(DxC_effect, right_index=True, left_index=True)
 
     legend_fontsize = axis_title_fontsize - 6
-    # Plot the effect for each factor/gene (column in `GxC_effect`) associated with the given SNP
-    if len(GxC_effect.columns) % 2 == 0:
-        n_rows = len(GxC_effect.columns) // 2 + 1
+    # Plot the effect for each factor/gene (column in `DxC_effect`) associated with the given SNP
+    if len(DxC_effect.columns) % 2 == 0:
+        n_rows = len(DxC_effect.columns) // 2 + 1
     else:
-        n_rows = int(len(GxC_effect.columns) // 2) + 1
+        n_rows = int(len(DxC_effect.columns) // 2) + 1
 
     figure_size = (2.5 * d, n_rows * d)
     fig, axs = plt.subplots(ncols=2, nrows=n_rows, figsize=figure_size, constrained_layout=False)
@@ -2861,11 +2890,11 @@ def visualize_GxC_effect(
             axs[0].yaxis.label.set_fontsize(axis_title_fontsize - 1)
             axs[0].tick_params(labelsize=legend_fontsize)
 
-        elif 0 < i < len(GxC_effect.columns) + 1:
-            GE = GxC_effect.columns[i - 1]
-            if GxC_effect[GE].min() < 0 and GxC_effect[GE].max() < 0:
+        elif 0 < i < len(DxC_effect.columns) + 1:
+            GE = DxC_effect.columns[i - 1]
+            if DxC_effect[GE].min() < 0 and DxC_effect[GE].max() < 0:
                 comap = "Blues_r"
-            elif GxC_effect[GE].min() <= 0 and GxC_effect[GE].max() > 0:
+            elif DxC_effect[GE].min() <= 0 and DxC_effect[GE].max() > 0:
                 comap = "RdBu_r"
             else:
                 comap = "Reds"
@@ -2882,10 +2911,10 @@ def visualize_GxC_effect(
             )
             norM = (
                 colors.TwoSlopeNorm(
-                    vcenter=0.0, vmin=GxC_effect[GE].min(), vmax=GxC_effect[GE].max()
+                    vcenter=0.0, vmin=DxC_effect[GE].min(), vmax=DxC_effect[GE].max()
                 )
                 if comap == "RdBu_r"
-                else colors.Normalize(vmin=GxC_effect[GE].min(), vmax=GxC_effect[GE].max())
+                else colors.Normalize(vmin=DxC_effect[GE].min(), vmax=DxC_effect[GE].max())
             )
             sm = cm.ScalarMappable(cmap=comap, norm=norM)
             cb = plt.colorbar(sm, ax=ax)
@@ -2919,5 +2948,5 @@ def visualize_GxC_effect(
             transparent=True,
         )
 
-    if return_GxC_effect:
-        return GxC_effect
+    if return_DxC_effect:
+        return DxC_effect

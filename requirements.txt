@@ -19,8 +19,8 @@ tensorboard==2.16.2
 
 # --------- others --------- #
 pyrootutils     # standardizing the project root setup
-pre-commit>=3.7.0      # hooks for applying linters on commit
-rich            # beautiful text formatting in terminal
+pre-commit>=3.7.0     # hooks for applying linters on commit
+rich==13.9.4     # beautiful text formatting in terminal
 pytest          # tests
 #  sh            # for running bash commaneds in some tests (linux/macos only)
 
@@ -38,7 +38,7 @@ gseapy>=1.1.1
 plotnine==0.14.5
 reportlab>=3.6.12
 cairosvg>=2.7.1
-numpy>=1.26.4
+numpy>=1.26.4,<2.0
 snakemake>=7.32.4,<8
 # pulp <= 2.7.0
 plotly>=5.22.0

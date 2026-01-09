@@ -28,9 +28,9 @@ import seaborn as sns
 import torch
 from anndata import AnnData
 from pandas_plink import read_plink
-from scipy.stats import kruskal, ks_2samp, mannwhitneyu, pearsonr, zscore
+from scipy.stats import zscore
 from sklearn.preprocessing import StandardScaler
-from tensorqtl import pgen, trans
+from tensorqtl import pgen
 
 from src.analysis.livi_testing import (
     run_LIVI_genetic_association_testing,
@@ -39,17 +39,19 @@ from src.analysis.livi_testing import (
 from src.analysis.plotting import (
     cell_state_factors_heatmap,
     overlap_with_known_eQTLs,
-    plot_ID_similarity,
-    plot_U_factor_similarity,
+    plot_D_factor_corr,
+    plot_donor_similarity,
+    plot_DxC_similarity,
     visualise_cell_state_latent,
 )
-from src.data_modules.livi_data import LIVIDataModule
+from src.data_modules.livi_data import LIVIDataset
 from src.models.livi import LIVI
-from src.models.livi_experimental import (
-    LIVI_cis,
-    LIVI_cis_efficient,
-    LIVI_cis_gen,
-)
+
+# from src.models.livi_experimental import (
+#     LIVI_cis_efficient,
+#     LIVI_cis_Normal,
+#     LIVI_cis_with_adversary,
+# )
 
 
 def validate_and_read_passed_args(
@@ -113,6 +115,7 @@ def validate_and_read_passed_args(
     assert (
         args.individual_column in adata.obs.columns
     ), f"`individual_column`: '{args.individual_column}' not in adata.obs columns."
+    adata.obs[args.individual_column] = adata.obs[args.individual_column].astype(str)
     if args.batch_column:
         assert (
             args.batch_column in adata.obs.columns
@@ -131,6 +134,7 @@ def validate_and_read_passed_args(
         pgr = pgen.PgenReader(args.genotype_matrix)
         GT_matrix = pgr.load_genotypes()  # SNPs x donors
         variant_info = pgr.variant_df
+        variant_info = variant_info.reset_index(names="variant_id")
     else:
         assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
         _, ext = os.path.splitext(args.genotype_matrix)
@@ -187,6 +191,7 @@ def validate_and_read_passed_args(
         GT_PCs = pd.read_csv(
             args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
         )  # donors x PCs
+        GT_PCs.index = GT_PCs.index.astype(str)
         GT_PCs = GT_PCs.loc[GT_PCs.index.isin(adata.obs[args.individual_column].unique())]
         if GT_PCs.shape[0] == 0:
             raise ValueError(
@@ -239,7 +244,7 @@ def validate_and_read_passed_args(
             f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
         ][0]
 
-    LIVI_model = LIVI_cis_gen.load_from_checkpoint(
+    LIVI_model = LIVI.load_from_checkpoint(
         os.path.join(args.model_run_dir, "checkpoints", checkpoint),
         map_location=torch.device("cpu"),
     )
@@ -247,7 +252,7 @@ def validate_and_read_passed_args(
     if args.output_file_prefix:
         if args.output_file_prefix == "descriptive":
             zdim = LIVI_model.z_dim
-            n_gxc = LIVI_model.n_gxc_factors
+            n_DxC = LIVI_model.n_DxC_factors
             n_persistent = LIVI_model.n_persistent_factors
             encoder_h = "_".join([str(d) for d in LIVI_model.hparams.encoder_hidden_dims])
             batch_norm_dec = LIVI_model.hparams.batch_norm_decoder
@@ -264,7 +269,7 @@ def validate_and_read_passed_args(
             warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
             warmup_epochs_G = LIVI_model.warmup_epochs_G
 
-            of_prefix = f"zdim{zdim}_{n_gxc}-U-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
+            of_prefix = f"zdim{zdim}_{n_DxC}-U-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
         else:
             of_prefix = args.output_file_prefix
     else:
@@ -301,38 +306,68 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         'cell-state_latent' (torch.Tensor): Cell state latent space.
         'base_decoder' (torch.Tensor): Gene loadings for the cell-state decoder.
         'batch_embedding' (torch.Tensor): Learned embedding of technical batch.
-        'U_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
-        'CxG_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
+        'D_embedding' (torch.Tensor): Learned embedding of context-specific individual effects, if applicable.
+        'DxC_decoder' (torch.Tensor): Gene loadings for the context-specific decoder, if applicable.
         'assignment_matrix' (torch.Tensor): Learned assignment matrix of U factors to cell-state factors.
         'V_embedding' (torch.Tensor): Learned embedding of persistent individual effects, if applicable.
         'V_decoder' (torch.Tensor): Gene loadings for the persistent decoder, if applicable.
     """
 
-    X = (
-        torch.Tensor(adata.layers[args.adata_layer].todense())
-        if args.adata_layer
-        else torch.Tensor(adata.X.todense())
+    ### Inference in batches to save memory
+
+    dataset = LIVIDataset(
+        adata=adata,
+        y_key=args.individual_column,
+        use_size_factor=True,
+        size_factor_key=None,
+        layer_key=None,
+        covariates_keys=None,
+        known_cis_eqtls=None,
+        eqtl_genotypes=None,
+        strict=False,
     )
+    bs_inference = int(args.batch_size_inference)
+    nbatches = (
+        adata.shape[0] // bs_inference
+    )  # int(5e5)  ### batch_size TO BE ADDED AS A USER-SPECIFIED ARG
+    batch_indices = [
+        (int((current_batch - 1) * bs_inference), int(current_batch * bs_inference))
+        for current_batch in range(1, nbatches + 1)
+    ]
+    # add last cells if any:
+    if batch_indices[-1][1] < adata.shape[0]:
+        batch_indices.append((batch_indices[-1][1], adata.shape[0]))
+
+    cell_state_latent = pd.DataFrame(
+        columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)]
+    )
+    for i in range(len(batch_indices)):
+        data = dataset.__getitem__(
+            list(np.arange(batch_indices[i][0], batch_indices[i][1], 1, dtype=int))
+        )
+        livi_results_batch = LIVI_model.predict(x=data["x"], y=data["y"])
+        c_latent_batch = livi_results_batch["cell-state_latent"].detach().numpy()
+        c_latent_batch = pd.DataFrame(
+            c_latent_batch,
+            index=adata.obs.index[batch_indices[i][0] : batch_indices[i][1]],
+            columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)],
+        )
+        cell_state_latent = pd.concat([cell_state_latent, c_latent_batch], axis=0)
+
     Y, _ = pd.factorize(adata.obs[args.individual_column])
     Y = torch.Tensor(Y).to(torch.long)
 
-    livi_results = LIVI_model.predict(x=X, y=Y)
+    livi_results = LIVI_model.predict(x=data["x"], y=Y)
 
-    zbase = livi_results["cell-state_latent"].detach().numpy()
-    zbase = pd.DataFrame(
-        zbase,
-        index=adata.obs.index,
-        columns=[f"Cell-state_Factor{f}" for f in range(1, int(LIVI_model.z_dim) + 1)],
-    )
     try:
-        zbase.to_csv(
+        cell_state_latent.to_csv(
             os.path.join(output_dir, f"{of_prefix}_cell-state_latent.tsv"),
             sep="\t",
             header=True,
             index=True,
         )
     except OSError:
-        zbase.to_csv(
+        cell_state_latent.to_csv(
             os.path.join(output_dir, "_cell-state_latent.tsv"),
             sep="\t",
             header=True,
@@ -343,7 +378,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         )
     try:
         visualise_cell_state_latent(
-            z=zbase,
+            z=cell_state_latent,
             cell_metadata=adata.obs,
             output_dir=output_dir,
             of_prefix=of_prefix,
@@ -353,7 +388,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
     except OSError:
         visualise_cell_state_latent(
-            z=zbase,
+            z=cell_state_latent,
             cell_metadata=adata.obs,
             output_dir=output_dir,
             of_prefix="",
@@ -366,7 +401,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         )
     try:
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -382,7 +417,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
         # Z-score across celltypes
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -396,7 +431,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
     except OSError:
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -413,7 +448,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         plt.close()
         # Z-score across celltypes
         cell_state_factors_heatmap(
-            cell_state_factors=zbase.to_numpy(),
+            cell_state_factors=cell_state_latent.to_numpy(),
             cell_idx=range(adata.obs.shape[0]),
             cell_metadata=adata.obs,
             celltype_column=args.celltype_column,
@@ -433,7 +468,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
     cell_state_decoder = livi_results["cell-state_decoder"].detach().numpy()
     cell_state_decoder = pd.DataFrame(
-        cell_state_decoder, index=adata.var.index, columns=zbase.columns
+        cell_state_decoder, index=adata.var.index, columns=cell_state_latent.columns
     )
     try:
         cell_state_decoder.to_csv(
@@ -453,72 +488,72 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             "Could not save cell-state decoder dataframe under provided filename (filename too long).\nSaved as '_cell-state_decoder.tsv' instead."
         )
 
-    if livi_results["U_embedding"] is not None:
-        U_context = livi_results["U_embedding"].detach().numpy()
+    if livi_results["D_embedding"] is not None:
+        D_context = livi_results["D_embedding"].detach().numpy()
         if args.variance_threshold:
-            variable_factors = np.where(np.var(U_context, axis=0) >= args.variance_threshold)[0]
-            U_context = U_context[:, variable_factors].astype(np.float32)
+            variable_factors = np.where(np.var(D_context, axis=0) >= args.variance_threshold)[0]
+            D_context = D_context[:, variable_factors].astype(np.float32)
         else:
-            U_context = U_context.astype(np.float32)
+            D_context = D_context.astype(np.float32)
 
         colnames_context = (
-            [f"U_Factor{f}" for f in variable_factors + 1]
+            [f"D_Factor{f}" for f in variable_factors + 1]
             if args.variance_threshold
-            else [f"U_Factor{gf}" for gf in range(1, LIVI_model.n_gxc_factors + 1)]
+            else [f"D_Factor{gf}" for gf in range(1, LIVI_model.n_DxC_factors + 1)]
         )
-        U_context = pd.DataFrame(U_context, index=adata.obs.index, columns=colnames_context)
-        U_context = (
-            U_context.merge(
+        D_context = pd.DataFrame(D_context, index=adata.obs.index, columns=colnames_context)
+        D_context = (
+            D_context.merge(
                 adata.obs.filter([args.individual_column]), right_index=True, left_index=True
             )
             .drop_duplicates()
             .set_index(args.individual_column)
         )
         try:
-            U_context.to_csv(
-                os.path.join(output_dir, f"{of_prefix}_U_embedding.tsv"),
+            D_context.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_D_embedding.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
         except OSError:
-            U_context.to_csv(
-                os.path.join(output_dir, "_U_embedding.tsv"),
+            D_context.to_csv(
+                os.path.join(output_dir, "_D_embedding.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
             warnings.warn(
-                "Could not save U embedding dataframe under provided filename (filename too long).\nSaved as '_U_embedding.tsv' instead."
+                "Could not save D embedding dataframe under provided filename (filename too long).\nSaved as '_D_embedding.tsv' instead."
             )
 
-        GxC_decoder = livi_results["GxC_decoder"].detach().numpy()
-        GxC_decoder = pd.DataFrame(
-            GxC_decoder,
+        DxC_decoder = livi_results["DxC_decoder"].detach().numpy()
+        DxC_decoder = pd.DataFrame(
+            DxC_decoder,
             index=adata.var.index,
-            columns=[f"GxC_Factor{f}" for f in range(1, LIVI_model.n_gxc_factors + 1)],
+            columns=[f"DxC_Factor{f}" for f in range(1, LIVI_model.n_DxC_factors + 1)],
         )
         try:
-            GxC_decoder.to_csv(
-                os.path.join(output_dir, f"{of_prefix}_GxC_decoder.tsv"),
+            DxC_decoder.to_csv(
+                os.path.join(output_dir, f"{of_prefix}_DxC_decoder.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
         except OSError:
-            GxC_decoder.to_csv(
-                os.path.join(output_dir, "_GxC_decoder.tsv"),
+            DxC_decoder.to_csv(
+                os.path.join(output_dir, "_DxC_decoder.tsv"),
                 sep="\t",
                 header=True,
                 index=True,
             )
             warnings.warn(
-                "Could not save CxG decoder dataframe under provided filename (filename too long).\nSaved as '_CxG_decoder.tsv' instead."
+                "Could not save DxC decoder dataframe under provided filename (filename too long).\nSaved as '_DxC_decoder.tsv' instead."
             )
 
     else:
-        U_context = None
-        GxC_decoder = None
+        D_context = None
+        DxC_decoder = None
 
     if livi_results["V_embedding"] is not None:
         V_persistent = livi_results["V_embedding"].detach().numpy()
@@ -583,7 +618,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
 
         assignment_matrix = torch.sigmoid(livi_results["assignment_matrix"]).detach().numpy()
         assignment_matrix = pd.DataFrame(
-            assignment_matrix, index=zbase.columns, columns=U_context.columns
+            assignment_matrix, index=cell_state_latent.columns, columns=D_context.columns
         )
         try:
             assignment_matrix.to_csv(
@@ -605,11 +640,12 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
     else:
         assignment_matrix = None
 
+    cell_state_decoder = None
     return (
-        zbase,
+        cell_state_latent,
         cell_state_decoder,
-        U_context,
-        GxC_decoder,
+        D_context,
+        DxC_decoder,
         V_persistent,
         persistent_decoder,
         assignment_matrix,
@@ -635,10 +671,10 @@ def main(args):
     print("\n-------- Performing inference --------\n")
 
     (
-        zbase,
+        cell_state_latent,
         cell_state_decoder,
-        U_context,
-        GxC_decoder,
+        D_context,
+        DxC_decoder,
         V_persistent,
         persistent_decoder,
         A,
@@ -646,11 +682,11 @@ def main(args):
 
     print("\n-------- Running genetic association testing --------\n")
 
-    covariates = set_up_covariates(args, U_context)
+    covariates = set_up_covariates(args, D_context)
 
     start = datetime.now()
     associations = run_LIVI_genetic_association_testing(
-        U_context=U_context,
+        D_context=D_context,
         V_persistent=V_persistent,
         GT_matrix=GT_matrix,
         variant_info=variant_info,
@@ -678,48 +714,71 @@ def main(args):
             f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
         )
 
-    associations_CxG = associations[0] if isinstance(associations, tuple) else associations
+    associations_DxC = associations[0] if isinstance(associations, tuple) else associations
     associations_V = associations[1] if isinstance(associations, tuple) else None
 
-    if U_context is not None and associations_CxG is not None and A is not None:
+    if D_context is not None and associations_DxC is not None and A is not None:
         ## Exceptions for too-long filenames
         try:
-            plot_U_factor_similarity(
-                U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+            plot_D_factor_corr(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 A=A,
-                assign_to_celltypes=True,
-                cell_state_factors=zbase,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
                 savefig=os.path.join(output_dir, of_prefix),
+                format="png",
             )
         except OSError:
-            plot_U_factor_similarity(
-                U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+            plot_D_factor_corr(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
                 A=A,
-                assign_to_celltypes=True,
-                cell_state_factors=zbase,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
                 savefig=os.path.join(output_dir, ""),
+                format="png",
             )
             warnings.warn(
-                "Could not save U factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                "Could not save D factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
             )
 
         try:
-            plot_ID_similarity(
-                U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+            plot_DxC_similarity(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
+                A=A,
+                cell_state_factors=cell_state_latent,
+                cell_metadata=adata.obs,
+                celltype_column=args.celltype_column,
+                donor_column=args.individual_column,
                 savefig=os.path.join(output_dir, of_prefix),
+                format="png",
             )
         except OSError:
-            plot_ID_similarity(
-                U=U_context,
-                associated_factors=associations_CxG.Factor.unique(),
+            plot_DxC_similarity(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
+                A=A,
+                cell_state_factors=cell_state_latent,
+                cell_metadata=adata.obs,
+                celltype_column=args.celltype_column,
+                donor_column=args.individual_column,
                 savefig=os.path.join(output_dir, ""),
+                format="png",
+            )
+            warnings.warn(
+                "Could not save DxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+            )
+        try:
+            plot_donor_similarity(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
+                savefig=os.path.join(output_dir, of_prefix),
+                format="png",
+            )
+        except OSError:
+            plot_donor_similarity(
+                D=D_context,
+                associated_factors=associations_DxC.Factor.unique(),
+                savefig=os.path.join(output_dir, ""),
+                format="png",
             )
             warnings.warn(
                 "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
@@ -729,7 +788,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations_CxG,
+                DxC_effects_LIVI=associations_DxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -741,7 +800,7 @@ def main(args):
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
                 SNP_colname_trans=SNP_colname_trans,
-                GxC_effects_LIVI=associations_CxG,
+                DxC_effects_LIVI=associations_DxC,
                 factor_assignment_matrix=A,
                 known_cis_eQTLs=known_cis_eQTLs,
                 SNP_colname_cis=SNP_colname_cis,
@@ -765,7 +824,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="last",
+        default="best",
         choices=["best", "last"],
         required=True,
         help="Which checkpoint to use; either 'last' or 'best'. ",
@@ -796,6 +855,13 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
+    )
+    parser.add_argument(
+        "--batch_size_inference",
+        "-bs",
+        type=float,
+        default=5e5,
+        help="Number of samples (cells) to use per batch when performing inference. Larger numbers are recommended when memory resources are not limited.",
     )
     parser.add_argument(
         "--covariates",

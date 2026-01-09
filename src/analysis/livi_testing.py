@@ -83,7 +83,6 @@ def lrt_pvalues(null_lml: float, alt_lmls: Union[float, np.ndarray], dof: int = 
     -------
     np.ndarray: Likelihood ratio test p-values.
     """
-    import numpy as np
 
     super_tiny = np.finfo(float).tiny
     tiny = np.finfo(float).eps
@@ -253,13 +252,13 @@ def LMM_test_feature(
     return feature_results
 
 
-def set_up_covariates(args: argparse.Namespace, U_context: pd.DataFrame) -> pd.DataFrame:
+def set_up_covariates(args: argparse.Namespace, D_context: pd.DataFrame) -> pd.DataFrame:
     """Set up sample covariates based on command-line arguments and metadata.
 
     Parameters
     ----------
     args (argparse.Namespace): Parsed command-line arguments.
-    U_context (pd.DataFrame): GxC LIVI factors.
+    D_context (pd.DataFrame): DxC LIVI factors.
 
     Returns
     -------
@@ -267,19 +266,20 @@ def set_up_covariates(args: argparse.Namespace, U_context: pd.DataFrame) -> pd.D
         as fixed effects in the L(M)M.
     """
 
-    covariates = pd.DataFrame(index=U_context.index)
+    covariates = pd.DataFrame(index=D_context.index)
 
     # File with individual level covariates such as aggregated GEX PCs
     covars = pd.read_csv(
         args.covariates, sep="," if ".csv" in args.covariates else "\t", index_col=0
     )
+    covars.index = covars.index.astype(str)
     covariates = covariates.merge(covars, how="left", left_index=True, right_index=True)
 
     return covariates
 
 
 def run_LIVI_genetic_association_testing(
-    U_context: pd.DataFrame,
+    D_context: pd.DataFrame,
     V_persistent: pd.DataFrame,
     GT_matrix: pd.DataFrame,
     output_dir: str,
@@ -302,7 +302,7 @@ def run_LIVI_genetic_association_testing(
 
     Parameters
     ----------
-    U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
+    D_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
     V_persistent (pd.DataFrame): LIVI persistent genetic embedding.
     GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
     output_dir (str): Output directory to save the testing results.
@@ -330,7 +330,7 @@ def run_LIVI_genetic_association_testing(
     if return_associations and fdr_threshold is None:
         fdr_threshold = 0.05
 
-    GT_matrix = GT_matrix.loc[U_context.index]
+    GT_matrix = GT_matrix.loc[D_context.index]
 
     if method in ["limix", "LIMIX", "LMM"]:
         # add intercept
@@ -352,37 +352,37 @@ def run_LIVI_genetic_association_testing(
     else:
         raise ValueError(f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}.")
 
-    if U_context is not None:
+    if D_context is not None:
         if variable_factors is not None:
-            U_context = pd.DataFrame(
-                U_context.to_numpy()[:, variable_factors],
-                index=U_context.index,
+            D_context = pd.DataFrame(
+                D_context.to_numpy()[:, variable_factors],
+                index=D_context.index,
                 columns=[f"CxG_Factor{f+1}" for f in variable_factors],
             )
         elif variance_threshold is not None:
             variable_factors = np.where(
-                np.var(U_context.to_numpy(), axis=0) >= variance_threshold
+                np.var(D_context.to_numpy(), axis=0) >= variance_threshold
             )[0]
-            U_context = pd.DataFrame(
-                U_context.to_numpy()[:, variable_factors],
-                index=U_context.index,
+            D_context = pd.DataFrame(
+                D_context.to_numpy()[:, variable_factors],
+                index=D_context.index,
                 columns=[f"CxG_Factor{f+1}" for f in variable_factors],
             )
         else:
-            U_context = U_context
+            D_context = D_context
 
-        print("\n ----- Running genetic association testing for U_context ----- \n")
+        print("\n ----- Running genetic association testing for D embedding ----- \n")
 
         if method in ["limix", "LIMIX", "LMM"]:
             method_prefix = "LMM"
             results = pd.DataFrame(
                 columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
             )
-            for f in U_context.columns:
+            for f in D_context.columns:
                 print(f"Testing: {f}")
                 results_factor = LMM_test_feature(
                     feature_id=f,
-                    phenotype_df=U_context.T,
+                    phenotype_df=D_context.T,
                     covariates_df=covariates,
                     G=GT_matrix,
                     QS=QS,
@@ -408,7 +408,7 @@ def run_LIVI_genetic_association_testing(
         elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
             method_prefix = "TensorQTL"
             results = run_tensorQTL(
-                phenotype_df=U_context.T,
+                phenotype_df=D_context.T,
                 genotype_df=GT_matrix.T,
                 variant_info=variant_info,
                 covariates_df=covariates,
@@ -420,20 +420,20 @@ def run_LIVI_genetic_association_testing(
 
         try:
             filename = (
-                f"{output_file_prefix}_{method_prefix}_results_Ucontext_variable-factors.tsv"
+                f"{output_file_prefix}_{method_prefix}_results_D-embedding_variable-factors.tsv"
                 if variable_factors or variance_threshold
-                else f"{output_file_prefix}_{method_prefix}_results_Ucontext.tsv"
+                else f"{output_file_prefix}_{method_prefix}_results_D-embedding.tsv"
             )
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         except OSError:
             filename = (
-                f"_{method_prefix}_results_Ucontext_variable-factors.tsv"
+                f"_{method_prefix}_results_D-embedding_variable-factors.tsv"
                 if variable_factors or variance_threshold
-                else f"_{method_prefix}_results_Ucontext.tsv"
+                else f"_{method_prefix}_results_D-embedding.tsv"
             )
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
             warnings.warn(
-                f"Could not save testing results for U under provided filename (filename too long).\nSaved as '{filename}' instead."
+                f"Could not save testing results for D under provided filename (filename too long).\nSaved as '{filename}' instead."
             )
         try:
             qqplot_filename = (
@@ -480,18 +480,18 @@ def run_LIVI_genetic_association_testing(
             )
             try:
                 filename_sign = (
-                    f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext_variable-factors.tsv"
+                    f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext.tsv"
+                    else f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
                 filename_sign = (
-                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext_variable-factors.tsv"
+                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding_variable-factors.tsv"
                     if variable_factors or variance_threshold
-                    else f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Ucontext.tsv"
+                    else f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_D-embedding.tsv"
                 )
                 results_sign_context.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
@@ -503,7 +503,7 @@ def run_LIVI_genetic_association_testing(
         print("----- Done ----- \n")
 
     if V_persistent is not None:
-        print("\n\n ----- Running genetic association testing for V_persistent ----- \n")
+        print("\n\n ----- Running genetic association testing for V embedding ----- \n")
 
         if method in ["limix", "LIMIX", "LMM"]:
             results = pd.DataFrame(
@@ -549,10 +549,10 @@ def run_LIVI_genetic_association_testing(
             )
 
         try:
-            filename = f"{output_file_prefix}_{method_prefix}_results_Vpersistent.tsv"
+            filename = f"{output_file_prefix}_{method_prefix}_results_V-embedding.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
         except OSError:
-            filename = f"_{method_prefix}_results_Vpersistent.tsv"
+            filename = f"_{method_prefix}_results_V-embedding.tsv"
             results.to_csv(os.path.join(output_dir, filename), sep="\t", header=True, index=False)
             warnings.warn(
                 f"Could not save testing results for V under provided filename (filename too long).\nSaved as '{filename}' instead."
@@ -602,13 +602,13 @@ def run_LIVI_genetic_association_testing(
                 results, cut_off=fdr_threshold, method=fdr_method
             )
             try:
-                filename_sign = f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Vpersistent.tsv"
+                filename_sign = f"{output_file_prefix}_{method_prefix}_results_{fdr_method}-{fdr_threshold}_V-embedding.tsv"
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
             except OSError:
                 filename_sign = (
-                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_Vpersistent.tsv"
+                    f"_{method_prefix}_results_{fdr_method}-{fdr_threshold}_V-embedding.tsv"
                 )
                 results_sign_persistent.to_csv(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
@@ -620,7 +620,7 @@ def run_LIVI_genetic_association_testing(
         print("----- Done ----- \n")
 
     if return_associations:
-        if U_context is not None:
+        if D_context is not None:
             if V_persistent is not None:
                 return results_sign_context, results_sign_persistent
             else:
@@ -707,7 +707,7 @@ def validate_and_read_passed_args(
         variant_info (pd.DataFrame): SNP information contained in the .bim or .pvar file, if PLINK genotype matrix is used, otherwise None.
         kinship (pd.DataFrame): Kinship matrix if provided, otherwise None.
         GT_PCs (pd.DataFrame): Dataframe containing genotype principal components if provided, otherwise None.
-        U_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
+        D_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
         V_persistent (pd.DataFrame): LIVI persistent genetic embedding if applicable, otherwise None.
     """
 
@@ -837,22 +837,22 @@ def validate_and_read_passed_args(
         for f in os.listdir(args.model_output_dir)
         if os.path.isfile(os.path.join(args.model_output_dir, f))
     ]
-    U_context = [
+    D_context = [
         re.match("(.*U_embedding.tsv)", f)
         for f in files
         if re.match(".*U_embedding.tsv", f) is not None
     ]
-    if len(U_context) > 0:
-        U_context = U_context[0].groups()[0]
-        U_context = pd.read_csv(
-            os.path.join(args.model_output_dir, U_context), index_col=0, sep="\t"
+    if len(D_context) > 0:
+        D_context = D_context[0].groups()[0]
+        D_context = pd.read_csv(
+            os.path.join(args.model_output_dir, D_context), index_col=0, sep="\t"
         )
-        if U_context.loc[U_context.index.isin(GT_matrix.index)].shape[0] == 0:
+        if D_context.loc[D_context.index.isin(GT_matrix.index)].shape[0] == 0:
             raise ValueError(
                 "Individual IDs in U context do not match individual IDs in the genotype matrix."
             )
     else:
-        U_context = None
+        D_context = None
 
     V_persistent = [
         re.match("(.*V_embedding.tsv)", f)
@@ -879,7 +879,7 @@ def validate_and_read_passed_args(
         variant_info,
         kinship,
         GT_PCs,
-        U_context,
+        D_context,
         V_persistent,
     )
 
@@ -1016,7 +1016,7 @@ if __name__ == "__main__":
     start = datetime.now()
 
     run_LIVI_genetic_association_testing(
-        U_context=U,
+        D_context=U,
         V_persistent=V,
         GT_matrix=GT_matrix,
         variant_info=variant_info,
