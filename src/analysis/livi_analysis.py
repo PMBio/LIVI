@@ -327,9 +327,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         strict=False,
     )
     bs_inference = int(args.batch_size_inference)
-    nbatches = (
-        adata.shape[0] // bs_inference
-    )  # int(5e5)  ### batch_size TO BE ADDED AS A USER-SPECIFIED ARG
+    nbatches = adata.shape[0] // bs_inference
     batch_indices = [
         (int((current_batch - 1) * bs_inference), int(current_batch * bs_inference))
         for current_batch in range(1, nbatches + 1)
