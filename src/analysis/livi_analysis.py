@@ -824,7 +824,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint",
         type=str,
-        default="last",
+        default="best",
         choices=["best", "last"],
         required=True,
         help="Which checkpoint to use; either 'last' or 'best'. ",
