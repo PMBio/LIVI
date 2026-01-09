@@ -754,6 +754,7 @@ def validate_and_read_passed_args(
     assert (
         args.individual_column in metadata.columns
     ), f"`individual_column`: '{args.individual_column}' not in cell metadata columns."
+    metadata[args.individual_column] = metadata[args.individual_column].astype(str)
 
     if args.kinship is not None:
         assert os.path.isfile(args.kinship), "Kinship matrix file not found."
@@ -785,6 +786,7 @@ def validate_and_read_passed_args(
         GT_PCs = pd.read_csv(
             args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
         )  # donors x PCs
+        GT_PCs.index = GT_PCs.index.astype(str)
         GT_PCs = GT_PCs.loc[GT_PCs.index.isin(metadata[args.individual_column].unique())]
         if GT_PCs.shape[0] == 0:
             raise ValueError(
@@ -847,9 +849,10 @@ def validate_and_read_passed_args(
         D_context = pd.read_csv(
             os.path.join(args.model_output_dir, D_context), index_col=0, sep="\t"
         )
+        D_context.index = D_context.index.astype(str)
         if D_context.loc[D_context.index.isin(GT_matrix.index)].shape[0] == 0:
             raise ValueError(
-                "Individual IDs in U context do not match individual IDs in the genotype matrix."
+                "Individual IDs in D embedding do not match individual IDs in the genotype matrix."
             )
     else:
         D_context = None
@@ -864,9 +867,10 @@ def validate_and_read_passed_args(
         V_persistent = pd.read_csv(
             os.path.join(args.model_output_dir, V_persistent), index_col=0, sep="\t"
         )
+        V_persistent.index = V_persistent.index.astype(str)
         if V_persistent.loc[V_persistent.index.isin(GT_matrix.index)].shape[0] == 0:
             raise ValueError(
-                "Individual IDs in V_persistent do not match individual IDs in the genotype matrix."
+                "Individual IDs in V embedding do not match individual IDs in the genotype matrix."
             )
     else:
         V_persistent = None

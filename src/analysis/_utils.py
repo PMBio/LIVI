@@ -491,7 +491,10 @@ def aggregate_cell_counts(
 
     init = True
     for k, v in grouped.groups.items():
-        pseudocell = "__".join(k)
+        if isinstance(k, list):
+            pseudocell = "__".join([str(key) for key in k])
+        else:
+            pseudocell = k
         if init:
             if layer:
                 pseudoexpression_matrix = adata[v].layers[layer].mean(axis=0)  # mean across donors
