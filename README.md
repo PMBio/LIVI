@@ -62,10 +62,20 @@ python src/train.py trainer.max_epochs=100 datamodule.batch_size=528
 
 ### Inference and downstream association testing
 
-The following performs inference on the gene expression data stored in `--adata`, using the "best" model checkpoint stored under `--model_run_dir`. Subsequently, it runs association testing between inferred donor factors and the SNP genotypes in `--genotype_matrix` (prefix of .bed, .bim, .fam PLINK files), while accounting for covariates (e.g. expression PCs) specified under `--covariates` and population structure specified under `--kinship` using a LMM. Output files are saved under `-od`. For a full list of options please run `python src/analysis/livi_analysis.py --h`.
+The following performs inference on the gene expression data stored in `--adata`, using the "best" model checkpoint stored under `--model_run_dir`. Subsequently, it runs association testing between inferred donor factors and the SNP genotypes in `--genotype_matrix` (prefix of .bed, .bim, .fam PLINK files), while accounting for covariates (e.g. expression PCs) specified under `--covariates` and population structure specified under `--kinship` using a LMM. Output files are saved under `-od`. \
+*For a full list of options please run `python src/analysis/livi_analysis.py --h`.*
 
 ```bash
-python src/analysis/livi_analysis.py --model_run_dir /path/to/model/checkpoints/ --adata /path/to/adata.h5ad --celltype_column CELLTYPE_COLUMN --individual_column INDIVIDUAL_COLUMN --covariates /path/to/association/testing/covariate_file.tsv --fdr_threshold FDR --genotype_matrix /path/to/PLINK/genotype/matrix --plink --kinship /path/to/Kinship_matrix.tsv -od /path/to/output/directory
+python src/analysis/livi_analysis.py \
+    --model_run_dir /path/to/model/checkpoints/ \
+    --adata /path/to/adata.h5ad \
+    --celltype_column CELLTYPE_COLUMN \
+    --individual_column INDIVIDUAL_COLUMN \
+    --covariates /path/to/association/testing/covariate_file.tsv \
+    --fdr_threshold FDR \
+    --genotype_matrix /path/to/PLINK/genotype/matrix --plink \
+    --kinship /path/to/Kinship_matrix.tsv \
+    -od /path/to/output/directory
 ```
 
 ### Interpretation of association testing results
