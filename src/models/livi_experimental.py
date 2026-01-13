@@ -1115,7 +1115,7 @@ class LIVI_train_Dis_with_UV_WO_freezing(LIVI_WO_freezing):
             )
 
 
-class LIVI_cis_efficient(LIVI):
+class LIVI_cis_efficient(pl.LightningModule):
     """LIVI model accounting for cell-state-specific cis genetic effects in a memory efficint
     manner."""
 
@@ -1139,25 +1139,7 @@ class LIVI_cis_efficient(LIVI):
         genetics_seed: Optional[int] = None,
         initialise_training_mode: bool = True,
     ):
-        super().__init__(
-            x_dim=x_dim,
-            z_dim=z_dim,
-            y_dim=y_dim,
-            n_DxC_factors=n_DxC_factors,
-            n_persistent_factors=n_persistent_factors,
-            n_cis_snps=n_cis_eqtls,
-            encoder_hidden_dims=encoder_hidden_dims,
-            learning_rate=learning_rate,
-            warmup_epochs_vae=warmup_epochs_vae,
-            warmup_epochs_G=warmup_epochs_G,
-            covariates_dims=covariates_dims,
-            l1_weight=l1_weight,
-            A_weight=A_weight,
-            batch_norm_decoder=batch_norm_decoder,
-            device=device,
-            genetics_seed=genetics_seed,
-            initialise_training_mode=False,
-        )
+        super().__init__()
 
         self.save_hyperparameters()
 
@@ -1209,8 +1191,7 @@ class LIVI_cis_efficient(LIVI):
             torch.randn(z_dim, n_DxC_factors, device=device, generator=self.G_gen)
         )
         self.D_context = nn.Embedding(y_dim, n_DxC_factors, device=device)
-        if self.hparams.genetics_seed is not None:
-            nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
+        nn.init.normal_(self.D_context.weight.data, mean=0.0, std=1.0, generator=self.G_gen)
 
         if n_persistent_factors != 0:
             self.V_persistent = nn.Embedding(y_dim, n_persistent_factors, device=device)
@@ -1233,6 +1214,11 @@ class LIVI_cis_efficient(LIVI):
 
         if initialise_training_mode:
             self.initialise_model()
+
+    def initialise_model(self):
+        self.set_pretrain_mode(self.pretrain_mode)
+        self.set_train_V_mode(self.train_V_mode)
+        self.set_train_DxC_mode(self.train_DxC_mode)
 
     def prepare_batch(self, batch):
         x = batch["x"]
@@ -1348,20 +1334,6 @@ class LIVI_cis_efficient(LIVI):
         """Performs a single training or validation step."""
         x, y, covariates, size_factor, snp_gene_mask, cell_snp_mask = self.prepare_batch(batch)
 
-        # # First-time setup: extract nonzero indices and initialize SNP_gene_effect
-        # # if not hasattr(self, "SNP_gene_effect") or self.SNP_gene_effect is None:
-        # if self.SNP_gene_effect.numel() == 0:
-        #     print("Initializing SNP_gene_effect")
-        #     self.nonzero_indices = snp_gene_mask.nonzero(as_tuple=True)
-        #     num_nonzero = self.nonzero_indices[0].numel()
-        #     self.SNP_gene_effect = nn.Parameter(
-        #         torch.randn(self.z_dim, num_nonzero).to(self.hparams.device),
-        #         requires_grad = self.train_DxC_mode
-        #     )
-        #     self.register_parameter("cis_effect", self.SNP_gene_effect)
-        #     # Reinitialize optimizer to include SNP_gene_effect
-        #     self.reinitialize_optimizer()
-
         optim_vae = self.optimizers()
 
         z_dist = self(x)
@@ -1401,6 +1373,39 @@ class LIVI_cis_efficient(LIVI):
             logger=True,
         )
 
+    def training_step(self, batch, batch_idx):
+        """Performs a single training step."""
+        return self.step(batch, batch_idx, mode="train")
+
+    def validation_step(self, batch, batch_idx):
+        """Performs a single validation step."""
+        return self.step(batch, batch_idx, mode="val")
+
+    def set_pretrain_mode(self, mode: bool):
+        """Set VAE pretrain mode.
+
+        If True, discriminator and genetic embeddings are not optimised.
+        """
+        self.pretrain_mode = mode
+        self.decoder.pretrain_VAE = mode
+        if mode:
+            # freeze parameters
+            self.set_train_DxC_mode(False)
+            self.set_train_V_mode(False)
+
+    def set_train_V_mode(self, mode: bool):
+        self.train_V_mode = mode
+        self.decoder.train_V = mode
+        if mode:
+            # Train V
+            if self.n_persistent_factors != 0:
+                self.V_persistent.requires_grad_(True)
+                self.decoder.persistent_decoder.requires_grad_(True)
+        else:
+            if self.n_persistent_factors != 0:
+                self.V_persistent.requires_grad_(False)
+                self.decoder.persistent_decoder.requires_grad_(False)
+
     def set_train_DxC_mode(self, mode: bool):
         self.train_DxC_mode = mode
         self.decoder.train_DxC = mode
@@ -1418,6 +1423,71 @@ class LIVI_cis_efficient(LIVI):
                 self.A.requires_grad_(False)
             if self.hparams.n_cis_eqtls != 0:
                 self.SNP_gene_effect.requires_grad_(False)
+
+    def freeze_vae(self, mode: bool):
+        """Freezes VAE and covariate embeddings parameters, after the number of VAE and
+        discriminator warm-up epochs has been completed."""
+
+        self.frozen = mode
+        if mode:
+            # freeze VAE etc.
+            self.encoder.requires_grad_(False)
+            self.decoder.mean.requires_grad_(False)
+            # # Retrain total_count
+            self.decoder.log_total_count.requires_grad_(False)
+            # freeze covariate embeddings, if applicable
+            if self.covariate_effect is not None:
+                self.covariate_effect.requires_grad_(False)
+        else:
+            # train VAE
+            self.encoder.requires_grad_(True)
+            self.decoder.mean.requires_grad_(True)
+            self.decoder.log_total_count.requires_grad_(True)
+            # train covariate embeddings, if applicable
+            if self.covariate_effect is not None:
+                self.covariate_effect.requires_grad_(True)
+            # freeze genetic embeddings
+            self.set_train_DxC_mode(False)
+            self.set_train_V_mode(False)
+
+    def on_train_epoch_end(self):
+        """After each epoch checks whether the number of warm-up epochs for the VAE, discriminator
+        and persistent G has been reached."""
+        print(f"VAE frozen: {self.frozen}")
+        print(f"Training V: {self.train_V_mode}")
+        print(f"Training DxC: {self.train_DxC_mode}")
+        print(f"DxC decoder requires grad: {self.decoder.DxC_decoder[0].weight.requires_grad}")
+        if self.current_epoch == self.hparams.warmup_epochs_vae:
+            self.set_pretrain_mode(False)
+            print("VAE pretraining completed.")
+            self.freeze_vae(True)  # Freeze VAE when starting training V
+            print("Freeze VAE parameters.")
+            self.set_train_V_mode(True)
+            print("Start training V.")
+
+        if self.current_epoch == self.hparams.warmup_epochs_vae + self.warmup_epochs_G:
+            # self.freeze_vae(True) # Freeze VAE after starting training V
+            # self.set_train_V_mode(False) # Freeze V
+            print("Pretraining completed.")
+            print("Start learning DxC effects.")
+            self.set_train_DxC_mode(True)
+
+    def on_save_checkpoint(self, checkpoint: dict):
+        # Save model's pretraining and frozen state
+        attributes_to_save = {
+            k: v
+            for k, v in self.__dict__.items()
+            if not k.startswith("_")
+            and k not in list(self.__dict__["_hparams"].keys())
+            and "G_gen" not in k
+        }
+        checkpoint["model_attributes"] = attributes_to_save
+
+    def on_load_checkpoint(self, checkpoint: dict):
+        # Restore model's attributes
+        model_attributes = checkpoint.get("model_attributes", {})
+        for attr_name, attr_value in model_attributes.items():
+            setattr(self, attr_name, attr_value)
 
     def predict(self, x, y):
         """Model inference. Get latent space and individual embeddings for the input data.
@@ -1478,16 +1548,25 @@ class LIVI_cis_efficient(LIVI):
             "cis_SNP_effect": cell_state_cis_effect,
         }
 
-    # def reinitialize_optimizer(self):
-    #     """Reinitialize optimizer dynamically to include additional model parameters."""
-    #     if self.trainer is not None:
-    #         self.trainer.optimizers = [self.configure_optimizers()]
-
     def configure_optimizers(self):
         """Configures optimizer."""
 
+        params = [
+            {"params": self.encoder.parameters()},
+            {"params": self.decoder.parameters()},
+        ]
+        if self.covariate_effect is not None:
+            params.append({"params": self.covariate_effect.parameters()})
+        if self.n_DxC_factors != 0:
+            params.append({"params": self.D_context.parameters()})
+            params.append({"params": self.A})
+        if self.n_persistent_factors != 0:
+            params.append({"params": self.V_persistent.parameters()})
+        if self.hparams.n_cis_snps != 0:
+            params.append({"params": self.SNP_gene_effect})
+
         optim_vae = torch.optim.Adam(
-            self.parameters(),
+            params,
             lr=self.hparams.learning_rate,
         )
 
