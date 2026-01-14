@@ -1243,6 +1243,14 @@ class LIVI_cis_efficient(pl.LightningModule):
 
         return x, y, covariates, size_factor, known_cis_associations, cell_gt
 
+    def forward(self, x: torch.Tensor):
+        """Encodes data into cell-state latent space."""
+        return self.encoder(x)
+
+    def get_prior(self) -> tdist.Distribution:
+        """Constructs zbase prior for given batch shape."""
+        return tdist.Independent(tdist.Normal(self.z_prior_loc, self.z_prior_scale), 1)
+
     def compute_elbo(
         self,
         z_dist: torch.distributions.Distribution,
