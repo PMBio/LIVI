@@ -782,33 +782,34 @@ def main(args):
                 "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
             )
 
-        try:
-            overlap_with_known_eQTLs(
-                known_trans_eQTLs=known_trans_eQTLs,
-                SNP_colname_trans=SNP_colname_trans,
-                DxC_effects_LIVI=associations_DxC,
-                factor_assignment_matrix=A,
-                known_cis_eQTLs=known_cis_eQTLs,
-                SNP_colname_cis=SNP_colname_cis,
-                persistent_effects_LIVI=associations_V,
-                savefig=os.path.join(output_dir, of_prefix),
-                format=None,
-            )
-        except OSError as err:
-            overlap_with_known_eQTLs(
-                known_trans_eQTLs=known_trans_eQTLs,
-                SNP_colname_trans=SNP_colname_trans,
-                DxC_effects_LIVI=associations_DxC,
-                factor_assignment_matrix=A,
-                known_cis_eQTLs=known_cis_eQTLs,
-                SNP_colname_cis=SNP_colname_cis,
-                persistent_effects_LIVI=associations_V,
-                savefig=os.path.join(output_dir, ""),
-                format=None,
-            )
-            warnings.warn(
-                "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
-            )
+        if known_trans_eQTLs is not None:
+            try:
+                overlap_with_known_eQTLs(
+                    known_trans_eQTLs=known_trans_eQTLs,
+                    SNP_colname_trans=SNP_colname_trans,
+                    DxC_effects_LIVI=associations_DxC,
+                    factor_assignment_matrix=A,
+                    known_cis_eQTLs=known_cis_eQTLs,
+                    SNP_colname_cis=SNP_colname_cis,
+                    persistent_effects_LIVI=associations_V,
+                    savefig=os.path.join(output_dir, of_prefix),
+                    format=None,
+                )
+            except OSError as err:
+                overlap_with_known_eQTLs(
+                    known_trans_eQTLs=known_trans_eQTLs,
+                    SNP_colname_trans=SNP_colname_trans,
+                    DxC_effects_LIVI=associations_DxC,
+                    factor_assignment_matrix=A,
+                    known_cis_eQTLs=known_cis_eQTLs,
+                    SNP_colname_cis=SNP_colname_cis,
+                    persistent_effects_LIVI=associations_V,
+                    savefig=os.path.join(output_dir, ""),
+                    format=None,
+                )
+                warnings.warn(
+                    "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+                )
 
 
 if __name__ == "__main__":
