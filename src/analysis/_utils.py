@@ -403,7 +403,7 @@ def find_trans_fSNPs(
             assert (
                 start_col in gene_metadata.columns
             ), "`gene_start` column missing from gene metadata"
-    gene_metadata[start_col] = gene_metadata[start_col].astype(int)
+    gene_metadata[start_col] = gene_metadata[start_col].astype(np.float64)
 
     end_col = "gene_end"
     try:
@@ -415,11 +415,11 @@ def find_trans_fSNPs(
         except KeyError:
             end_col = "geneend"
             assert end_col in gene_metadata.columns, "`gene_end` column missing from gene metadata"
-    gene_metadata[end_col] = gene_metadata[end_col].astype(int)
+    gene_metadata[end_col] = gene_metadata[end_col].astype(np.float64)
 
     if any([c not in DxC_effects.columns for c in ["SNP_chrom", "SNP_pos"]]):
         DxC_effects[["SNP_chrom", "SNP_pos"]] = DxC_effects.SNP_id.str.split(":", expand=True)
-        DxC_effects.SNP_pos = DxC_effects.SNP_pos.astype(int)
+        DxC_effects.SNP_pos = DxC_effects.SNP_pos.astype(np.float64)
     DxC_effects = DxC_effects.assign(
         upstream_5MB=DxC_effects.apply(lambda x: max(0, x.SNP_pos - 5000000), axis=1),
         downstream_5MB=DxC_effects.apply(lambda x: x.SNP_pos + 5000000, axis=1),
