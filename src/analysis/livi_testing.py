@@ -1012,15 +1012,15 @@ if __name__ == "__main__":
         variant_info,
         kinship,
         gt_pcs,
-        U,
+        D,
         V,
     ) = validate_and_read_passed_args(args)
-    covariates = set_up_covariates(args, U)
+    covariates = set_up_covariates(args, D)
 
     start = datetime.now()
 
     run_LIVI_genetic_association_testing(
-        D_context=U,
+        D_context=D,
         V_persistent=V,
         GT_matrix=GT_matrix,
         variant_info=variant_info,
