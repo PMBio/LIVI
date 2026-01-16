@@ -871,15 +871,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--method",
         type=str,
-        default="tensorQTL",
-        choices=["tensorQTL", "LIMIX"],
-        help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
+        default="TensorQTL",
+        choices=["TensorQTL", "LIMIX", "LMM"],
+        help="Whether to use LIMIX/LMM or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
     )
     parser.add_argument(
         "--plink",
         action="store_true",
         default=False,
-        help="If PLINK genotype files (bed, bim, fam if `method` is LIMIX, or pgen, pvar, psam if `method` is tensorQTL) are provided instead of a GT matrix in .tsv format.",
+        help="If PLINK genotype files (bed, bim, fam if `method` is LIMIX/LMM, or pgen, pvar, psam if `method` is TensorQTL) are provided instead of a GT matrix in .tsv format.",
     )
     parser.add_argument(
         "--kinship",

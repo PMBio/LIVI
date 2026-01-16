@@ -74,6 +74,7 @@ python src/analysis/livi_analysis.py \
     --covariates /path/to/association/testing/covariate_file.tsv \
     --fdr_threshold FDR \
     --genotype_matrix /path/to/PLINK/genotype/matrix --plink \
+    --method LMM \
     --kinship /path/to/Kinship_matrix.tsv \
     -od /path/to/output/directory
 ```
