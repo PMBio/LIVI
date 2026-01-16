@@ -1039,7 +1039,7 @@ def main(args):
             return_associations=True,
         )
 
-        if not args.prs:
+        if not args.prs and known_trans_eQTLs:
             corr = str(args.factor_correlation_theshold)
             overlap_with_known_eQTLs(
                 known_trans_eQTLs=known_trans_eQTLs,
