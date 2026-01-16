@@ -32,7 +32,7 @@ from sklearn.preprocessing import StandardScaler
 from statsmodels.stats import multitest
 from tensorqtl import pgen, trans
 
-from src.analysis._utils import assign_U_to_celltype, calculate_DxC_effect
+from src.analysis._utils import assign_D_to_celltype, calculate_DxC_effect
 
 # import src.analysis.livi_testing as testing
 from src.analysis.livi_testing import (
@@ -433,12 +433,14 @@ def main(args):
                 files_i = [
                     f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
                 ]
-            U_associations = [
+            D_associations = [
                 re.match(
-                    f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f
+                    f"(.*PRS_{args.testing_method}_results_{args.fdr_method}*_D-embedding.tsv)", f
                 )  # assumes same fdr method was used for individual run associations
                 for f in files_i
-                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f)
+                if re.match(
+                    f"(.*PRS_{args.testing_method}_results_{args.fdr_method}*_D-embedding.tsv)", f
+                )
                 is not None
             ]
         else:
@@ -446,20 +448,25 @@ def main(args):
             files_i = [
                 f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
             ]
-            U_associations = [
-                re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f)
+            D_associations = [
+                re.match(
+                    f"(.*{args.testing_method}_results_{args.fdr_method}.*_D-embedding.tsv)", f
+                )
                 for f in files_i
-                if re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f) is not None
+                if re.match(
+                    f"(.*{args.testing_method}_results_{args.fdr_method}.*_D-embedding.tsv)", f
+                )
+                is not None
                 and "PRS" not in f
             ]
-        if len(U_associations) > 0:
-            if len(U_associations) > 1:
+        if len(D_associations) > 0:
+            if len(D_associations) > 1:
                 warnings.warn(
-                    f"Found more than one file with DxC associations for {model_replicates[i]}. Using file: {U_associations[0].groups()[0]}."
+                    f"Found more than one file with DxC associations for {model_replicates[i]}. Using file: {D_associations[0].groups()[0]}."
                 )
-            U_associations = U_associations[0].groups()[0]
+            D_associations = D_associations[0].groups()[0]
             seed_associations = pd.read_csv(
-                os.path.join(path2file, U_associations), index_col=False, sep="\t"
+                os.path.join(path2file, D_associations), index_col=False, sep="\t"
             )
             seed_associations = seed_associations.assign(
                 random_seed=[gseed[i]] * seed_associations.shape[0]
@@ -495,7 +502,7 @@ def main(args):
         transparent=True,
     )
     plt.savefig(
-        os.path.join(output_dir, "N-unique-fSNPs_vs_N-runs.svg"),
+        os.path.join(output_dir, "N-unique-fSNPs_vs_N-runs.pdf"),
         dpi=300,
         bbox_inches="tight",
         transparent=True,
@@ -582,14 +589,14 @@ def main(args):
         intersect_snps_one &= set(snps_one)
 
     print(
-        f"Number of common fSNPs across all runs associated only with one U factor: {len(intersect_snps_one)}"
+        f"Number of common fSNPs across all runs associated only with one D factor: {len(intersect_snps_one)}"
     )  # used to judge concordance at the single-cell level
 
     print(
         "------------  Assessing celltype assignment concordance between different random seeds  ------------"
     )
 
-    seeds_U_ct = {}
+    seeds_D_ct = {}
     seeds_DxC_effects = []
     for i in range(len(model_replicates)):
         livi_associations = associations_all_seeds.loc[
@@ -615,7 +622,7 @@ def main(args):
             sep="\t",
         )
 
-        U_ct_dict = assign_U_to_celltype(
+        D_ct_dict = assign_D_to_celltype(
             cell_state_latent=zbase,
             A=seed_A,
             cell_metadata=adata.obs,
@@ -624,7 +631,7 @@ def main(args):
             assignment_threshold=0.8,
         )
 
-        seeds_U_ct[gseed[i]] = U_ct_dict
+        seeds_D_ct[gseed[i]] = D_ct_dict
 
         livi_associations = livi_associations.loc[
             livi_associations.SNP_id.isin(intersect_snps_one)
@@ -641,11 +648,11 @@ def main(args):
         DxC_effects_all_snps = pd.concat(DxC_effects_all_snps, axis=1, ignore_index=False)
         seeds_DxC_effects.append(DxC_effects_all_snps)
 
-    seeds_U_ct_df = pd.DataFrame.from_dict(seeds_U_ct, orient="index")
+    seeds_D_ct_df = pd.DataFrame.from_dict(seeds_D_ct, orient="index")
 
     associations_all_seeds = associations_all_seeds.assign(
         Celltypes=associations_all_seeds.apply(
-            lambda x: seeds_U_ct_df.loc[x.random_seed, x.Factor], axis=1
+            lambda x: seeds_D_ct_df.loc[x.random_seed, x.Factor], axis=1
         )
     )
     ## N_celltypes should be either 1 or None, after changing the U to celltype assignment approach
@@ -698,7 +705,7 @@ def main(args):
         filename = filename.replace(".png", "_PRS.png")
     plt.savefig(os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=True)
     plt.savefig(
-        os.path.join(output_dir, filename.replace("png", "svg")),
+        os.path.join(output_dir, filename.replace("png", "pdf")),
         dpi=400,
         bbox_inches="tight",
         transparent=True,
@@ -848,7 +855,7 @@ def main(args):
         transparent=True,
     )
     plt.savefig(
-        os.path.join(output_dir, filename.replace("Sankey", "histogram").replace("png", "svg")),
+        os.path.join(output_dir, filename.replace("Sankey", "histogram").replace("png", "pdf")),
         dpi=400,
         bbox_inches="tight",
         transparent=True,
@@ -930,7 +937,7 @@ def main(args):
         os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
     )
     plt.savefig(
-        os.path.join(output_dir, filename.replace("png", "svg")),
+        os.path.join(output_dir, filename.replace("png", "pdf")),
         dpi=400,
         bbox_inches="tight",
         transparent=True,
@@ -942,19 +949,19 @@ def main(args):
             "------------ Calculate correlations between factors from different runs  ------------"
         )
         ### Calculate correlations between factors, then combine highly correalted factors (average value) to "robust factors" and test those
-        seeds_U = []
+        seeds_D = []
         for i in range(len(model_replicates)):
-            seed_U = pd.read_csv(
+            seed_D = pd.read_csv(
                 os.path.join(
-                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_U_embedding.tsv"
+                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_D_embedding.tsv"
                 ),
                 index_col=0,
                 sep="\t",
             )
-            seed_U = seed_U.assign(random_seed=[gseed[i]] * seed_U.shape[0])
-            seeds_U.append(seed_U)
+            seed_D = seed_D.assign(random_seed=[gseed[i]] * seed_D.shape[0])
+            seeds_D.append(seed_D)
 
-        # robust_factors = aggregate_correlated_factors_across_runs(seeds_U, args.factor_correlation_theshold, factor_correlations=None)
+        # robust_factors = aggregate_correlated_factors_across_runs(seeds_D, args.factor_correlation_theshold, factor_correlations=None)
 
         #### Calculate correlations based on DxC decoder
         seeds_DxC_decoder = []
@@ -972,10 +979,10 @@ def main(args):
         factor_correlations = correlate_factors_across_runs(seeds_DxC_decoder)
 
         robust_factors = aggregate_correlated_factors_across_runs(
-            seeds_U, args.factor_correlation_theshold, factor_correlations=factor_correlations
+            seeds_D, args.factor_correlation_theshold, factor_correlations=factor_correlations
         )
         robust_factors.to_csv(
-            os.path.join(output_dir, "Robust_aggregated_U_factors.tsv"),
+            os.path.join(output_dir, "Robust_aggregated_D_factors.tsv"),
             sep="\t",
             header=True,
             index=True,
@@ -985,7 +992,7 @@ def main(args):
             [
                 loadings.rename(
                     columns=dict(
-                        zip(loadings.columns, [f.replace("DxC", "U") for f in loadings.columns])
+                        zip(loadings.columns, [f.replace("DxC", "D") for f in loadings.columns])
                     )
                 )
                 for loadings in seeds_DxC_decoder
@@ -1101,7 +1108,7 @@ if __name__ == "__main__":
         "--testing_method",
         type=str,
         default=False,
-        choices=["tensorQTL", "LIMIX"],
+        choices=["TensorQTL", "LIMIX"],
         help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
     )
     parser.add_argument(
