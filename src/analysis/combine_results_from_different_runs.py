@@ -241,6 +241,7 @@ def validate_and_read_passed_args(
         assert (
             args.individual_column in adata.obs.columns
         ), f"`individual_column`: '{args.individual_column}' not in adata.obs columns."
+        adata.obs[args.individual_column] = adata.obs[args.individual_column].astype(str)
     if args.batch_column:
         assert (
             args.batch_column in adata.obs.columns
@@ -257,6 +258,7 @@ def validate_and_read_passed_args(
                     f"Kinship matrix must be either .tsv or .csv. File format provided: {ext}."
                 )
             kinship = pd.read_csv(args.kinship, index_col=0, sep="\t" if ext == ".tsv" else ",")
+            kinship.index = kinship.index.astype(str)
             kinship = kinship.loc[
                 adata.obs[args.individual_column].unique(),
                 adata.obs[args.individual_column].unique(),
@@ -280,6 +282,7 @@ def validate_and_read_passed_args(
             GT_PCs = pd.read_csv(
                 args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
             )  # donors x PCs
+            GT_PCs.index = GT_PCs.index.astype(str)
             GT_PCs = GT_PCs.loc[GT_PCs.index.isin(adata.obs[args.individual_column].unique())]
             if GT_PCs.shape[0] == 0:
                 raise ValueError(

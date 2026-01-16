@@ -169,6 +169,7 @@ def validate_and_read_passed_args(
                 f"Kinship matrix must be either .tsv or .csv. File format provided: {ext}."
             )
         kinship = pd.read_csv(args.kinship, index_col=0, sep="\t" if ext == ".tsv" else ",")
+        kinship.index = kinship.index.astype(str)
         kinship = kinship.loc[
             adata.obs[args.individual_column].unique(), adata.obs[args.individual_column].unique()
         ]
