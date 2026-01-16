@@ -332,7 +332,7 @@ def run_LIVI_genetic_association_testing(
 
     GT_matrix = GT_matrix.loc[D_context.index]
 
-    if method in ["limix", "LIMIX", "LMM"]:
+    if method in ["LIMIX", "LMM"]:
         # add intercept
         covariates["intercept"] = 1.0
 
@@ -347,7 +347,7 @@ def run_LIVI_genetic_association_testing(
             kinship_mat = np.dot(GT_matrix.to_numpy(), GT_matrix.T.to_numpy())
             kinship_mat = normalise_covariance(kinship_mat)
         QS = economic_qs(kinship_mat)
-    elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+    elif method == "TensorQTL":
         covariates = covariates.merge(genotype_pcs, how="left", right_index=True, left_index=True)
     else:
         raise ValueError(f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}.")
@@ -373,7 +373,7 @@ def run_LIVI_genetic_association_testing(
 
         print("\n ----- Running genetic association testing for D embedding ----- \n")
 
-        if method in ["limix", "LIMIX", "LMM"]:
+        if method in ["LIMIX", "LMM"]:
             method_prefix = "LMM"
             results = pd.DataFrame(
                 columns=["Factor", "SNP_id", "effect_size", "effect_size_se", "p_value"]
@@ -405,7 +405,7 @@ def run_LIVI_genetic_association_testing(
                     on="SNP_id",
                     how="left",
                 )
-        elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        elif method == "TensorQTL":
             method_prefix = "TensorQTL"
             results = run_tensorQTL(
                 phenotype_df=D_context.T,
@@ -536,7 +536,7 @@ def run_LIVI_genetic_association_testing(
                     on="SNP_id",
                     how="left",
                 )
-        elif method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+        elif args.method == "TensorQTL":
             results = run_tensorQTL(
                 phenotype_df=V_persistent.T,
                 genotype_df=GT_matrix.T,
@@ -714,8 +714,8 @@ def validate_and_read_passed_args(
     assert os.path.isdir(args.model_output_dir), "Model directory not found."
     assert os.path.isfile(args.cell_metadata_file), "Cell metadata file not found."
     assert os.path.isfile(args.covariates), "Covariates file not found."
-    # assert args.method in ["limix", "LIMIX", "LMM", "tensorQTL", "TensorQTL", "tensorqtl"], f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}."
-    if args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+
+    if args.method == "TensorQTL":
         assert (
             args.genotype_pcs is not None
         ), "Genotype PCs are required when testing using TensorQTL."
@@ -723,7 +723,7 @@ def validate_and_read_passed_args(
             warnings.warn(
                 "Testing method is TensorQTL, but no GPU is available. This will slow down performance."
             )
-    if args.method in ["limix", "LIMIX", "LMM"]:
+    if args.method in ["LIMIX", "LMM"]:
         assert args.kinship is not None, "Kinship matrix required with testing using LIMIX-QTL."
 
     if args.output_dir:
@@ -797,12 +797,12 @@ def validate_and_read_passed_args(
     else:
         GT_PCs = None
 
-    if args.plink and args.method in ["limix", "LIMIX", "LMM"]:
+    if args.plink and args.method in ["LIMIX", "LMM"]:
         variant_info, fam, bed = read_plink(args.genotype_matrix, verbose=False)
         GT_matrix = pd.DataFrame(
             bed.compute(), index=variant_info.snp, columns=fam.iid
         )  # SNPs x donors
-    elif args.plink and args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
+    elif args.plink and args.method == "TensorQTL":
         pgr = pgen.PgenReader(args.genotype_matrix)
         GT_matrix = pgr.load_genotypes()  # SNPs x donors
         variant_info = pgr.variant_df
@@ -927,27 +927,27 @@ if __name__ == "__main__":
         "--method",
         type=str,
         default="TensorQTL",
-        choices=["TensorQTL", "LIMIX"],
-        help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
+        choices=["TensorQTL", "LIMIX", "LMM"],
+        help="Whether to use LIMIX/LMM or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
     )
     parser.add_argument(
         "--plink",
         action="store_true",
         default=False,
-        help="If PLINK genotype files (bim, bed, fam if `method` is LIMIX, or pgen, pvar, psam if `method` is tensorQTL) are provided instead of a GT matrix in .tsv format.",
+        help="If PLINK genotype files (bim, bed, fam if `method` is LIMIX/LMM, or pgen, pvar, psam if `method` is TensorQTL) are provided instead of a GT matrix in .tsv format.",
     )
     parser.add_argument(
         "--kinship",
         "-K",
         type=str,
-        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing. Required when testing_method == 'LIMIX'",
+        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing. Required when testing_method == 'LMM'",
     )
     parser.add_argument(
         "--genotype_pcs",
         "-GT_pcs",
         default=None,
         type=str,
-        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing. Required when testing_method == 'tensorQTL'",
+        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing. Required when testing_method == 'TensorQTL'",
     )
     parser.add_argument(
         "--n_gt_pcs",
