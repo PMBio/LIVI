@@ -435,10 +435,12 @@ def main(args):
                 ]
             D_associations = [
                 re.match(
-                    f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f
+                    f"(.*PRS_{args.testing_method}_results_{args.fdr_method}*_D-embedding.tsv)", f
                 )  # assumes same fdr method was used for individual run associations
                 for f in files_i
-                if re.match(f"(.*PRS_LMM_results_{args.fdr_method}*_D-embedding.tsv)", f)
+                if re.match(
+                    f"(.*PRS_{args.testing_method}_results_{args.fdr_method}*_D-embedding.tsv)", f
+                )
                 is not None
             ]
         else:
@@ -447,9 +449,14 @@ def main(args):
                 f for f in os.listdir(path2file) if os.path.isfile(os.path.join(path2file, f))
             ]
             D_associations = [
-                re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f)
+                re.match(
+                    f"(.*{args.testing_method}_results_{args.fdr_method}.*_D-embedding.tsv)", f
+                )
                 for f in files_i
-                if re.match(f"(.*LMM_results_{args.fdr_method}.*_D-embedding.tsv)", f) is not None
+                if re.match(
+                    f"(.*{args.testing_method}_results_{args.fdr_method}.*_D-embedding.tsv)", f
+                )
+                is not None
                 and "PRS" not in f
             ]
         if len(D_associations) > 0:
@@ -698,7 +705,7 @@ def main(args):
         filename = filename.replace(".png", "_PRS.png")
     plt.savefig(os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=True)
     plt.savefig(
-        os.path.join(output_dir, filename.replace("png", "svg")),
+        os.path.join(output_dir, filename.replace("png", "pdf")),
         dpi=400,
         bbox_inches="tight",
         transparent=True,
@@ -848,7 +855,7 @@ def main(args):
         transparent=True,
     )
     plt.savefig(
-        os.path.join(output_dir, filename.replace("Sankey", "histogram").replace("png", "svg")),
+        os.path.join(output_dir, filename.replace("Sankey", "histogram").replace("png", "pdf")),
         dpi=400,
         bbox_inches="tight",
         transparent=True,
@@ -930,7 +937,7 @@ def main(args):
         os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
     )
     plt.savefig(
-        os.path.join(output_dir, filename.replace("png", "svg")),
+        os.path.join(output_dir, filename.replace("png", "pdf")),
         dpi=400,
         bbox_inches="tight",
         transparent=True,
@@ -942,19 +949,19 @@ def main(args):
             "------------ Calculate correlations between factors from different runs  ------------"
         )
         ### Calculate correlations between factors, then combine highly correalted factors (average value) to "robust factors" and test those
-        seeds_U = []
+        seeds_D = []
         for i in range(len(model_replicates)):
-            seed_U = pd.read_csv(
+            seed_D = pd.read_csv(
                 os.path.join(
-                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_U_embedding.tsv"
+                    args.results_dir, model_replicates[i], f"{model_replicates[i]}_D_embedding.tsv"
                 ),
                 index_col=0,
                 sep="\t",
             )
-            seed_U = seed_U.assign(random_seed=[gseed[i]] * seed_U.shape[0])
-            seeds_U.append(seed_U)
+            seed_D = seed_D.assign(random_seed=[gseed[i]] * seed_D.shape[0])
+            seeds_D.append(seed_D)
 
-        # robust_factors = aggregate_correlated_factors_across_runs(seeds_U, args.factor_correlation_theshold, factor_correlations=None)
+        # robust_factors = aggregate_correlated_factors_across_runs(seeds_D, args.factor_correlation_theshold, factor_correlations=None)
 
         #### Calculate correlations based on DxC decoder
         seeds_DxC_decoder = []
@@ -972,10 +979,10 @@ def main(args):
         factor_correlations = correlate_factors_across_runs(seeds_DxC_decoder)
 
         robust_factors = aggregate_correlated_factors_across_runs(
-            seeds_U, args.factor_correlation_theshold, factor_correlations=factor_correlations
+            seeds_D, args.factor_correlation_theshold, factor_correlations=factor_correlations
         )
         robust_factors.to_csv(
-            os.path.join(output_dir, "Robust_aggregated_U_factors.tsv"),
+            os.path.join(output_dir, "Robust_aggregated_D_factors.tsv"),
             sep="\t",
             header=True,
             index=True,
@@ -985,7 +992,7 @@ def main(args):
             [
                 loadings.rename(
                     columns=dict(
-                        zip(loadings.columns, [f.replace("DxC", "U") for f in loadings.columns])
+                        zip(loadings.columns, [f.replace("DxC", "D") for f in loadings.columns])
                     )
                 )
                 for loadings in seeds_DxC_decoder
@@ -1101,7 +1108,7 @@ if __name__ == "__main__":
         "--testing_method",
         type=str,
         default=False,
-        choices=["tensorQTL", "LIMIX"],
+        choices=["TensorQTL", "LIMIX"],
         help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
     )
     parser.add_argument(
