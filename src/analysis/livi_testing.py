@@ -357,7 +357,7 @@ def run_LIVI_genetic_association_testing(
             D_context = pd.DataFrame(
                 D_context.to_numpy()[:, variable_factors],
                 index=D_context.index,
-                columns=[f"CxG_Factor{f+1}" for f in variable_factors],
+                columns=[f"DxC_Factor{f+1}" for f in variable_factors],
             )
         elif variance_threshold is not None:
             variable_factors = np.where(
@@ -366,7 +366,7 @@ def run_LIVI_genetic_association_testing(
             D_context = pd.DataFrame(
                 D_context.to_numpy()[:, variable_factors],
                 index=D_context.index,
-                columns=[f"CxG_Factor{f+1}" for f in variable_factors],
+                columns=[f"DxC_Factor{f+1}" for f in variable_factors],
             )
         else:
             D_context = D_context
@@ -452,7 +452,7 @@ def run_LIVI_genetic_association_testing(
             )
             plt.close()
             warnings.warn(
-                "Could not save QQplot for U under provided filename (filename too long).\nSaved as '_QQplot_<method>_context-specific-effects.png' instead."
+                "Could not save QQplot for D under provided filename (filename too long).\nSaved as '_QQplot_<method>_context-specific-effects.png' instead."
             )
         try:
             histplot_filename = f"{output_file_prefix}_{method_prefix}_Pvalue-Histogram_context-specific-effects.png"
@@ -840,9 +840,9 @@ def validate_and_read_passed_args(
         if os.path.isfile(os.path.join(args.model_output_dir, f))
     ]
     D_context = [
-        re.match("(.*U_embedding.tsv)", f)
+        re.match("(.*D_embedding.tsv)", f)
         for f in files
-        if re.match(".*U_embedding.tsv", f) is not None
+        if re.match(".*D_embedding.tsv", f) is not None
     ]
     if len(D_context) > 0:
         D_context = D_context[0].groups()[0]
@@ -926,8 +926,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--method",
         type=str,
-        default="tensorQTL",
-        choices=["tensorQTL", "LIMIX"],
+        default="TensorQTL",
+        choices=["TensorQTL", "LIMIX"],
         help="Whether to use LIMIX or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
     )
     parser.add_argument(
