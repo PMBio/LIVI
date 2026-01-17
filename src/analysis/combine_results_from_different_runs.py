@@ -642,7 +642,7 @@ def main(args):
         DxC_effects_all_snps = []
         for snp in intersect_snps_one:
             DxC_effect_snp = calculate_DxC_effect(
-                LIVI_associations=livi_associations,
+                DxC_associations=livi_associations,
                 SNP_id=snp,
                 cell_state_latent=zbase,
                 A=seed_A,
