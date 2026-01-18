@@ -658,11 +658,11 @@ def main(args):
             lambda x: seeds_D_ct_df.loc[x.random_seed, x.Factor], axis=1
         )
     )
-    ## N_celltypes should be either 1 or None, after changing the U to celltype assignment approach
+    ## N_celltypes should be either 1 or None, after changing the D to celltype assignment approach
     associations_all_seeds = associations_all_seeds.loc[associations_all_seeds.Celltypes.notna()]
-    associations_all_seeds = associations_all_seeds.assign(
-        N_celltypes=associations_all_seeds.apply(lambda x: len(set(x.Celltypes)), axis=1)
-    )
+    # associations_all_seeds = associations_all_seeds.assign(
+    #     N_celltypes=associations_all_seeds.apply(lambda x: len(set(x.Celltypes)), axis=1) ## not needed when top_one=True in assign_D_to_celltype
+    # )
 
     if args.save_results_summary:
         associations_all_seeds.to_csv(
@@ -679,16 +679,17 @@ def main(args):
             header=True,
         )
 
-    plot_data = associations_all_seeds.loc[associations_all_seeds.N_celltypes < 5].filter(
-        ["SNP_id", "Celltypes", "random_seed"]
-    )
+    # plot_data = associations_all_seeds.loc[associations_all_seeds.N_celltypes < 5].filter( ## not needed when top_one=True in assign_D_to_celltype
+    #     ["SNP_id", "Celltypes", "random_seed"]
+    # )
+    plot_data = associations_all_seeds.filter(["SNP_id", "Celltypes", "random_seed"])
     snps_all_runs = plot_data.groupby("SNP_id", observed=True).apply(
         lambda x: x.random_seed.nunique() == len(model_replicates), include_groups=False
     )
     snps_all_runs = snps_all_runs[snps_all_runs].index
     # Global stats
     plot_data = plot_data.loc[plot_data.SNP_id.isin(snps_all_runs)]
-    plot_data = plot_data.explode("Celltypes")
+    # plot_data = plot_data.explode("Celltypes") ## not needed when top_one=True in assign_D_to_celltype
     plot_data = plot_data.drop_duplicates()
     plot_data = plot_data.groupby(["SNP_id", "Celltypes"]).size().reset_index(name="N_runs")
     sns.histplot(plot_data.N_runs, discrete=True, binwidth=0.8, color="navy")
