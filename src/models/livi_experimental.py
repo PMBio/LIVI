@@ -1570,7 +1570,7 @@ class LIVI_cis_efficient(pl.LightningModule):
             params.append({"params": self.A})
         if self.n_persistent_factors != 0:
             params.append({"params": self.V_persistent.parameters()})
-        if self.hparams.n_cis_snps != 0:
+        if self.hparams.n_cis_eqtls != 0:
             params.append({"params": self.SNP_gene_effect})
 
         optim_vae = torch.optim.Adam(

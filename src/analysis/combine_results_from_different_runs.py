@@ -636,20 +636,22 @@ def main(args):
 
         seeds_D_ct[gseed[i]] = D_ct_dict
 
-        livi_associations = livi_associations.loc[
-            livi_associations.SNP_id.isin(intersect_snps_one)
-        ]
-        DxC_effects_all_snps = []
-        for snp in intersect_snps_one:
-            DxC_effect_snp = calculate_DxC_effect(
-                DxC_associations=livi_associations,
-                SNP_id=snp,
-                cell_state_latent=zbase,
-                A=seed_A,
-            )
-            DxC_effects_all_snps.append(DxC_effect_snp)
-        DxC_effects_all_snps = pd.concat(DxC_effects_all_snps, axis=1, ignore_index=False)
-        seeds_DxC_effects.append(DxC_effects_all_snps)
+        # To avoid very long computation times, only calculate single-cell effect if less than 300 SNPs are associated with only one D factor
+        if len(intersect_snps_one) <= 300:
+            livi_associations = livi_associations.loc[
+                livi_associations.SNP_id.isin(intersect_snps_one)
+            ]
+            DxC_effects_all_snps = []
+            for snp in intersect_snps_one:
+                DxC_effect_snp = calculate_DxC_effect(
+                    DxC_associations=livi_associations,
+                    SNP_id=snp,
+                    cell_state_latent=zbase,
+                    A=seed_A,
+                )
+                DxC_effects_all_snps.append(DxC_effect_snp)
+            DxC_effects_all_snps = pd.concat(DxC_effects_all_snps, axis=1, ignore_index=False)
+            seeds_DxC_effects.append(DxC_effects_all_snps)
 
     seeds_D_ct_df = pd.DataFrame.from_dict(seeds_D_ct, orient="index")
 
@@ -658,11 +660,11 @@ def main(args):
             lambda x: seeds_D_ct_df.loc[x.random_seed, x.Factor], axis=1
         )
     )
-    ## N_celltypes should be either 1 or None, after changing the U to celltype assignment approach
+    ## N_celltypes should be either 1 or None, after changing the D to celltype assignment approach
     associations_all_seeds = associations_all_seeds.loc[associations_all_seeds.Celltypes.notna()]
-    associations_all_seeds = associations_all_seeds.assign(
-        N_celltypes=associations_all_seeds.apply(lambda x: len(set(x.Celltypes)), axis=1)
-    )
+    # associations_all_seeds = associations_all_seeds.assign(
+    #     N_celltypes=associations_all_seeds.apply(lambda x: len(set(x.Celltypes)), axis=1) ## not needed when top_one=True in assign_D_to_celltype
+    # )
 
     if args.save_results_summary:
         associations_all_seeds.to_csv(
@@ -679,16 +681,17 @@ def main(args):
             header=True,
         )
 
-    plot_data = associations_all_seeds.loc[associations_all_seeds.N_celltypes < 5].filter(
-        ["SNP_id", "Celltypes", "random_seed"]
-    )
+    # plot_data = associations_all_seeds.loc[associations_all_seeds.N_celltypes < 5].filter( ## not needed when top_one=True in assign_D_to_celltype
+    #     ["SNP_id", "Celltypes", "random_seed"]
+    # )
+    plot_data = associations_all_seeds.filter(["SNP_id", "Celltypes", "random_seed"])
     snps_all_runs = plot_data.groupby("SNP_id", observed=True).apply(
         lambda x: x.random_seed.nunique() == len(model_replicates), include_groups=False
     )
     snps_all_runs = snps_all_runs[snps_all_runs].index
     # Global stats
     plot_data = plot_data.loc[plot_data.SNP_id.isin(snps_all_runs)]
-    plot_data = plot_data.explode("Celltypes")
+    # plot_data = plot_data.explode("Celltypes") ## not needed when top_one=True in assign_D_to_celltype
     plot_data = plot_data.drop_duplicates()
     plot_data = plot_data.groupby(["SNP_id", "Celltypes"]).size().reset_index(name="N_runs")
     sns.histplot(plot_data.N_runs, discrete=True, binwidth=0.8, color="navy")
@@ -865,87 +868,88 @@ def main(args):
     )
     plt.close()
 
-    print(
-        "------------  Assessing concordance between different random seeds at the single-cell level ------------"
-    )
-
-    corrs_across_runs_pearson = []
-    corrs_across_runs_pearson_pvals = []
-    for i, j in combinations(range(len(seeds_DxC_effects)), 2):
-        corrs = pearsonr(
-            x=seeds_DxC_effects[i].abs(),
-            y=seeds_DxC_effects[j].abs(),
-            axis=0,
-            alternative="greater",
+    if len(seeds_DxC_effects) > 0:
+        print(
+            "------------  Assessing concordance between different random seeds at the single-cell level ------------"
         )
-        corrs_across_runs_pearson.append(corrs.statistic)
-        corrs_across_runs_pearson_pvals.append(corrs.pvalue)
 
-    corrs_across_runs_pearson = np.vstack(corrs_across_runs_pearson)
-    corrs_across_runs_pearson_pvals = np.vstack(corrs_across_runs_pearson_pvals)
-    mean_corrs_across_runs_pearson = np.mean(corrs_across_runs_pearson, axis=0)
-    mean_pval_across_runs_pearson = np.mean(corrs_across_runs_pearson_pvals, axis=0)
+        corrs_across_runs_pearson = []
+        corrs_across_runs_pearson_pvals = []
+        for i, j in combinations(range(len(seeds_DxC_effects)), 2):
+            corrs = pearsonr(
+                x=seeds_DxC_effects[i].abs(),
+                y=seeds_DxC_effects[j].abs(),
+                axis=0,
+                alternative="greater",
+            )
+            corrs_across_runs_pearson.append(corrs.statistic)
+            corrs_across_runs_pearson_pvals.append(corrs.pvalue)
 
-    ## Histogram
-    sns.histplot(mean_corrs_across_runs_pearson, bins="fd", color="navy")
-    plt.xlabel("Pearson's $ρ$", fontsize=15)
-    plt.ylabel("Counts", fontsize=15)
-    plt.title(
-        f"Pearson's $ρ$ between {variable} effect on cells across {len(gseed)} different random model initialisations"
-    )
-    filename = (
-        f"{args.model_prefix}_Histogram_{variable}-effect-concordance-different-seeds-single-cell-level_Pearson.png"
-        if args.model_prefix is not None
-        else f"Histogram_{variable}-effect-concordance-different-seeds-single-cell-level_Pearson.png"
-    )
-    if args.prs:
-        filename = filename.replace(".png", "_PRS.png")
-    plt.savefig(
-        os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
-    )
-    plt.savefig(
-        os.path.join(output_dir, filename.replace("png", "svg")),
-        dpi=400,
-        bbox_inches="tight",
-        transparent=True,
-    )
-    plt.close()
+        corrs_across_runs_pearson = np.vstack(corrs_across_runs_pearson)
+        corrs_across_runs_pearson_pvals = np.vstack(corrs_across_runs_pearson_pvals)
+        mean_corrs_across_runs_pearson = np.mean(corrs_across_runs_pearson, axis=0)
+        mean_pval_across_runs_pearson = np.mean(corrs_across_runs_pearson_pvals, axis=0)
 
-    ## Barplot
-    sorted_indices = np.argsort(mean_corrs_across_runs_pearson)[::-1]
-    correlations_sorted = mean_corrs_across_runs_pearson[sorted_indices]
-    pvalues_sorted = mean_pval_across_runs_pearson[sorted_indices]
-    snp_names_sorted = np.array(list(intersect_snps_one))[sorted_indices]
-    pval_colors = ["cornflowerblue" if p < 0.05 else "grey" for p in pvalues_sorted]
+        ## Histogram
+        sns.histplot(mean_corrs_across_runs_pearson, bins="fd", color="navy")
+        plt.xlabel("Pearson's $ρ$", fontsize=15)
+        plt.ylabel("Counts", fontsize=15)
+        plt.title(
+            f"Pearson's $ρ$ between {variable} effect on cells across {len(gseed)} different random model initialisations"
+        )
+        filename = (
+            f"{args.model_prefix}_Histogram_{variable}-effect-concordance-different-seeds-single-cell-level_Pearson.png"
+            if args.model_prefix is not None
+            else f"Histogram_{variable}-effect-concordance-different-seeds-single-cell-level_Pearson.png"
+        )
+        if args.prs:
+            filename = filename.replace(".png", "_PRS.png")
+        plt.savefig(
+            os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
+        )
+        plt.savefig(
+            os.path.join(output_dir, filename.replace("png", "svg")),
+            dpi=400,
+            bbox_inches="tight",
+            transparent=True,
+        )
+        plt.close()
 
-    plt.figure(figsize=(10, 6))
-    plt.bar(range(len(correlations_sorted)), correlations_sorted, color=pval_colors)
-    # Labels and title
-    plt.axhline(y=0, color="black", linewidth=1)
-    plt.xticks(range(len(correlations_sorted)), snp_names_sorted, rotation=90)
-    plt.xlabel(variable)
-    plt.ylabel("Pearson's $ρ$", fontsize=15)
-    plt.legend(
-        handles=[
-            plt.Line2D([0], [0], color="cornflowerblue", lw=4, label="Significant (p<0.05)"),
-            plt.Line2D([0], [0], color="grey", lw=4, label="Not Significant"),
-        ],
-        loc="upper right",
-    )
-    plt.title(
-        f"Pearson's $ρ$ between {variable} effect on cells across {len(gseed)} different random model initialisations"
-    )
-    filename = filename.replace("Histogram", "Barplot")
-    plt.savefig(
-        os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
-    )
-    plt.savefig(
-        os.path.join(output_dir, filename.replace("png", "pdf")),
-        dpi=400,
-        bbox_inches="tight",
-        transparent=True,
-    )
-    plt.close()
+        ## Barplot
+        sorted_indices = np.argsort(mean_corrs_across_runs_pearson)[::-1]
+        correlations_sorted = mean_corrs_across_runs_pearson[sorted_indices]
+        pvalues_sorted = mean_pval_across_runs_pearson[sorted_indices]
+        snp_names_sorted = np.array(list(intersect_snps_one))[sorted_indices]
+        pval_colors = ["cornflowerblue" if p < 0.05 else "grey" for p in pvalues_sorted]
+
+        plt.figure(figsize=(10, 6))
+        plt.bar(range(len(correlations_sorted)), correlations_sorted, color=pval_colors)
+        # Labels and title
+        plt.axhline(y=0, color="black", linewidth=1)
+        plt.xticks(range(len(correlations_sorted)), snp_names_sorted, rotation=90)
+        plt.xlabel(variable)
+        plt.ylabel("Pearson's $ρ$", fontsize=15)
+        plt.legend(
+            handles=[
+                plt.Line2D([0], [0], color="cornflowerblue", lw=4, label="Significant (p<0.05)"),
+                plt.Line2D([0], [0], color="grey", lw=4, label="Not Significant"),
+            ],
+            loc="upper right",
+        )
+        plt.title(
+            f"Pearson's $ρ$ between {variable} effect on cells across {len(gseed)} different random model initialisations"
+        )
+        filename = filename.replace("Histogram", "Barplot")
+        plt.savefig(
+            os.path.join(output_dir, filename), dpi=400, bbox_inches="tight", transparent=False
+        )
+        plt.savefig(
+            os.path.join(output_dir, filename.replace("png", "pdf")),
+            dpi=400,
+            bbox_inches="tight",
+            transparent=True,
+        )
+        plt.close()
 
     if args.test_aggregated_factors:
         print(
