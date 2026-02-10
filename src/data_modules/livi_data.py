@@ -48,17 +48,18 @@ class LIVIDataset(Dataset):
                     tmp_cis_eqtls[c] = known_cis_eqtls[c]
                 else:
                     tmp_cis_eqtls[c] = 0
-            self.known_cis_eqtls = tmp_cis_eqtls
+            # Convert to tensor here once, instead of in __getitem__
+            self.known_cis_eqtls = torch.from_numpy(tmp_cis_eqtls.to_numpy()).to(torch.long)
         else:
             self.known_cis_eqtls = None
-
-        self.y_key = y_key
 
         if not use_size_factor and size_factor_key is not None:
             raise ValueError("Set use_size_factor = True when passing log_size_factor_key")
         self.use_size_factor = use_size_factor
         self.size_factor_key = size_factor_key
         self.layer_key = layer_key
+
+        self.y_key = y_key
         self.y, self.y_index = pd.factorize(
             self.adata.obs[self.y_key], sort=False, use_na_sentinel=False
         )
@@ -76,7 +77,7 @@ class LIVIDataset(Dataset):
                 raise ValueError(
                     "Individual IDs in the cis-eQTL genotype matrix do not match individual IDs in adata.obs."
                 )
-            if self.GT.filter(self.known_cis_eqtls.index).shape[1] == 0:
+            if self.GT.filter(tmp_cis_eqtls.index).shape[1] == 0:
                 raise ValueError(
                     "SNP IDs in the cis-eQTL genotype matrix do not match SNP IDs in cis-eQTL associations."
                 )
@@ -136,7 +137,7 @@ class LIVIDataset(Dataset):
                 covars.append(torch.tensor(indices[idx], dtype=torch.long))
             data["covariates"] = covars
         if self.known_cis_eqtls is not None:
-            data["known_cis"] = torch.from_numpy(self.known_cis_eqtls.to_numpy()).to(torch.long)
+            data["known_cis"] = self.known_cis_eqtls  # already a tensor
         if self.GT is not None:
             data["GT_cells"] = torch.from_numpy(
                 self.GT.loc[self.y_index[self.y[idx]]].to_numpy()
@@ -166,6 +167,10 @@ class LIVIDataModule(LightningDataModule):
         drop_last: bool = False,
         seed: int = 42,
         device: Union[torch.device, str] = "cpu",
+        num_workers: int = 4,
+        pin_memory: bool = True,
+        persistent_workers: bool = True,
+        prefetch_factor: int = 2,
         **data_loader_kwargs,
     ) -> None:
         """Initialize DataModule.
@@ -203,6 +208,11 @@ class LIVIDataModule(LightningDataModule):
         self.drop_last = drop_last
         self.seed = seed
         self.device = device
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory and (str(device) != "cpu")  # only pin if using GPU
+        self.persistent_workers = persistent_workers and (num_workers > 0)
+        self.prefetch_factor = prefetch_factor if num_workers > 0 else None
+
         self.data_loader_kwargs = data_loader_kwargs
 
     def setup(self, stage: Optional[str] = None) -> None:
@@ -254,7 +264,17 @@ class LIVIDataModule(LightningDataModule):
             sampler=base_sampler, batch_size=self.batch_size, drop_last=self.drop_last
         )
         data_loader_kwargs = copy.copy(self.data_loader_kwargs)
-        data_loader_kwargs.update({"sampler": sampler, "batch_size": None})
+
+        data_loader_kwargs.update(
+            {
+                "sampler": sampler,
+                "batch_size": None,
+                "num_workers": self.num_workers,
+                "pin_memory": self.pin_memory,
+                "persistent_workers": self.persistent_workers,
+                "prefetch_factor": self.prefetch_factor,
+            }
+        )
         return DataLoader(dataset, **data_loader_kwargs)
 
     def get_num_features(self) -> int:
