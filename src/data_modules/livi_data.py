@@ -104,6 +104,8 @@ class LIVIDataset(Dataset):
                 else:
                     X = self.adata.layers[self.layer_key]
                 size_factor = X.sum(1)
+                if hasattr(size_factor, "A1"):  # sparse.sum can return matrix objects
+                    size_factor = size_factor.A1
             else:
                 size_factor = self.adata.obs[self.size_factor_key].to_numpy()
             self.size_factor = size_factor
@@ -118,17 +120,23 @@ class LIVIDataset(Dataset):
         x = x[idx, :]
         if issparse(x):
             x = x.todense()
-        x = np.asarray(x)
+
+        # contiguous arrays make operations faster: https://medium.com/@heyamit10/understanding-numpy-ascontiguousarray-with-practical-examples-a71d639fe65a
+        x = np.ascontiguousarray(x, dtype=np.float32)
         if self.strict:
             if np.any(np.not_equal(np.mod(x, 1), 0)) and self.use_size_factor:
                 raise TypeError(
                     "LIVI expects raw count data as input, but non-integers were found."
                 )
-        data["x"] = torch.tensor(x, dtype=torch.float)
+
+        ## torch.from_numpy() is faster than torch.tensor():
+        # https://stackoverflow.com/questions/68183227/read-data-from-numpy-array-into-a-pytorch-tensor-without-creating-a-new-tensor
+        data["x"] = torch.from_numpy(x)
+
         data["y"] = torch.tensor(self.y[idx], dtype=torch.long)
         if self.use_size_factor:
-            data["size_factor"] = torch.tensor(
-                self.size_factor[idx].reshape(-1, 1), dtype=torch.float
+            data["size_factor"] = torch.from_numpy(
+                np.ascontiguousarray(self.size_factor[idx].reshape(-1, 1), dtype=np.float32)
             )
 
         if self.covariates is not None:
