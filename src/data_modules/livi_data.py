@@ -54,7 +54,7 @@ class LIVIDataset(Dataset):
             self.known_cis_eqtls = None
 
         if not use_size_factor and size_factor_key is not None:
-            raise ValueError("Set use_size_factor = True when passing log_size_factor_key")
+            raise ValueError("Set use_size_factor = True when passing size_factor_key")
         self.use_size_factor = use_size_factor
         self.size_factor_key = size_factor_key
         self.layer_key = layer_key
@@ -66,25 +66,43 @@ class LIVIDataset(Dataset):
         if eqtl_genotypes is not None:
             assert (
                 self.known_cis_eqtls is not None
-            ), "eQTL genotypes provided, but not cis-eQTLs gene associations."
+            ), "eQTL genotypes provided, but not cis-eQTL gene associations."
             if isinstance(eqtl_genotypes, str):
-                self.GT = pd.read_csv(eqtl_genotypes, sep="\t", index_col=0)
-                self.GT = self.GT.loc[self.y_index]
+                GT = pd.read_csv(eqtl_genotypes, sep="\t", index_col=0)
+                GT = GT.loc[self.y_index]
             else:
-                self.GT = eqtl_genotypes
-                self.GT = self.GT.loc[self.y_index]
-            if self.GT.shape[0] == 0:
+                GT = eqtl_genotypes
+                GT = GT.loc[self.y_index]
+            if GT.shape[0] == 0:
                 raise ValueError(
                     "Individual IDs in the cis-eQTL genotype matrix do not match individual IDs in adata.obs."
                 )
-            if self.GT.filter(tmp_cis_eqtls.index).shape[1] == 0:
+            if GT.filter(tmp_cis_eqtls.index).shape[1] == 0:
                 raise ValueError(
                     "SNP IDs in the cis-eQTL genotype matrix do not match SNP IDs in cis-eQTL associations."
                 )
-            # Consider only absence/presence of SNP, not dosage ?
-            self.GT = self.GT.replace(2, 1)
+            # Consider only absence/presence of SNP, not dosage
+            GT = GT.replace(2, 1)
+
+            #####   Optimize genotype lookup   #####
+            ## Problem: Using pd.DataFrame.loc in __getitem__ to look up genotypes for each cell is slow. It's faster to have
+            ## the genotypes per cell already available.
+            ## WARNING: Do not try to create a full cell-level genotype matrix (cells x SNPs), as memory will explode when using
+            ## thousands of SNPs and millions of cells.
+            ## Instead create a mapping from cell_idx to genotype_row_idx using numpy arrays once in __init__ .
+            ## This is much more memory efficient and allows for direct and fast indexing in __getitem__.
+
+            # Step 1: Convert GT to numpy contiguous array once here
+            self.GT_array = np.ascontiguousarray(GT.to_numpy(), dtype=np.float32)  # donors × SNPs
+            # Step 2: Map donor ID to row idx in GT_array
+            donor_to_gt_idx = {donor: i for i, donor in enumerate(GT.index)}
+            # Step 3: Create cell-level genotype index array
+            self.cell_to_gt_idx = np.array(
+                [donor_to_gt_idx[self.y_index[y_val]] for y_val in self.y], dtype=np.int32
+            )
         else:
-            self.GT = None
+            self.GT_array = None
+            self.cell_to_gt_idx = None
 
         self.strict = strict
 
@@ -104,6 +122,8 @@ class LIVIDataset(Dataset):
                 else:
                     X = self.adata.layers[self.layer_key]
                 size_factor = X.sum(1)
+                if hasattr(size_factor, "A1"):  # sparse.sum can return matrix objects
+                    size_factor = size_factor.A1
             else:
                 size_factor = self.adata.obs[self.size_factor_key].to_numpy()
             self.size_factor = size_factor
@@ -118,17 +138,23 @@ class LIVIDataset(Dataset):
         x = x[idx, :]
         if issparse(x):
             x = x.todense()
-        x = np.asarray(x)
+
+        # contiguous arrays make operations faster: https://medium.com/@heyamit10/understanding-numpy-ascontiguousarray-with-practical-examples-a71d639fe65a
+        x = np.ascontiguousarray(x, dtype=np.float32)
         if self.strict:
             if np.any(np.not_equal(np.mod(x, 1), 0)) and self.use_size_factor:
                 raise TypeError(
                     "LIVI expects raw count data as input, but non-integers were found."
                 )
-        data["x"] = torch.tensor(x, dtype=torch.float)
+
+        ## torch.from_numpy() is faster than torch.tensor():
+        # https://stackoverflow.com/questions/68183227/read-data-from-numpy-array-into-a-pytorch-tensor-without-creating-a-new-tensor
+        data["x"] = torch.from_numpy(x)
+
         data["y"] = torch.tensor(self.y[idx], dtype=torch.long)
         if self.use_size_factor:
-            data["size_factor"] = torch.tensor(
-                self.size_factor[idx].reshape(-1, 1), dtype=torch.float
+            data["size_factor"] = torch.from_numpy(
+                np.ascontiguousarray(self.size_factor[idx].reshape(-1, 1), dtype=np.float32)
             )
 
         if self.covariates is not None:
@@ -138,10 +164,10 @@ class LIVIDataset(Dataset):
             data["covariates"] = covars
         if self.known_cis_eqtls is not None:
             data["known_cis"] = self.known_cis_eqtls  # already a tensor
-        if self.GT is not None:
-            data["GT_cells"] = torch.from_numpy(
-                self.GT.loc[self.y_index[self.y[idx]]].to_numpy()
-            ).to(torch.float)
+        # Use pre-computed index array from __init__ for fast genotype lookup
+        if self.GT_array is not None:
+            # gt_indices = self.cell_to_gt_idx[idx]
+            data["GT_cells"] = torch.from_numpy(self.GT_array[self.cell_to_gt_idx[idx]])
 
         return data
 
