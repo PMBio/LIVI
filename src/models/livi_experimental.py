@@ -1374,11 +1374,7 @@ class LIVI_cis_efficient(pl.LightningModule):
             optim_vae.step()
 
         self.log_dict(
-            logs,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
+            logs, on_step=False, on_epoch=True, prog_bar=True, logger=True, sync_dist=True
         )
 
     def training_step(self, batch, batch_idx):
