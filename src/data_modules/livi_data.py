@@ -1,4 +1,5 @@
 import copy
+import warnings
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
@@ -29,10 +30,22 @@ class LIVIDataset(Dataset):
         known_cis_eqtls: Optional[Union[str, pd.DataFrame]] = None,
         eqtl_genotypes: Optional[Union[str, pd.DataFrame]] = None,
         strict: bool = False,
+        backed_mode: bool = True,
     ):
         # load anndata
         if isinstance(adata, str):
-            self.adata = sc.read_h5ad(adata)
+            if backed_mode:
+                # Load in backed mode (READ-ONLY)
+                print("Loading adata in backed mode (read-only)")
+                self.adata = sc.read_h5ad(adata, backed="r")
+                # Verify backed mode is read-only
+                if hasattr(self.adata, "file") and hasattr(self.adata.file, "mode"):
+                    if "w" in self.adata.file.mode or "+" in self.adata.file.mode:
+                        raise ValueError(
+                            f"adata file opened in write mode! Mode: {self.adata.file.mode}"
+                        )
+            else:
+                self.adata = sc.read_h5ad(adata)
         else:
             self.adata = adata
 
@@ -117,15 +130,39 @@ class LIVIDataset(Dataset):
 
         if self.use_size_factor:
             if self.size_factor_key is None:
-                if self.layer_key is None:
-                    X = self.adata.X
+                if hasattr(self.adata, "isbacked") and self.adata.isbacked:
+                    warnings.warn(
+                        "`backed = True`, but `size_factor_key = None`. Computing size factors in backed mode will result in longer runtime. When reading adata in backed mode, we recommend pre-computing size factors, storing them in adata.obs and providing them via `size_factor_key`."
+                    )
+                    print("\nComputing size factors in backed mode...")
+                    # Compute size factors in chunks
+                    n_cells = self.adata.shape[0]
+                    chunk_size = 10000
+                    size_factor = np.zeros(n_cells, dtype=np.float32)
+                    if self.layer_key is None:
+                        X = self.adata.X
+                    else:
+                        X = self.adata.layers[self.layer_key]
+
+                    for start in range(0, n_cells, chunk_size):
+                        end = min(start + chunk_size, n_cells)
+                        chunk_sums = X[start:end].sum(1)
+                        if hasattr(chunk_sums, "A1"):  # sparse.sum can return matrix objects
+                            chunk_sums = chunk_sums.A1
+                        size_factor[start:end] = chunk_sums
+                    print("Size factors computed.\n")
+
                 else:
-                    X = self.adata.layers[self.layer_key]
-                size_factor = X.sum(1)
-                if hasattr(size_factor, "A1"):  # sparse.sum can return matrix objects
-                    size_factor = size_factor.A1
+                    if self.layer_key is None:
+                        X = self.adata.X
+                    else:
+                        X = self.adata.layers[self.layer_key]
+                    size_factor = X.sum(1)
+                    if hasattr(size_factor, "A1"):  # sparse.sum can return matrix objects
+                        size_factor = size_factor.A1
             else:
                 size_factor = self.adata.obs[self.size_factor_key].to_numpy()
+
             self.size_factor = size_factor
 
     def __getitem__(self, idx: List[int]) -> Dict[str, np.ndarray]:
@@ -186,14 +223,15 @@ class LIVIDataModule(LightningDataModule):
         covariates_keys: Optional[List[str]] = None,
         known_cis_eqtls: Optional[Union[str, pd.DataFrame]] = None,
         eqtl_genotypes: Optional[Union[str, pd.DataFrame]] = None,
-        strict: bool = False,
-        data_split: List[float] = [0.8],
-        batch_size: int = 128,
+        strict: bool = True,
+        backed_mode: bool = True,
+        data_split: List[float] = [1.0],
+        batch_size: int = 1024,
         shuffle: bool = True,
-        drop_last: bool = False,
         seed: int = 42,
-        device: Union[torch.device, str] = "cpu",
-        num_workers: int = 4,
+        drop_last: bool = True,
+        device: Union[torch.device, str] = "cuda",
+        num_workers: int = 0,
         pin_memory: bool = True,
         persistent_workers: bool = True,
         prefetch_factor: int = 2,
@@ -227,6 +265,7 @@ class LIVIDataModule(LightningDataModule):
         self.known_cis_eqtls = known_cis_eqtls
         self.eqtl_genotypes = eqtl_genotypes
         self.strict = strict
+        self.backed_mode = backed_mode
 
         self.data_split = data_split
         self.batch_size = batch_size
@@ -253,6 +292,7 @@ class LIVIDataModule(LightningDataModule):
             known_cis_eqtls=self.known_cis_eqtls,
             eqtl_genotypes=self.eqtl_genotypes,
             strict=self.strict,
+            backed_mode=self.backed_mode,
         )
         lengths = self._get_splits(len(self.dataset))
         self.train, self.val, self.test = torch.utils.data.random_split(
