@@ -1,5 +1,5 @@
 ### Run:
-# python src/analysis/livi_analysis.py --model_run_dir --checkpoint --adata -id --adata_layer --batch_column -ct -GT_matrix --plink -K --known_trans_eQTLs --known_cis_eQTLs --quantile_normalise --fdr -ofp -od
+# python src/analysis/livi_inference.py --model_run_dir --checkpoint --adata --adata_layer -id -ct --batch_column -bs -od
 ###
 
 import pyrootutils
@@ -27,15 +27,9 @@ import scanpy as sc
 import seaborn as sns
 import torch
 from anndata import AnnData
-from pandas_plink import read_plink
 from scipy.stats import zscore
 from sklearn.preprocessing import StandardScaler
-from tensorqtl import pgen
 
-from src.analysis.livi_testing import (
-    run_LIVI_genetic_association_testing,
-    set_up_covariates,
-)
 from src.analysis.plotting import (
     cell_state_factors_heatmap,
     overlap_with_known_eQTLs,
@@ -88,18 +82,6 @@ def validate_and_read_passed_args(
 
     assert os.path.isdir(args.model_run_dir), "Model directory not found."
     assert os.path.isfile(args.adata), "AnnData file not found."
-    assert os.path.isfile(args.covariates), "Covariates file not found."
-
-    if args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
-        assert (
-            args.genotype_pcs is not None
-        ), "Genotype PCs are required when testing using TensorQTL."
-        if not torch.cuda.is_available():
-            warnings.warn(
-                "Testing method is TensorQTL, but no GPU is available. This will slow down performance."
-            )
-    if args.method in ["limix", "LIMIX", "LMM"]:
-        assert args.kinship is not None, "Kinship matrix required with testing using LIMIX-QTL."
 
     if args.output_dir:
         output_dir = args.output_dir
@@ -124,119 +106,6 @@ def validate_and_read_passed_args(
         assert (
             args.celltype_column in adata.obs.columns
         ), f"`celltype_column`: '{args.celltype_column}' not in adata.obs columns."
-
-    if args.plink and args.method in ["limix", "LIMIX", "LMM"]:
-        variant_info, fam, bed = read_plink(args.genotype_matrix, verbose=False)
-        GT_matrix = pd.DataFrame(
-            bed.compute(), index=variant_info.snp, columns=fam.iid
-        )  # SNPs x donors
-    elif args.plink and args.method in ["tensorQTL", "TensorQTL", "tensorqtl"]:
-        pgr = pgen.PgenReader(args.genotype_matrix)
-        GT_matrix = pgr.load_genotypes()  # SNPs x donors
-        variant_info = pgr.variant_df
-        variant_info = variant_info.reset_index(names="variant_id")
-    else:
-        assert os.path.isfile(args.genotype_matrix), "Genotype matrix file not found"
-        _, ext = os.path.splitext(args.genotype_matrix)
-        if ext not in [".tsv", ".csv"]:
-            raise TypeError(
-                f"Genotype matrix must be either .tsv or .csv. File format provided: {ext}. To use a PLINK matrix please use the --plink flag"
-            )
-        GT_matrix = pd.read_csv(
-            args.genotype_matrix, index_col=0, sep="\t" if ext == ".tsv" else ","
-        )
-        variant_info = None
-
-    GT_matrix = GT_matrix.filter(adata.obs[args.individual_column].unique())
-    if GT_matrix.shape[1] == 0:
-        raise ValueError(
-            "Individual IDs in adata.obs do not match individual IDs in the genotype matrix."
-        )
-
-    # GT_matrix_standardised = pd.DataFrame(
-    #     StandardScaler().fit_transform(GT_matrix.T.values),  # donors x SNPs
-    #     index=GT_matrix.columns,
-    #     columns=GT_matrix.index,
-    # )
-    # del GT_matrix
-    GT_matrix = GT_matrix.T  # donors x SNPs
-
-    if args.kinship is not None:
-        assert os.path.isfile(args.kinship), "Kinship matrix file not found."
-        _, ext = os.path.splitext(args.kinship)
-        if ext not in [".tsv", ".csv"]:
-            raise TypeError(
-                f"Kinship matrix must be either .tsv or .csv. File format provided: {ext}."
-            )
-        kinship = pd.read_csv(args.kinship, index_col=0, sep="\t" if ext == ".tsv" else ",")
-        kinship.index = kinship.index.astype(str)
-        kinship = kinship.loc[
-            adata.obs[args.individual_column].unique(), adata.obs[args.individual_column].unique()
-        ]
-        if kinship.shape[0] == 0:
-            raise ValueError(
-                "Individual IDs in cell metadata do not match individual IDs in the kinship matrix."
-            )
-    else:
-        kinship = None
-
-    if args.genotype_pcs is not None:
-        assert os.path.isfile(args.genotype_pcs), "Genotype PCs file not found."
-        _, ext = os.path.splitext(args.genotype_pcs)
-        if ext not in [".tsv", ".csv"]:
-            raise TypeError(
-                f"Genotype PCs file must be either .tsv or .csv. File format provided: {ext}."
-            )
-        n_gt_pcs = args.n_gt_pcs if args.n_gt_pcs else 10
-        # load GT PCs; restrict to individuals in sample_df
-        GT_PCs = pd.read_csv(
-            args.genotype_pcs, sep="\t" if ext == ".tsv" else ",", index_col=0
-        )  # donors x PCs
-        GT_PCs.index = GT_PCs.index.astype(str)
-        GT_PCs = GT_PCs.loc[GT_PCs.index.isin(adata.obs[args.individual_column].unique())]
-        if GT_PCs.shape[0] == 0:
-            raise ValueError(
-                "Individual IDs in cell metadata do not match individual IDs in the genotype PCs."
-            )
-        # select leading components
-        GT_PCs = GT_PCs.filter([f"PC{i}" for i in range(1, n_gt_pcs + 1)])
-    else:
-        GT_PCs = None
-
-    SNP_colname_trans = None
-    if args.known_trans_eQTLs:
-        assert os.path.isfile(args.known_trans_eQTLs), "Known trans eQTLs file not found."
-        _, ext = os.path.splitext(args.known_trans_eQTLs)
-        known_trans_eQTLs = pd.read_csv(args.known_trans_eQTLs, sep="\t" if ext == ".tsv" else ",")
-        SNP_colnames = [
-            c for c in known_trans_eQTLs.columns if "SNP" in c or "snp" in c or "variant" in c
-        ]
-        for c in SNP_colnames:
-            if known_trans_eQTLs.loc[known_trans_eQTLs[c].isin(GT_matrix.columns)].shape[0] != 0:
-                SNP_colname_trans = c
-        if SNP_colname_trans is None and c == SNP_colnames[-1]:
-            raise ValueError(
-                "SNP IDs in known trans eQTLs do not match SNP IDs in the genotype matrix."
-            )
-    else:
-        known_trans_eQTLs = None
-    SNP_colname_cis = None
-    if args.known_cis_eQTLs:
-        assert os.path.isfile(args.known_cis_eQTLs), "Known cis eQTLs file not found."
-        _, ext = os.path.splitext(args.known_cis_eQTLs)
-        known_cis_eQTLs = pd.read_csv(args.known_cis_eQTLs, sep="\t" if ext == ".tsv" else ",")
-        SNP_colnames = [
-            c for c in known_cis_eQTLs.columns if "SNP" in c or "snp" in c or "variant" in c
-        ]
-        for c in SNP_colnames:
-            if known_cis_eQTLs.loc[known_cis_eQTLs[c].isin(GT_matrix.columns)].shape[0] != 0:
-                SNP_colname_cis = c
-        if SNP_colname_cis is None and c == SNP_colnames[-1]:
-            raise ValueError(
-                "SNP IDs in known cis eQTLs do not match SNP IDs in the genotype matrix."
-            )
-    else:
-        known_cis_eQTLs = None
 
     if args.checkpoint == "last":
         checkpoint = "last.ckpt"
@@ -281,14 +150,6 @@ def validate_and_read_passed_args(
         of_prefix,
         LIVI_model,
         adata,
-        GT_matrix,
-        variant_info,
-        kinship,
-        GT_PCs,
-        known_trans_eQTLs,
-        SNP_colname_trans,
-        known_cis_eQTLs,
-        SNP_colname_cis,
     )
 
 
@@ -669,14 +530,6 @@ def main(args):
         of_prefix,
         LIVI_model,
         adata,
-        GT_matrix,
-        variant_info,
-        kinship,
-        GT_PCs,
-        known_trans_eQTLs,
-        SNP_colname_trans,
-        known_cis_eQTLs,
-        SNP_colname_cis,
     ) = validate_and_read_passed_args(args)
 
     print("\n-------- Performing inference --------\n")
@@ -691,49 +544,12 @@ def main(args):
         A,
     ) = LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args)
 
-    print("\n-------- Running genetic association testing --------\n")
-
-    covariates = set_up_covariates(args, D_context)
-
-    start = datetime.now()
-    associations = run_LIVI_genetic_association_testing(
-        D_context=D_context,
-        V_persistent=V_persistent,
-        GT_matrix=GT_matrix,
-        variant_info=variant_info,
-        Kinship=kinship,
-        genotype_pcs=GT_PCs,
-        method=args.method,
-        fdr_method=args.fdr_method,
-        output_dir=output_dir,
-        output_file_prefix=of_prefix,
-        covariates=covariates,
-        quantile_norm=args.quantile_normalise,
-        variance_threshold=args.variance_threshold,
-        variable_factors=args.variable_factors,
-        fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
-        return_associations=True,
-    )
-
-    end = datetime.now()
-    duration = (end - start).seconds
-    duration_minutes = duration / 60
-    duration_hours = duration_minutes / 60
-
-    with open(os.path.join(output_dir, "association_testing_execution_time.txt"), "w") as outfile:
-        outfile.write(
-            f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
-        )
-
-    associations_DxC = associations[0] if isinstance(associations, tuple) else associations
-    associations_V = associations[1] if isinstance(associations, tuple) else None
-
-    if D_context is not None and associations_DxC is not None and A is not None:
+    if D_context is not None:
         ## Exceptions for too-long filenames
         try:
             plot_D_factor_corr(
                 D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
+                associated_factors=D_context.columns,
                 A=A,
                 savefig=os.path.join(output_dir, of_prefix),
                 format="png",
@@ -741,7 +557,7 @@ def main(args):
         except OSError:
             plot_D_factor_corr(
                 D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
+                associated_factors=D_context.columns,
                 A=A,
                 savefig=os.path.join(output_dir, ""),
                 format="png",
@@ -753,7 +569,7 @@ def main(args):
         try:
             plot_DxC_similarity(
                 D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
+                associated_factors=D_context.columns,
                 A=A,
                 cell_state_factors=cell_state_latent,
                 cell_metadata=adata.obs,
@@ -765,7 +581,7 @@ def main(args):
         except OSError:
             plot_DxC_similarity(
                 D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
+                associated_factors=D_context.columns,
                 A=A,
                 cell_state_factors=cell_state_latent,
                 cell_metadata=adata.obs,
@@ -780,49 +596,20 @@ def main(args):
         try:
             plot_donor_similarity(
                 D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
+                associated_factors=D_context.columns,
                 savefig=os.path.join(output_dir, of_prefix),
                 format="png",
             )
         except OSError:
             plot_donor_similarity(
                 D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
+                associated_factors=D_context.columns,
                 savefig=os.path.join(output_dir, ""),
                 format="png",
             )
             warnings.warn(
                 "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
             )
-
-        if known_trans_eQTLs is not None:
-            try:
-                overlap_with_known_eQTLs(
-                    known_trans_eQTLs=known_trans_eQTLs,
-                    SNP_colname_trans=SNP_colname_trans,
-                    DxC_effects_LIVI=associations_DxC,
-                    factor_assignment_matrix=A,
-                    known_cis_eQTLs=known_cis_eQTLs,
-                    SNP_colname_cis=SNP_colname_cis,
-                    persistent_effects_LIVI=associations_V,
-                    savefig=os.path.join(output_dir, of_prefix),
-                    format=None,
-                )
-            except OSError as err:
-                overlap_with_known_eQTLs(
-                    known_trans_eQTLs=known_trans_eQTLs,
-                    SNP_colname_trans=SNP_colname_trans,
-                    DxC_effects_LIVI=associations_DxC,
-                    factor_assignment_matrix=A,
-                    known_cis_eQTLs=known_cis_eQTLs,
-                    SNP_colname_cis=SNP_colname_cis,
-                    persistent_effects_LIVI=associations_V,
-                    savefig=os.path.join(output_dir, ""),
-                    format=None,
-                )
-                warnings.warn(
-                    "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
-                )
 
 
 if __name__ == "__main__":
@@ -862,62 +649,11 @@ if __name__ == "__main__":
         help="Column name in cell metadata (adata.obs) indicating the individual the sample (cell) comes from.",
     )
     parser.add_argument(
-        "--genotype_matrix",
-        "-GT_matrix",
-        type=str,
-        required=True,
-        help="Absolute path of the .tsv file with the genotype matrix (the SNPs to test against LIVI's individual embeddings). For PLINK files please use in addition the --plink flag.",
-    )
-    parser.add_argument(
         "--batch_size_inference",
         "-bs",
         type=float,
         default=5e5,
         help="Number of samples (cells) to use per batch when performing inference. Larger numbers are recommended when memory resources are not limited.",
-    )
-    parser.add_argument(
-        "--covariates",
-        default=None,
-        type=str,
-        help="Absolute path of the .tsv file containing gene expression PCs aggregated at the donor level.",
-    )
-    parser.add_argument(
-        "--method",
-        type=str,
-        default="TensorQTL",
-        choices=["TensorQTL", "LIMIX", "LMM"],
-        help="Whether to use LIMIX/LMM or TensorQTL for SNP association testing. LIMIX can account for repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.",
-    )
-    parser.add_argument(
-        "--plink",
-        action="store_true",
-        default=False,
-        help="If PLINK genotype files (bed, bim, fam if `method` is LIMIX/LMM, or pgen, pvar, psam if `method` is TensorQTL) are provided instead of a GT matrix in .tsv format.",
-    )
-    parser.add_argument(
-        "--kinship",
-        "-K",
-        type=str,
-        help="Absolute path of the .tsv file with the Kinship matrix (e.g. generated with PLINK) to be used for relatedness/population structure correction during variant testing.",
-    )
-    parser.add_argument(
-        "--genotype_pcs",
-        "-GT_pcs",
-        default=None,
-        type=str,
-        help="Absolute path of the .tsv file with the genotype PCs (individuals x PCs) to be used for relatedness/population structure correction during variant testing.",
-    )
-    parser.add_argument(
-        "--n_gt_pcs",
-        default=None,
-        type=int,
-        help="Number of genotype principal components to use as covariates during SNP association testing. If omitted 10 PCs are used by default.",
-    )
-    parser.add_argument(
-        "--quantile_normalise",
-        action="store_true",
-        default=False,
-        help="Whether to quantile normalise LIVI's individual embeddings prior to variant association testing.",
     )
     parser.add_argument(
         "--variable_factors",
@@ -942,31 +678,6 @@ if __name__ == "__main__":
         default=None,
         type=str,
         help="Column name in cell metadata (adata.obs) indicating the experimental batch the sample (cell) comes from.",
-    )
-    parser.add_argument(
-        "--fdr_threshold",
-        "-fdr",
-        type=float,
-        help="False discovery rate (FDR) threshold for multiple testing correction.",
-    )
-    parser.add_argument(
-        "--fdr_method",
-        default="Benjamini-Hochberg",
-        type=str,
-        choices=["Storey", "qvalue", "Benjamini-Hochberg", "BH", "Benjamini-Yekutieli", "BY"],
-        help="False discovery rate (FDR) controlling method for multiple testing correction.",
-    )
-    parser.add_argument(
-        "--known_trans_eQTLs",
-        default=None,
-        type=str,
-        help="Absolute path of the .tsv file with known trans eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
-    )
-    parser.add_argument(
-        "--known_cis_eQTLs",
-        default=None,
-        type=str,
-        help="Absolute path of the .tsv file with known cis eQTLs to compare against LIVI associations (SNP IDs must be the same as in the genotype matrix!).",
     )
     parser.add_argument(
         "--output_file_prefix",

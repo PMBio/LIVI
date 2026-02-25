@@ -264,7 +264,8 @@ def visualise_cell_state_latent(
     of_prefix: str,
     format: str,
     args: argparse.Namespace,
-    save_umap=True,
+    save_umap: bool = True,
+    color_palette: Optional[str] = None,
 ) -> None:
     """Visualize LIVI's cell-state latent space using UMAP (Uniform Manifold Approximation and
     Projection) .
@@ -312,7 +313,7 @@ def visualise_cell_state_latent(
         data=umap_df,
         ax=axs[0],
         s=3,
-        palette="tab20",
+        palette=color_palette if color_palette else "tab20",
         rasterized=format == "pdf",
     )
     axs[0].legend(
@@ -2409,6 +2410,7 @@ def plot_ct_gex_vs_gt(
     filter_maf: bool = True,
     test_gt_groups: bool = True,
     annotation_fontsize: int = 20,
+    layer: Optional[str] = None,
     celltype: Optional[Union[str, List[str]]] = None,
     celltype_column: Optional[str] = None,
     cell_indices: Optional[List[int]] = None,
@@ -2466,7 +2468,10 @@ def plot_ct_gex_vs_gt(
 
     if cell_indices is not None:
         adata_aggr = aggregate_cell_counts(
-            adata=adata[cell_indices, gene], aggregate_cols=[iid_column], layer=None, sum_gene=True
+            adata=adata[cell_indices, gene],
+            aggregate_cols=[iid_column],
+            layer=layer,
+            sum_gene=True,
         )
     elif celltype is not None:
         assert (
@@ -2477,7 +2482,7 @@ def plot_ct_gex_vs_gt(
         adata_aggr = aggregate_cell_counts(
             adata=adata[adata.obs.loc[adata.obs[celltype_column].isin(celltype)].index, gene],
             aggregate_cols=[iid_column],
-            layer=None,
+            layer=layer,
             sum_gene=True,
         )
     else:
