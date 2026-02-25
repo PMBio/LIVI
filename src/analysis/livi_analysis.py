@@ -1,5 +1,5 @@
 ### Run:
-# python src/analysis/livi_analysis.py --model_run_dir --checkpoint --adata -id --adata_layer --batch_column --sex_column --age_column -ct -GT_matrix --plink -K --known_trans_eQTLs --known_cis_eQTLs --quantile_normalise --fdr -ofp -od
+# python src/analysis/livi_analysis.py --model_run_dir --checkpoint --adata -id --adata_layer --batch_column -ct -GT_matrix --plink -K --known_trans_eQTLs --known_cis_eQTLs --quantile_normalise --fdr -ofp -od
 ###
 
 import pyrootutils
@@ -270,7 +270,7 @@ def validate_and_read_passed_args(
             warmup_epochs_vae = LIVI_model.hparams.warmup_epochs_vae
             warmup_epochs_G = LIVI_model.warmup_epochs_G
 
-            of_prefix = f"zdim{zdim}_{n_DxC}-U-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
+            of_prefix = f"zdim{zdim}_{n_DxC}-D-factors_{n_persistent}-V-factors_warmup-vae-{warmup_epochs_vae}_warmup-G-{warmup_epochs_G}_adversary-weight-{adversary_weight}_l1-weight-{l1_weight}_l1-weight-A-{l1_weight_A}"
         else:
             of_prefix = args.output_file_prefix
     else:
@@ -375,6 +375,16 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         warnings.warn(
             "Could not save cell-state latent dataframe under provided filename (filename too long).\nSaved as '_cell-state_latent.tsv' instead."
         )
+    if adata.uns[f"{args.celltype_column}_colors"].any():
+        adata.obs[args.celltype_column] = adata.obs[args.celltype_column].astype("category")
+        ct_colors = dict(
+            zip(
+                adata.obs[args.celltype_column].cat.categories,
+                adata.uns[f"{args.celltype_column}_colors"],
+            )
+        )
+    else:
+        ct_colors = None
     try:
         visualise_cell_state_latent(
             z=cell_state_latent,
@@ -383,6 +393,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             of_prefix=of_prefix,
             format="png",
             args=args,
+            color_palette=ct_colors,
         )
         plt.close()
     except OSError:
@@ -393,6 +404,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
             of_prefix="",
             format="png",
             args=args,
+            color_palette=ct_colors,
         )
         plt.close()
         warnings.warn(
