@@ -178,7 +178,7 @@ def aggregate_correlated_factors_across_runs(
         )  # len N individuals
         n_factors = 0
         for r_index, f_index in factors2aggregate:
-            factor_name = f"U_Factor{f_index+1}"
+            factor_name = f"D_Factor{f_index+1}"
             aggregated_values += factors_across_different_runs[r_index][factor_name].to_numpy()
             n_factors += 1
         # Normalize by the number of aggregated factors
@@ -188,7 +188,7 @@ def aggregate_correlated_factors_across_runs(
         aggregated_robust_factors.append(factor_avg)
 
     robust_factors_df = pd.concat(aggregated_robust_factors, axis=1)
-    robust_factors_df.columns = [f"Robust_U{i+1}" for i in range(len(aggregated_robust_factors))]
+    robust_factors_df.columns = [f"Robust_D{i+1}" for i in range(len(aggregated_robust_factors))]
 
     return robust_factors_df
 
