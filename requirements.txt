@@ -15,7 +15,7 @@ hydra-joblib-launcher==1.2.0
 # neptune-client
 # mlflow
 # comet-ml
-tensorboard==2.16.2
+tensorboard==2.18.0
 
 # --------- others --------- #
 pyrootutils     # standardizing the project root setup
