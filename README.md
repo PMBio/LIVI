@@ -12,9 +12,13 @@
 ## Description
 
 LIVI is a probabilistic model for single-cell RNA-seq data collected from a large population of individuals. At its core, LIVI builds on variational autoencoders (VAEs), employing structured linear decoders to decompose observed variation in single-cell expression to cell-state variation, donor-driven variation and their interaction. The resulting model has properties that resemble classical factor analysis, where the decoder is a factor loadings matrix instead of a neural network with non-linear activations. \
-Once trained, LIVI enables efficient donor-level association testing, while retaining single-cell resolution and interpretation. Because donor latent factors are inferred without information on specific donor-level characteristics, such as SNP genotypes, they can be used as quantitative phenotypes to test for genetic effects without the risk of circularity. Following association testing at the donor level, the discovered effects can be projected back onto single cells via LIVI's latent donor-cell-state interaction model ($D \\times C$), and the decoder weights can be inspected to identify the affected sets of genes.
+Once trained, LIVI enables efficient donor-level association testing, while retaining single-cell resolution and interpretation. Because donor latent factors are inferred without information on specific donor-level characteristics, such as SNP genotypes, they can be used as quantitative phenotypes to test for genetic effects without the risk of circularity. Following association testing at the donor level, the discovered effects can be projected back onto single cells via LIVI's latent donor-cell-state interaction model ($D \\times C$), and the decoder weights can be inspected to identify the affected sets of genes. \\
+
+Check out our preprint for more details on the model and analyses: [Vagiaki et al., 2026](https://doi.org/10.64898/2026.02.04.703363)
 
 ## Quick start
+
+We are working on more comprehensive documentation. In the meantime, if you need assistance using our tool beyond this *Quick start* guide, feel free to reach out at [danai.vagiaki@embl.de](danai.vagiaki@embl.de)
 
 ### How to install
 
