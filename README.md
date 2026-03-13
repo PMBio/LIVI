@@ -86,3 +86,22 @@ python src/analysis/livi_analysis.py \
 ### Interpretation of association testing results
 
 Examples of downstream intrepretation and plotting of association testing results can be found in [https://github.com/danaivagiaki/LIVI_analyses](https://github.com/danaivagiaki/LIVI_analyses)
+
+## Citation
+
+If you use LIVI in your research, please cite:
+
+```bibtex
+@article{vagiaki2026livi,
+  title = {Mapping trans-eQTLs at single-cell resolution using Latent Interaction Variational Inference},
+  author = {Vagiaki, Danai and Heinen, Tobias and Saraswat, Manu and Clarke, Brian and Stegle, Oliver},
+  journal = {bioRxiv},
+  year = {2026},
+  doi = {10.64898/2026.02.04.703363},
+  URL = {https://www.biorxiv.org/content/early/2026/02/06/2026.02.04.703363},
+}
+```
+
+## Acknowledgments
+
+This project builds on the [Lightning-Hydra-Template](https://github.com/ashleve/lightning-hydra-template).
