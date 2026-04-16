@@ -330,7 +330,7 @@ def run_LIVI_genetic_association_testing(
     if return_associations and fdr_threshold is None:
         fdr_threshold = 0.05
 
-    GT_matrix = GT_matrix.loc[D_context.index]
+    GT_matrix, D_context = GT_matrix.align(D_context, join="inner", axis=0)
 
     if method in ["LIMIX", "LMM"]:
         # add intercept
@@ -351,6 +351,8 @@ def run_LIVI_genetic_association_testing(
         covariates = covariates.merge(genotype_pcs, how="left", right_index=True, left_index=True)
     else:
         raise ValueError(f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}.")
+
+    covariates, D_context = covariates.align(D_context, join="inner", axis=0)
 
     if D_context is not None:
         if variable_factors is not None:
@@ -497,7 +499,7 @@ def run_LIVI_genetic_association_testing(
                     os.path.join(output_dir, filename_sign), sep="\t", header=True, index=False
                 )
                 warnings.warn(
-                    f"Could not save significant results for U under provided filename (filename too long).\nSaved as '{filename_sign}' instead."
+                    f"Could not save significant results for D under provided filename (filename too long).\nSaved as '{filename_sign}' instead."
                 )
 
         print("----- Done ----- \n")
