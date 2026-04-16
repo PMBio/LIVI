@@ -836,6 +836,7 @@ def validate_and_read_passed_args(
     # del GT_matrix
 
     GT_matrix = GT_matrix.T  # donors x SNPs
+    GT_matrix.index = GT_matrix.index.astype(str)
 
     files = [
         f
