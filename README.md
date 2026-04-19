@@ -40,12 +40,12 @@ pip install -r requirements.txt
 
 ### How to train LIVI
 
-LIVI builds on the [Lightning-Hydra template] (https://github.com/ashleve/lightning-hydra-template) structure with configuration-based experiments. This means that you need to specify your own config files based on your dataset and file system. Assuming that you have cloned this repo into a directory `/your/homedir/LIVI`. You need to specify a model, a datamodule, a paths and an experiment config under `/your/homedir/LIVI/configs/model`, `/your/homedir/LIVI/configs/datamodule`, `/your/homedir/LIVI/configs/paths` and `/your/homedir/LIVI/configs/experiment` , respectively. \\
+LIVI builds on the [Lightning-Hydra template] (https://github.com/ashleve/lightning-hydra-template) structure with configuration-based experiments. This means that you need to specify your own config files based on your dataset and file system. Assuming that you have cloned this repo into a directory `/your/homedir/LIVI`. You need to specify a model, a datamodule, a paths and an experiment config under `/your/homedir/LIVI/configs/model`, `/your/homedir/LIVI/configs/datamodule`, `/your/homedir/LIVI/configs/paths` and `/your/homedir/LIVI/configs/experiment` , respectively.
 
 - Example of model config: [configs/model/LIVIcis_onek1k_10K-HVG-HEX.yaml](configs/model/LIVIcis_onek1k_10K-HVG-HEX.yaml) . You can use the model config to specify the numbers of latent factors, learning rate, warm-up epochs etc. `x_dim` should correspond to the number of genes and `y_dim` to the number of individuals in your dataset.
 - Example of datamodule config: [configs/datamodule/onek1k_10K-HVG-HEX_LIVIcis.yaml](configs/datamodule/onek1k_10K-HVG-HEX_LIVIcis.yaml). You can use the datamodule config to specify the anndata object you wish to train LIVI on (including which are the donor IDs and covariates IDs keys in `adata.obs`), as well as training specific parameters like batch size.
 
-After you have the model, datamodule and path configs, you can specify them in your experiment config. Example of experiment config using the model and datamodule config from above: [configs/experiment/LIVIcis-cell-state_onek1k_10K-HVG-HEX_train-end-to-end.yaml](configs/experiment/LIVIcis-cell-state_onek1k_10K-HVG-HEX_train-end-to-end.yaml) \\
+After you have the model, datamodule and path configs, you can specify them in your experiment config. Example of experiment config using the model and datamodule config from above: [configs/experiment/LIVIcis-cell-state_onek1k_10K-HVG-HEX_train-end-to-end.yaml](configs/experiment/LIVIcis-cell-state_onek1k_10K-HVG-HEX_train-end-to-end.yaml)
 
 You can create you custom path config as below:
 
@@ -67,7 +67,7 @@ output_dir: ${hydra:runtime.output_dir}
 work_dir: ${hydra:runtime.cwd}
 ```
 
-Finally, you can train the model with chosen experiment config like this:
+**Finally, you can train the model with chosen experiment config like this:**
 
 ```bash
 python src/train.py experiment=experiment_name.yaml
