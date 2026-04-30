@@ -538,7 +538,7 @@ def run_LIVI_genetic_association_testing(
                     on="SNP_id",
                     how="left",
                 )
-        elif args.method == "TensorQTL":
+        elif method == "TensorQTL":
             results = run_tensorQTL(
                 phenotype_df=V_persistent.T,
                 genotype_df=GT_matrix.T,
