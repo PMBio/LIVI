@@ -375,7 +375,7 @@ def LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args):
         warnings.warn(
             "Could not save cell-state latent dataframe under provided filename (filename too long).\nSaved as '_cell-state_latent.tsv' instead."
         )
-    if adata.uns[f"{args.celltype_column}_colors"].any():
+    if f"{args.celltype_column}_colors" in adata.uns.keys():
         adata.obs[args.celltype_column] = adata.obs[args.celltype_column].astype("category")
         ct_colors = dict(
             zip(
