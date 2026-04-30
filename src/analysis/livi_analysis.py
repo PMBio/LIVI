@@ -110,7 +110,7 @@ def validate_and_read_passed_args(
     else:
         output_dir = args.model_run_dir
 
-    adata = sc.read_h5ad(args.adata)
+    adata = sc.read_h5ad(args.adata, backed="r")
 
     assert (
         args.individual_column in adata.obs.columns
