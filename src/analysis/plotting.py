@@ -1072,6 +1072,8 @@ def cell_state_factors_heatmap(
     else:
         ext = "." + format if format else ".png"
 
+    cell_state_factors = nn.Softmax(dim=1)(torch.from_numpy(cell_state_factors)).numpy()
+
     if factors is not None:
         df_plot = pd.DataFrame(cell_state_factors[:, factors], columns=[str(t) for t in factors])
     else:
@@ -1089,7 +1091,7 @@ def cell_state_factors_heatmap(
     sns.set_style("white")
 
     if color_map is None:
-        color_map = "vlag" if z_score is not None else None
+        color_map = "vlag" if z_score is not None else "Reds"
     if color_map in ["vlag", "RdBu_r", "seismic"]:
         sns.clustermap(
             df_celltype,
