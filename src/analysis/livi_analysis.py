@@ -705,138 +705,144 @@ def main(args):
         A,
     ) = LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args)
 
-    print("\n-------- Running genetic association testing --------\n")
+    if D_context is not None or V_persistent is not None:
+        print("\n-------- Running genetic association testing --------\n")
 
-    covariates = set_up_covariates(args, D_context)
+        if D_context is not None:
+            covariates = set_up_covariates(args, D_context)
+        else:
+            covariates = set_up_covariates(args, V_persistent)
 
-    start = datetime.now()
-    associations = run_LIVI_genetic_association_testing(
-        D_context=D_context,
-        V_persistent=V_persistent,
-        GT_matrix=GT_matrix,
-        variant_info=variant_info,
-        Kinship=kinship,
-        genotype_pcs=GT_PCs,
-        method=args.method,
-        fdr_method=args.fdr_method,
-        output_dir=output_dir,
-        output_file_prefix=of_prefix,
-        covariates=covariates,
-        quantile_norm=args.quantile_normalise,
-        variance_threshold=args.variance_threshold,
-        variable_factors=args.variable_factors,
-        fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
-        return_associations=True,
-    )
-
-    end = datetime.now()
-    duration = (end - start).seconds
-    duration_minutes = duration / 60
-    duration_hours = duration_minutes / 60
-
-    with open(os.path.join(output_dir, "association_testing_execution_time.txt"), "w") as outfile:
-        outfile.write(
-            f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
+        start = datetime.now()
+        associations = run_LIVI_genetic_association_testing(
+            D_context=D_context,
+            V_persistent=V_persistent,
+            GT_matrix=GT_matrix,
+            variant_info=variant_info,
+            Kinship=kinship,
+            genotype_pcs=GT_PCs,
+            method=args.method,
+            fdr_method=args.fdr_method,
+            output_dir=output_dir,
+            output_file_prefix=of_prefix,
+            covariates=covariates,
+            quantile_norm=args.quantile_normalise,
+            variance_threshold=args.variance_threshold,
+            variable_factors=args.variable_factors,
+            fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
+            return_associations=True,
         )
 
-    associations_DxC = associations[0] if isinstance(associations, tuple) else associations
-    associations_V = associations[1] if isinstance(associations, tuple) else None
+        end = datetime.now()
+        duration = (end - start).seconds
+        duration_minutes = duration / 60
+        duration_hours = duration_minutes / 60
 
-    if D_context is not None and associations_DxC is not None and A is not None:
-        ## Exceptions for too-long filenames
-        try:
-            plot_D_factor_corr(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                savefig=os.path.join(output_dir, of_prefix),
-                format="png",
-            )
-        except OSError:
-            plot_D_factor_corr(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                savefig=os.path.join(output_dir, ""),
-                format="png",
-            )
-            warnings.warn(
-                "Could not save D factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+        with open(
+            os.path.join(output_dir, "association_testing_execution_time.txt"), "w"
+        ) as outfile:
+            outfile.write(
+                f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
             )
 
-        try:
-            plot_DxC_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                cell_state_factors=cell_state_latent,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
-                donor_column=args.individual_column,
-                savefig=os.path.join(output_dir, of_prefix),
-                format="png",
-            )
-        except OSError:
-            plot_DxC_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                cell_state_factors=cell_state_latent,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
-                donor_column=args.individual_column,
-                savefig=os.path.join(output_dir, ""),
-                format="png",
-            )
-            warnings.warn(
-                "Could not save DxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
-            )
-        try:
-            plot_donor_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                savefig=os.path.join(output_dir, of_prefix),
-                format="png",
-            )
-        except OSError:
-            plot_donor_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                savefig=os.path.join(output_dir, ""),
-                format="png",
-            )
-            warnings.warn(
-                "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
-            )
+        associations_DxC = associations[0] if isinstance(associations, tuple) else associations
+        associations_V = associations[1] if isinstance(associations, tuple) else None
 
-        if known_trans_eQTLs is not None:
+        if D_context is not None and associations_DxC is not None and A is not None:
+            ## Exceptions for too-long filenames
             try:
-                overlap_with_known_eQTLs(
-                    known_trans_eQTLs=known_trans_eQTLs,
-                    SNP_colname_trans=SNP_colname_trans,
-                    DxC_effects_LIVI=associations_DxC,
-                    factor_assignment_matrix=A,
-                    known_cis_eQTLs=known_cis_eQTLs,
-                    SNP_colname_cis=SNP_colname_cis,
-                    persistent_effects_LIVI=associations_V,
+                plot_D_factor_corr(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
                     savefig=os.path.join(output_dir, of_prefix),
-                    format=None,
+                    format="png",
                 )
-            except OSError as err:
-                overlap_with_known_eQTLs(
-                    known_trans_eQTLs=known_trans_eQTLs,
-                    SNP_colname_trans=SNP_colname_trans,
-                    DxC_effects_LIVI=associations_DxC,
-                    factor_assignment_matrix=A,
-                    known_cis_eQTLs=known_cis_eQTLs,
-                    SNP_colname_cis=SNP_colname_cis,
-                    persistent_effects_LIVI=associations_V,
+            except OSError:
+                plot_D_factor_corr(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
                     savefig=os.path.join(output_dir, ""),
-                    format=None,
+                    format="png",
                 )
                 warnings.warn(
-                    "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+                    "Could not save D factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
                 )
+
+            try:
+                plot_DxC_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
+                    cell_state_factors=cell_state_latent,
+                    cell_metadata=adata.obs,
+                    celltype_column=args.celltype_column,
+                    donor_column=args.individual_column,
+                    savefig=os.path.join(output_dir, of_prefix),
+                    format="png",
+                )
+            except OSError:
+                plot_DxC_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
+                    cell_state_factors=cell_state_latent,
+                    cell_metadata=adata.obs,
+                    celltype_column=args.celltype_column,
+                    donor_column=args.individual_column,
+                    savefig=os.path.join(output_dir, ""),
+                    format="png",
+                )
+                warnings.warn(
+                    "Could not save DxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                )
+            try:
+                plot_donor_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    savefig=os.path.join(output_dir, of_prefix),
+                    format="png",
+                )
+            except OSError:
+                plot_donor_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    savefig=os.path.join(output_dir, ""),
+                    format="png",
+                )
+                warnings.warn(
+                    "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                )
+
+            if known_trans_eQTLs is not None:
+                try:
+                    overlap_with_known_eQTLs(
+                        known_trans_eQTLs=known_trans_eQTLs,
+                        SNP_colname_trans=SNP_colname_trans,
+                        DxC_effects_LIVI=associations_DxC,
+                        factor_assignment_matrix=A,
+                        known_cis_eQTLs=known_cis_eQTLs,
+                        SNP_colname_cis=SNP_colname_cis,
+                        persistent_effects_LIVI=associations_V,
+                        savefig=os.path.join(output_dir, of_prefix),
+                        format=None,
+                    )
+                except OSError as err:
+                    overlap_with_known_eQTLs(
+                        known_trans_eQTLs=known_trans_eQTLs,
+                        SNP_colname_trans=SNP_colname_trans,
+                        DxC_effects_LIVI=associations_DxC,
+                        factor_assignment_matrix=A,
+                        known_cis_eQTLs=known_cis_eQTLs,
+                        SNP_colname_cis=SNP_colname_cis,
+                        persistent_effects_LIVI=associations_V,
+                        savefig=os.path.join(output_dir, ""),
+                        format=None,
+                    )
+                    warnings.warn(
+                        "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+                    )
 
 
 if __name__ == "__main__":
