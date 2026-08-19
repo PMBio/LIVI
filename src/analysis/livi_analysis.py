@@ -238,15 +238,29 @@ def validate_and_read_passed_args(
     else:
         known_cis_eQTLs = None
 
+    ckpt_dir = os.path.join(args.model_run_dir, "checkpoints")
     if args.checkpoint == "last":
         checkpoint = "last.ckpt"
+    elif args.checkpoint == "best":
+        candidates = sorted(f for f in os.listdir(ckpt_dir) if "epoch" in f)
+        if not candidates:
+            raise FileNotFoundError(
+                f"No checkpoint with 'epoch' in its name found in {ckpt_dir}. "
+                "Use --checkpoint last, or pass a checkpoint file name."
+            )
+        if len(candidates) > 1:
+            raise ValueError(
+                f"'best' is ambiguous: {len(candidates)} checkpoints in {ckpt_dir}: {candidates}. "
+                "Pass one of them to --checkpoint by name."
+            )
+        checkpoint = candidates[0]
     else:
-        checkpoint = [
-            f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
-        ][0]
+        checkpoint = args.checkpoint
+        if not os.path.isfile(os.path.join(ckpt_dir, checkpoint)):
+            raise FileNotFoundError(f"Checkpoint '{checkpoint}' not found in {ckpt_dir}.")
 
     LIVI_model = LIVI.load_from_checkpoint(
-        os.path.join(args.model_run_dir, "checkpoints", checkpoint),
+        os.path.join(ckpt_dir, checkpoint),
         map_location=torch.device("cpu"),
     )
 
@@ -837,9 +851,12 @@ if __name__ == "__main__":
         "--checkpoint",
         type=str,
         default="best",
-        choices=["best", "last"],
         required=True,
-        help="Which checkpoint to use; either 'last' or 'best'. ",
+        help=(
+            "Which checkpoint to use: 'best' (the best checkpoint saved by save_top_k=1 in LIVI_Checkpoint "
+            "callback), 'last' (last.ckpt), or an explicit checkpoint file name (required for runs that save "
+            "several periodic checkpoints)."
+        ),
     )
     parser.add_argument(
         "--adata",
