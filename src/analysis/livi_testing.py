@@ -279,8 +279,6 @@ def set_up_covariates(args: argparse.Namespace, D_context: pd.DataFrame) -> pd.D
 
 
 def run_LIVI_genetic_association_testing(
-    D_context: pd.DataFrame,
-    V_persistent: pd.DataFrame,
     GT_matrix: pd.DataFrame,
     output_dir: str,
     output_file_prefix: str,
@@ -288,6 +286,8 @@ def run_LIVI_genetic_association_testing(
     quantile_norm: bool = True,
     fdr_method: str = "BH",
     return_associations: bool = False,
+    D_context: Optional[pd.DataFrame] = None,
+    V_persistent: Optional[pd.DataFrame] = None,
     Kinship: Optional[pd.DataFrame] = None,
     genotype_pcs: Optional[pd.DataFrame] = None,
     variant_info: Optional[pd.DataFrame] = None,
@@ -300,49 +300,85 @@ def run_LIVI_genetic_association_testing(
     save the results to file. Optionally select also significant associations based on
     `fdr_threshold`.
 
+    All donor-indexed inputs are reduced to the donors shared by the LIVI embedding(s) and
+    `GT_matrix`, in the embedding's donor order, before the kinship matrix is derived from them.
+    Donors dropped because they are absent from `GT_matrix` are reported with a warning.
+
     Parameters
     ----------
-    D_context (pd.DataFrame): LIVI cell-state-specific genetic embedding.
-    V_persistent (pd.DataFrame): LIVI persistent genetic embedding.
     GT_matrix (pd.DataFrame): Genotype matrix (donors x SNPs).
     output_dir (str): Output directory to save the testing results.
     output_file_prefix(str): Output file prefix.
     method (str): Whether to use LIMIX or TensorQTL for association testing. LIMIX can account for
         repeated samples (e.g. when a donor is in multiple batches), while TensorQTL is fast.
-    fdr_method (str): False discovery rate (FDR) controlling method for multiple testing correction.
-    Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix.
-    genotype_pcs (Optional[pd.DataFrame]): Precomputed genotype principal components.
-    variant_info (Optional[pd.DataFrame]): SNP information contained in the .bim file,
-        if PLINK genotype matrix is used.
-    covariates_df (Optional[pd.DataFrame]): DataFrame containing sample covariates
-        to be included as fixed effects in the LMM.
     quantile_norm (bool): Flag indicating whether quantile normalization should be
         applied to the phenotype.
+    fdr_method (str): False discovery rate (FDR) controlling method for multiple testing correction.
+    return_associations (bool): Whether to return the significant associations in addition to
+        writing all results to file. Sets `fdr_threshold` to 0.05 if it was not given.
+    D_context (Optional[pd.DataFrame]): LIVI cell-state-specific (DxC) genetic embedding
+        (donors x factors). Tested only if given.
+    V_persistent (Optional[pd.DataFrame]): LIVI persistent genetic embedding (donors x factors).
+        Tested only if given. At least one of `D_context` and `V_persistent` is required.
+    Kinship (Optional[pd.DataFrame]): Precomputed Kinship matrix (donors x donors). Used by
+        LIMIX/LMM; if omitted, a kinship matrix is computed from `GT_matrix`.
+    genotype_pcs (Optional[pd.DataFrame]): Precomputed genotype principal components. Added to the
+        covariates when `method="TensorQTL"`.
+    variant_info (Optional[pd.DataFrame]): SNP information contained in the .bim file,
+        if PLINK genotype matrix is used.
+    covariates (Optional[pd.DataFrame]): DataFrame containing sample covariates to be included
+        as fixed effects in the L(M)M. If omitted, only an intercept is used.
+    variance_threshold (Optional[float]): Test only the D factors whose variance across donors is
+        at least this value. Ignored if `variable_factors` is given.
+    variable_factors (Optional[List[int]]): Indices of the D factors to test. Takes precedence
+        over `variance_threshold`.
     fdr_threshold (Optional[float]): False discovery rate (FDR) threshold to call an association significant.
 
     Returns
     -------
-    results_sign_context (pd.DataFrame): Significant SNP associations with the cell-state-specific genetic embedding.
-    results_sign_persistent (pd.DataFrame): Significant SNP associations with the persistent genetic embedding,
-        if there is one.
+    None if `return_associations` is False, or if neither `D_context` nor `V_persistent` was given
+    (in which case a warning is raised and no testing is performed).
+
+    When `return_associations` is True, the shape of the result depends on which embeddings were
+    tested, so callers have to check the type:
+        both embeddings  -> (results_sign_context, results_sign_persistent)
+        `D_context` only -> results_sign_context, as a bare DataFrame rather than a 1-tuple
+        `V_persistent` only -> (None, results_sign_persistent)
+    where results_sign_context and results_sign_persistent hold the significant SNP associations
+    with the cell-state-specific and the persistent genetic embedding respectively.
     """
+
+    if D_context is None and V_persistent is None:
+        warnings.warn("\n----- No LIVI embedding given to run association testing. -----\n")
+        return None
 
     if return_associations and fdr_threshold is None:
         fdr_threshold = 0.05
 
-    GT_matrix, D_context = GT_matrix.align(D_context, join="inner", axis=0)
+    livi_donors = D_context.index if D_context is not None else V_persistent.index
+    common_donors = livi_donors.intersection(GT_matrix.index)
+    D_context = D_context.loc[common_donors] if D_context is not None else D_context
+    V_persistent = V_persistent.loc[common_donors] if V_persistent is not None else V_persistent
+    GT_matrix = GT_matrix.loc[common_donors]
+
+    if covariates is not None:
+        # covariates is built based on LIVI donors. However, if some donors have no genotypes, they are dropped
+        # from D_context, so we have to remove them from the covariates and the Kinship as well
+        dropped_donors = covariates.index.difference(common_donors)
+        if len(dropped_donors) > 0:
+            warnings.warn(
+                f"Dropped {len(dropped_donors)} donor(s) not present in the genotype matrix: {list(dropped_donors)[:10]}{' ...' if len(dropped_donors) > 10 else ''}"
+            )
+        covariates = covariates.loc[common_donors]
+    else:
+        covariates = pd.DataFrame(index=common_donors)
 
     if method in ["LIMIX", "LMM"]:
         # add intercept
         covariates["intercept"] = 1.0
-
         if Kinship is not None:
             kinship = Kinship
-            kinship_mat = (
-                kinship.loc[covariates.index, covariates.index].to_numpy()
-                if covariates is not None
-                else kinship.to_numpy()
-            )
+            kinship_mat = kinship.loc[common_donors, common_donors].to_numpy()
         else:
             kinship_mat = np.dot(GT_matrix.to_numpy(), GT_matrix.T.to_numpy())
             kinship_mat = normalise_covariance(kinship_mat)
@@ -351,8 +387,6 @@ def run_LIVI_genetic_association_testing(
         covariates = covariates.merge(genotype_pcs, how="left", right_index=True, left_index=True)
     else:
         raise ValueError(f"Supported methods are LIMIX and TensorQTL. Unknown method: {method}.")
-
-    covariates, D_context = covariates.align(D_context, join="inner", axis=0)
 
     if D_context is not None:
         if variable_factors is not None:
