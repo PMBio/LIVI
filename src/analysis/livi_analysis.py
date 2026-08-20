@@ -32,6 +32,7 @@ from scipy.stats import zscore
 from sklearn.preprocessing import StandardScaler
 from tensorqtl import pgen
 
+from src.analysis._utils import find_trans_fSNPs
 from src.analysis.livi_testing import (
     run_LIVI_genetic_association_testing,
     set_up_covariates,
@@ -238,15 +239,29 @@ def validate_and_read_passed_args(
     else:
         known_cis_eQTLs = None
 
+    ckpt_dir = os.path.join(args.model_run_dir, "checkpoints")
     if args.checkpoint == "last":
         checkpoint = "last.ckpt"
+    elif args.checkpoint == "best":
+        candidates = sorted(f for f in os.listdir(ckpt_dir) if "epoch" in f)
+        if not candidates:
+            raise FileNotFoundError(
+                f"No checkpoint with 'epoch' in its name found in {ckpt_dir}. "
+                "Use --checkpoint last, or pass a checkpoint file name."
+            )
+        if len(candidates) > 1:
+            raise ValueError(
+                f"'best' is ambiguous: {len(candidates)} checkpoints in {ckpt_dir}: {candidates}. "
+                "Pass one of them to --checkpoint by name."
+            )
+        checkpoint = candidates[0]
     else:
-        checkpoint = [
-            f for f in os.listdir(os.path.join(args.model_run_dir, "checkpoints")) if "epoch" in f
-        ][0]
+        checkpoint = args.checkpoint
+        if not os.path.isfile(os.path.join(ckpt_dir, checkpoint)):
+            raise FileNotFoundError(f"Checkpoint '{checkpoint}' not found in {ckpt_dir}.")
 
     LIVI_model = LIVI.load_from_checkpoint(
-        os.path.join(args.model_run_dir, "checkpoints", checkpoint),
+        os.path.join(ckpt_dir, checkpoint),
         map_location=torch.device("cpu"),
     )
 
@@ -691,138 +706,188 @@ def main(args):
         A,
     ) = LIVI_inference(LIVI_model, adata, of_prefix, output_dir, args)
 
-    print("\n-------- Running genetic association testing --------\n")
+    if D_context is not None or V_persistent is not None:
+        print("\n-------- Running genetic association testing --------\n")
 
-    covariates = set_up_covariates(args, D_context)
+        if D_context is not None:
+            covariates = set_up_covariates(args, D_context)
+        else:
+            covariates = set_up_covariates(args, V_persistent)
 
-    start = datetime.now()
-    associations = run_LIVI_genetic_association_testing(
-        D_context=D_context,
-        V_persistent=V_persistent,
-        GT_matrix=GT_matrix,
-        variant_info=variant_info,
-        Kinship=kinship,
-        genotype_pcs=GT_PCs,
-        method=args.method,
-        fdr_method=args.fdr_method,
-        output_dir=output_dir,
-        output_file_prefix=of_prefix,
-        covariates=covariates,
-        quantile_norm=args.quantile_normalise,
-        variance_threshold=args.variance_threshold,
-        variable_factors=args.variable_factors,
-        fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
-        return_associations=True,
-    )
-
-    end = datetime.now()
-    duration = (end - start).seconds
-    duration_minutes = duration / 60
-    duration_hours = duration_minutes / 60
-
-    with open(os.path.join(output_dir, "association_testing_execution_time.txt"), "w") as outfile:
-        outfile.write(
-            f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
+        start = datetime.now()
+        associations = run_LIVI_genetic_association_testing(
+            D_context=D_context,
+            V_persistent=V_persistent,
+            GT_matrix=GT_matrix,
+            variant_info=variant_info,
+            Kinship=kinship,
+            genotype_pcs=GT_PCs,
+            method=args.method,
+            fdr_method=args.fdr_method,
+            output_dir=output_dir,
+            output_file_prefix=of_prefix,
+            covariates=covariates,
+            quantile_norm=args.quantile_normalise,
+            variance_threshold=args.variance_threshold,
+            variable_factors=args.variable_factors,
+            fdr_threshold=(args.fdr_threshold if args.fdr_threshold else None),
+            return_associations=True,
         )
 
-    associations_DxC = associations[0] if isinstance(associations, tuple) else associations
-    associations_V = associations[1] if isinstance(associations, tuple) else None
+        end = datetime.now()
+        duration = (end - start).seconds
+        duration_minutes = duration / 60
+        duration_hours = duration_minutes / 60
 
-    if D_context is not None and associations_DxC is not None and A is not None:
-        ## Exceptions for too-long filenames
-        try:
-            plot_D_factor_corr(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                savefig=os.path.join(output_dir, of_prefix),
-                format="png",
-            )
-        except OSError:
-            plot_D_factor_corr(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                savefig=os.path.join(output_dir, ""),
-                format="png",
-            )
-            warnings.warn(
-                "Could not save D factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+        with open(
+            os.path.join(output_dir, "association_testing_execution_time.txt"), "w"
+        ) as outfile:
+            outfile.write(
+                f"Execution time in seconds: {duration}\nExecution time in minutes: {duration_minutes}\nExecution time in hours: {duration_hours}\n"
             )
 
-        try:
-            plot_DxC_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                cell_state_factors=cell_state_latent,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
-                donor_column=args.individual_column,
-                savefig=os.path.join(output_dir, of_prefix),
-                format="png",
+        associations_DxC = associations[0] if isinstance(associations, tuple) else associations
+        associations_V = associations[1] if isinstance(associations, tuple) else None
+
+        if associations_DxC is not None and args.trans_fQTLs:
+            gene_meta = adata.var.copy()
+
+            # Assumes SNP ids are in the typical chr:pos format
+            associations_DxC = associations_DxC.assign(
+                SNP_chrom=[s[0] for s in associations_DxC.SNP_id.str.split(":")],
+                SNP_pos=[s[1] for s in associations_DxC.SNP_id.str.split(":")],
             )
-        except OSError:
-            plot_DxC_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                A=A,
-                cell_state_factors=cell_state_latent,
-                cell_metadata=adata.obs,
-                celltype_column=args.celltype_column,
-                donor_column=args.individual_column,
-                savefig=os.path.join(output_dir, ""),
-                format="png",
+            associations_DxC.SNP_pos = associations_DxC.SNP_pos.astype(np.int64)
+            if isinstance(associations_DxC["SNP_chrom"].iloc[0], str):
+                associations_DxC.SNP_chrom = associations_DxC.SNP_chrom.str.replace(
+                    "chr", ""
+                )  # in case chr prefix exists
+
+            chrom_column = gene_meta.columns[["chr" in c for c in gene_meta.columns]][0]
+            gene_meta[chrom_column] = gene_meta[chrom_column].str.replace("chr", "")
+
+            associations_DxC = associations_DxC.assign(
+                fQTL=associations_DxC["SNP_id"] + "__" + associations_DxC["Factor"]
             )
-            warnings.warn(
-                "Could not save DxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
-            )
-        try:
-            plot_donor_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                savefig=os.path.join(output_dir, of_prefix),
-                format="png",
-            )
-        except OSError:
-            plot_donor_similarity(
-                D=D_context,
-                associated_factors=associations_DxC.Factor.unique(),
-                savefig=os.path.join(output_dir, ""),
-                format="png",
-            )
-            warnings.warn(
-                "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+            trans_fQTLs = find_trans_fSNPs(
+                DxC_effects=associations_DxC, DxC_decoder=DxC_decoder, gene_metadata=gene_meta
             )
 
-        if known_trans_eQTLs is not None:
+            trans_fQTLs = trans_fQTLs.assign(fQTL=trans_fQTLs.SNP_id + "__" + trans_fQTLs.Factor)
+            trans_fQTLs = trans_fQTLs.merge(
+                associations_DxC.filter(
+                    [c for c in associations_DxC.columns if c not in ["SNP_id", "Factor"]]
+                ),
+                on="fQTL",
+                how="left",
+            )
+            trans_fQTLs.to_csv(
+                os.path.join(
+                    output_dir,
+                    f"{of_prefix}_{args.method}_results_{args.fdr_method}-{args.fdr_threshold}_trans-fQTLs_D-embedding.tsv",
+                ),
+                sep="\t",
+                index=False,
+                header=True,
+            )
+            print(f"number of trans-fQTLs: {trans_fQTLs.shape[0]}\n")
+            print(f"number of trans-fSNPs: {trans_fQTLs['SNP_id'].nunique()}\n")
+
+        if D_context is not None and associations_DxC is not None and A is not None:
+            ## Exceptions for too-long filenames
             try:
-                overlap_with_known_eQTLs(
-                    known_trans_eQTLs=known_trans_eQTLs,
-                    SNP_colname_trans=SNP_colname_trans,
-                    DxC_effects_LIVI=associations_DxC,
-                    factor_assignment_matrix=A,
-                    known_cis_eQTLs=known_cis_eQTLs,
-                    SNP_colname_cis=SNP_colname_cis,
-                    persistent_effects_LIVI=associations_V,
+                plot_D_factor_corr(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
                     savefig=os.path.join(output_dir, of_prefix),
-                    format=None,
+                    format="png",
                 )
-            except OSError as err:
-                overlap_with_known_eQTLs(
-                    known_trans_eQTLs=known_trans_eQTLs,
-                    SNP_colname_trans=SNP_colname_trans,
-                    DxC_effects_LIVI=associations_DxC,
-                    factor_assignment_matrix=A,
-                    known_cis_eQTLs=known_cis_eQTLs,
-                    SNP_colname_cis=SNP_colname_cis,
-                    persistent_effects_LIVI=associations_V,
+            except OSError:
+                plot_D_factor_corr(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
                     savefig=os.path.join(output_dir, ""),
-                    format=None,
+                    format="png",
                 )
                 warnings.warn(
-                    "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+                    "Could not save D factor similarity plot under provided filename (filename too long).\nSaved with default filename instead."
                 )
+
+            try:
+                plot_DxC_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
+                    cell_state_factors=cell_state_latent,
+                    cell_metadata=adata.obs,
+                    celltype_column=args.celltype_column,
+                    donor_column=args.individual_column,
+                    savefig=os.path.join(output_dir, of_prefix),
+                    format="png",
+                )
+            except OSError:
+                plot_DxC_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    A=A,
+                    cell_state_factors=cell_state_latent,
+                    cell_metadata=adata.obs,
+                    celltype_column=args.celltype_column,
+                    donor_column=args.individual_column,
+                    savefig=os.path.join(output_dir, ""),
+                    format="png",
+                )
+                warnings.warn(
+                    "Could not save DxC similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                )
+            try:
+                plot_donor_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    savefig=os.path.join(output_dir, of_prefix),
+                    format="png",
+                )
+            except OSError:
+                plot_donor_similarity(
+                    D=D_context,
+                    associated_factors=associations_DxC.Factor.unique(),
+                    savefig=os.path.join(output_dir, ""),
+                    format="png",
+                )
+                warnings.warn(
+                    "Could not save individual similarity plot under provided filename (filename too long).\nSaved with default filename instead."
+                )
+
+            if known_trans_eQTLs is not None:
+                try:
+                    overlap_with_known_eQTLs(
+                        known_trans_eQTLs=known_trans_eQTLs,
+                        SNP_colname_trans=SNP_colname_trans,
+                        DxC_effects_LIVI=associations_DxC,
+                        factor_assignment_matrix=A,
+                        known_cis_eQTLs=known_cis_eQTLs,
+                        SNP_colname_cis=SNP_colname_cis,
+                        persistent_effects_LIVI=associations_V,
+                        savefig=os.path.join(output_dir, of_prefix),
+                        format="pdf",
+                    )
+                except OSError as err:
+                    overlap_with_known_eQTLs(
+                        known_trans_eQTLs=known_trans_eQTLs,
+                        SNP_colname_trans=SNP_colname_trans,
+                        DxC_effects_LIVI=associations_DxC,
+                        factor_assignment_matrix=A,
+                        known_cis_eQTLs=known_cis_eQTLs,
+                        SNP_colname_cis=SNP_colname_cis,
+                        persistent_effects_LIVI=associations_V,
+                        savefig=os.path.join(output_dir, ""),
+                        format="pdf",
+                    )
+                    warnings.warn(
+                        "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
+                    )
 
 
 if __name__ == "__main__":
@@ -837,9 +902,12 @@ if __name__ == "__main__":
         "--checkpoint",
         type=str,
         default="best",
-        choices=["best", "last"],
         required=True,
-        help="Which checkpoint to use; either 'last' or 'best'. ",
+        help=(
+            "Which checkpoint to use: 'best' (the best checkpoint saved by save_top_k=1 in LIVI_Checkpoint "
+            "callback), 'last' (last.ckpt), or an explicit checkpoint file name (required for runs that save "
+            "several periodic checkpoints)."
+        ),
     )
     parser.add_argument(
         "--adata",
@@ -955,6 +1023,12 @@ if __name__ == "__main__":
         type=str,
         choices=["Storey", "qvalue", "Benjamini-Hochberg", "BH", "Benjamini-Yekutieli", "BY"],
         help="False discovery rate (FDR) controlling method for multiple testing correction.",
+    )
+    parser.add_argument(
+        "--trans_fQTLs",
+        action="store_true",
+        default=False,
+        help="Save DxC fQTLs driven by SNPs in trans.",
     )
     parser.add_argument(
         "--known_trans_eQTLs",
