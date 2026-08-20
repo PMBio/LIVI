@@ -47,7 +47,7 @@ np.random.seed(32)
 def correlate_factors_across_runs(
     factors_across_different_runs: List[pd.DataFrame],
 ) -> Dict[str, np.ndarray]:
-    """Compute pairwise correlations of U factors across different runs of LIVI model.
+    """Compute pairwise correlations of D factors across different runs of LIVI model.
 
     This function normalizes the input factor matrices from each run, then computes
     the correlation between factors from different runs using the dot product method
