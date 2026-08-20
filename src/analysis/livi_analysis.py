@@ -32,6 +32,7 @@ from scipy.stats import zscore
 from sklearn.preprocessing import StandardScaler
 from tensorqtl import pgen
 
+from src.analysis._utils import find_trans_fSNPs
 from src.analysis.livi_testing import (
     run_LIVI_genetic_association_testing,
     set_up_covariates,
@@ -748,6 +749,50 @@ def main(args):
         associations_DxC = associations[0] if isinstance(associations, tuple) else associations
         associations_V = associations[1] if isinstance(associations, tuple) else None
 
+        if associations_DxC is not None and args.trans_fQTLs:
+            gene_meta = adata.var.copy()
+
+            # Assumes SNP ids are in the typical chr:pos format
+            associations_DxC = associations_DxC.assign(
+                SNP_chrom=[s[0] for s in associations_DxC.SNP_id.str.split(":")],
+                SNP_pos=[s[1] for s in associations_DxC.SNP_id.str.split(":")],
+            )
+            associations_DxC.SNP_pos = associations_DxC.SNP_pos.astype(np.int64)
+            if isinstance(associations_DxC["SNP_chrom"].iloc[0], str):
+                associations_DxC.SNP_chrom = associations_DxC.SNP_chrom.str.replace(
+                    "chr", ""
+                )  # in case chr prefix exists
+
+            chrom_column = gene_meta.columns[["chr" in c for c in gene_meta.columns]][0]
+            gene_meta[chrom_column] = gene_meta[chrom_column].str.replace("chr", "")
+
+            associations_DxC = associations_DxC.assign(
+                fQTL=associations_DxC["SNP_id"] + "__" + associations_DxC["Factor"]
+            )
+            trans_fQTLs = find_trans_fSNPs(
+                DxC_effects=associations_DxC, DxC_decoder=DxC_decoder, gene_metadata=gene_meta
+            )
+
+            trans_fQTLs = trans_fQTLs.assign(fQTL=trans_fQTLs.SNP_id + "__" + trans_fQTLs.Factor)
+            trans_fQTLs = trans_fQTLs.merge(
+                associations_DxC.filter(
+                    [c for c in associations_DxC.columns if c not in ["SNP_id", "Factor"]]
+                ),
+                on="fQTL",
+                how="left",
+            )
+            trans_fQTLs.to_csv(
+                os.path.join(
+                    output_dir,
+                    f"{of_prefix}_{args.method}_results_{args.fdr_method}-{args.fdr_threshold}_trans-fQTLs_D-embedding.tsv",
+                ),
+                sep="\t",
+                index=False,
+                header=True,
+            )
+            print(f"number of trans-fQTLs: {trans_fQTLs.shape[0]}\n")
+            print(f"number of trans-fSNPs: {trans_fQTLs['SNP_id'].nunique()}\n")
+
         if D_context is not None and associations_DxC is not None and A is not None:
             ## Exceptions for too-long filenames
             try:
@@ -826,7 +871,7 @@ def main(args):
                         SNP_colname_cis=SNP_colname_cis,
                         persistent_effects_LIVI=associations_V,
                         savefig=os.path.join(output_dir, of_prefix),
-                        format=None,
+                        format="pdf",
                     )
                 except OSError as err:
                     overlap_with_known_eQTLs(
@@ -838,7 +883,7 @@ def main(args):
                         SNP_colname_cis=SNP_colname_cis,
                         persistent_effects_LIVI=associations_V,
                         savefig=os.path.join(output_dir, ""),
-                        format=None,
+                        format="pdf",
                     )
                     warnings.warn(
                         "Could not save overlap with known eQTLs plots under provided filename (filename too long).\nSaved with default filename instead."
@@ -978,6 +1023,12 @@ if __name__ == "__main__":
         type=str,
         choices=["Storey", "qvalue", "Benjamini-Hochberg", "BH", "Benjamini-Yekutieli", "BY"],
         help="False discovery rate (FDR) controlling method for multiple testing correction.",
+    )
+    parser.add_argument(
+        "--trans_fQTLs",
+        action="store_true",
+        default=False,
+        help="Save DxC fQTLs driven by SNPs in trans.",
     )
     parser.add_argument(
         "--known_trans_eQTLs",
