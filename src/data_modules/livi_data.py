@@ -14,6 +14,7 @@ from torch.utils.data import (
     DataLoader,
     Dataset,
     RandomSampler,
+    Sampler
     SequentialSampler,
 )
 
@@ -167,6 +168,9 @@ class LIVIDataset(Dataset):
 
     def __getitem__(self, idx: List[int]) -> Dict[str, np.ndarray]:
         """Get numpy arrays for given indices."""
+        # Sort indices so the HDF5 read is more contiguous. Reduces random-seek overhead in backed mode.
+        idx = sorted(idx)
+        
         data = dict()
         if self.layer_key is None:
             x = self.adata.X
@@ -346,3 +350,149 @@ class LIVIDataModule(LightningDataModule):
     def get_num_features(self) -> int:
         """Returns dimension of observed space."""
         return self.dataset.adata.shape[1]
+
+
+class ChunkShuffleSampler(Sampler):
+    """Batch sampler for fast sequential HDF5 reads on a pre-shuffled .h5ad file.
+
+    In each epoch two levels of shuffling are applied:
+      1. Chunk order  — the sequence of fixed chunks is randomly permuted.
+      2. Within-chunk — cell indices inside each chunk are shuffled in memory.
+
+    Batches are formed within each chunk and never cross chunk boundaries, so all
+    indices in a batch are contiguous in the file after the sort in
+    LIVIDataset.__getitem__. Combined with a pre-shuffled file (src/utils/shuffle_h5ad.py),
+    each chunk already contains a globally random mix of donors and cell states.
+
+    Parameters
+    ----------
+    n_obs : int
+        Total number of cells in the dataset split.
+    chunk_size : int
+        Number of cells per chunk (default 500000).
+        Should be much larger than batch_size.
+    batch_size : int
+        Cells per batch.
+    drop_last : bool
+        If True, drop the final incomplete batch at the end of each chunk
+        (avoids cross-chunk batches, default True).
+    seed : int, optional
+        Base seed. Per-epoch seed = seed + epoch, giving reproducible but
+        varied shuffles across epochs.
+    """
+
+    def __init__(
+        self,
+        n_obs: int,
+        chunk_size: int = 500000,
+        batch_size: int = 4000,
+        drop_last: bool = True,
+        seed: Optional[int] = None,
+    ) -> None:
+        self.n_obs = n_obs
+        self.chunk_size = chunk_size
+        self.batch_size = batch_size
+        self.drop_last = drop_last
+        self.seed = seed
+        self._epoch = 0
+
+    def set_epoch(self, epoch: int) -> None:
+        """Manually set the epoch counter (useful for resuming from a checkpoint)."""
+        self._epoch = epoch
+
+    def __iter__(self) -> Iterator[List[int]]:
+        g = torch.Generator()
+        epoch_seed = (
+            self.seed + self._epoch
+            if self.seed is not None
+            else torch.randint(0, 2**31, (1,)).item()
+        )
+        g.manual_seed(epoch_seed)
+        self._epoch += 1
+
+        # Shuffle the order of chunks
+        chunk_starts = list(range(0, self.n_obs, self.chunk_size))
+        chunk_order = torch.randperm(len(chunk_starts), generator=g).tolist()
+
+        batch: List[int] = []
+        for c in chunk_order:
+            c_start = chunk_starts[c]
+            c_end = min(c_start + self.chunk_size, self.n_obs)
+
+            # Shuffle cell indices within the chunk (in memory)
+            local_perm = torch.randperm(c_end - c_start, generator=g)
+            chunk_indices = (local_perm + c_start).tolist()
+
+            for idx in chunk_indices:
+                batch.append(idx)
+                if len(batch) == self.batch_size:
+                    yield batch
+                    batch = []
+
+            # Handle leftover cells at the end of the chunk
+            if batch:
+                if not self.drop_last:
+                    yield batch
+                batch = []  # never carry cells across chunk boundaries
+
+    def __len__(self) -> int:
+        n_batches = 0
+        for c_start in range(0, self.n_obs, self.chunk_size):
+            c_size = min(self.chunk_size, self.n_obs - c_start)
+            if self.drop_last:
+                n_batches += c_size // self.batch_size
+            else:
+                n_batches += (c_size + self.batch_size - 1) // self.batch_size
+        return n_batches
+
+
+class LIVIDataModule_ChunkSampler(LIVIDataModule):
+    """LIVIDataModule using ChunkShuffleSampler for the training dataloader.
+
+    Designed for use with a pre-shuffled .h5ad file (to shuffle the .h5ad 
+    you can use src/utils/shuffle_h5ad.py).
+    Set shuffle: True in the config — ChunkShuffleSampler handles per-epoch
+    randomisation internally via chunk-order and within-chunk shuffles.
+    Val / test / predict dataloaders are unaffected and remain sequential.
+
+    Additional parameter
+    --------------------
+    chunk_size : int
+        Rows per chunk (default 500000). Must be >> batch_size.
+    """
+
+    def __init__(self, *args, chunk_size: int = 500000, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.chunk_size = chunk_size
+
+    def _data_loader(self, dataset: Dataset, shuffle: Optional[bool] = None) -> DataLoader:
+        shuffle = self.shuffle if shuffle is None else shuffle
+
+        if shuffle:
+            sampler = ChunkShuffleSampler(
+                n_obs=len(dataset),
+                chunk_size=self.chunk_size,
+                batch_size=self.batch_size,
+                drop_last=self.drop_last,
+                seed=self.seed,
+            )
+        else:
+            # Val / test / predict: plain sequential batches
+            sampler = BatchSampler(
+                sampler=SequentialSampler(dataset),
+                batch_size=self.batch_size,
+                drop_last=False,
+            )
+
+        data_loader_kwargs = copy.copy(self.data_loader_kwargs)
+        data_loader_kwargs.update(
+            {
+                "sampler": sampler,
+                "batch_size": None,
+                "num_workers": self.num_workers,
+                "pin_memory": self.pin_memory,
+                "persistent_workers": self.persistent_workers,
+                "prefetch_factor": self.prefetch_factor,
+            }
+        )
+        return DataLoader(dataset, **data_loader_kwargs)
