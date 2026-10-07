@@ -2143,9 +2143,9 @@ def plot_gene_loadings_for_factor(
     """
 
     if DxC_decoder.index.name is None:
-        idx_name = "GeneID"
-    else:
-        idx_name = DxC_decoder.index.name
+        DxC_decoder.index.name = "GeneID"
+    idx_name = DxC_decoder.index.name
+
     gene_loadings = DxC_decoder[factor].reset_index()
 
     if genes_to_annotate is not None:
@@ -2272,9 +2272,9 @@ def plot_gene_loadings_for_associated_variable(
     """
     DxC_associations_variable = DxC_associations.loc[DxC_associations.SNP_id == variable]
     if DxC_decoder.index.name is None:
-        idx_name = "GeneID"
-    else:
-        idx_name = DxC_decoder.index.name
+        DxC_decoder.index.name = "GeneID"
+    idx_name = DxC_decoder.index.name
+
     gene_loadings = DxC_decoder.filter(
         [f.replace("D", "DxC") for f in DxC_associations_variable.Factor.unique().tolist()]
     )
